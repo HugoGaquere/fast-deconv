@@ -1,0 +1,22 @@
+[project]
+name = "fast-deconv"
+version = "0.0.1"
+readme = "README.md"
+authors = [
+  { name = "Hugo Gaquere", email = "hugo.gaquere@obspm.fr" },
+]
+requires-python = ">=3.11"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies=["numpy"]
+
+[build-system]
+requires = ["scikit-build-core", "cmake", "pybind11"]
+build-backend = "scikit_build_core.build"
+
