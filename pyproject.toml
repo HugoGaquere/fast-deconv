@@ -14,15 +14,14 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
 ]
-dependencies=["numpy"]
+dependencies=["numpy", "cupy-cuda12x"]
 
 [project.optional-dependencies]
 test = ["pytest"]
 
 [build-system]
-requires = ["scikit-build-core>=0.10", "cmake", "pybind11"]
+requires = ["scikit-build-core>=0.10", "nanobind"]
 build-backend = "scikit_build_core.build"
-
 
 [tool.scikit-build]
 minimum-version = "build-system.requires"
