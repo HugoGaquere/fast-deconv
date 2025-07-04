@@ -2,33 +2,19 @@
 #include <memory>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
-#include "argmax.cuh"
 
-// extern "C" void add_one(float* data, size_t size);
-extern "C" int argmax(const ArgmaxContext* context, const float* data, const bool* mask, const size_t size);
+extern "C" int argmax(float* data, bool* mask, size_t size);
 
 namespace nb = nanobind;
 
-std::unique_ptr<ArgmaxContext> argmax_context;
 
-void _argmax_init(const size_t size) {
-    argmax_context = std::make_unique<ArgmaxContext>();
-    argmax_context->init(size);
-}
-
-void _argmax_free() {
-    argmax_context->free();
-}
-
-int _argmax(const nb::ndarray<float>& data, const nb::ndarray<bool>& mask) {
-    return argmax(argmax_context.get(), data.data(), mask.data(), data.size());
+int _argmax(nb::ndarray<float>& data, nb::ndarray<bool>& mask) {
+    return argmax(data.data(), mask.data(), data.size());
 }
 
 NB_MODULE(kernels, m) {
 
     m.def("argmax", &_argmax);
-    m.def("argmax_init", &_argmax_init);
-    m.def("argmax_free", &_argmax_free);
     
     m.def("inspect", [](const nb::ndarray<>& a) {
         printf("Array data pointer : %p\n", a.data());

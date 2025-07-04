@@ -22,7 +22,6 @@ find_package(nanobind CONFIG REQUIRED)
 nanobind_add_module(kernels
     src/kernels.cpp
     src/utils.cuh
-    src/argmax.cuh
     src/argmax.cu
 )
 

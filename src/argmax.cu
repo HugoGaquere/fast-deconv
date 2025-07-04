@@ -1,77 +1,50 @@
-#include "argmax.cuh"
 #include "utils.cuh"
 #include <cmath>
 #include <cstdio>
 #include <cub/cub.cuh>
 
-struct MaskedArgMaxOp {
-    __host__ __device__ MaskedValue operator()(const MaskedValue &a,
-                                               const MaskedValue &b) const {
-        if (!a.valid)
-            return b;
-        if (!b.valid)
-            return a;
-        return (a.value >= b.value) ? a : b;
+struct MaskingOp {
+    const float* data;
+    const bool* mask;
+
+    __device__ float operator()(const int& i) const {
+        return mask[i] ? data[i] : -INFINITY;
     }
 };
 
+extern "C" int argmax(float* data, bool* mask, size_t size) {
+    using namespace cub;
 
-__host__ __device__
-MaskedValue::MaskedValue() : index(-1), value(-INFINITY), valid(false) {}
+    // 1. Create a counting iterator [0, 1, 2, ..., size-1]
+    CountingInputIterator<int> counting_iter(0);
 
-__host__ __device__
-MaskedValue::MaskedValue(int i, float v, bool m) : index(i), value(v), valid(m) {}
+    // 2. Create the transform iterator that applies masking on-the-fly
+    MaskingOp op = {data, mask};
+    TransformInputIterator<float, MaskingOp, CountingInputIterator<int>>
+        masked_iter(counting_iter, op);
 
+    // 3. Allocate output
+    KeyValuePair<int, float>* d_output;
+    cudaMalloc(&d_output, sizeof(KeyValuePair<int, float>));
 
-void ArgmaxContext::init(const size_t size) {
-    if (temp_storage)
-        return;
-    cudaMalloc((void**)&zipped, size * sizeof(MaskedValue));
-    cudaMalloc((void**)&output, sizeof(MaskedValue));
-    cub::DeviceReduce::Reduce(nullptr, temp_storage_bytes, zipped, output, size,
-                              MaskedArgMaxOp{}, MaskedValue(),
-                              cudaStreamDefault);
-    cudaMalloc(&temp_storage, temp_storage_bytes);
-}
+    // 4. Temp storage
+    void* d_temp_storage = nullptr;
+    size_t temp_storage_bytes = 0;
 
-void ArgmaxContext::free() {
-    cudaFree(zipped);
-    cudaFree(output);
-    cudaFree(temp_storage);
-    zipped = nullptr;
-    output = nullptr;
-    temp_storage = nullptr;
-    temp_storage_bytes = 0;
-}
+    // First call to get temp storage size
+    DeviceReduce::ArgMax(d_temp_storage, temp_storage_bytes, masked_iter, d_output, size);
+    cudaMalloc(&d_temp_storage, temp_storage_bytes);
 
+    // 5. Actual ArgMax call
+    DeviceReduce::ArgMax(d_temp_storage, temp_storage_bytes, masked_iter, d_output, size);
 
-__global__ void zip_kernel(const float* data, const bool* mask,
-                           MaskedValue* out, int n) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < n) {
-        out[i] = MaskedValue{i, data[i], mask[i]};
-    }
-}
+    // 6. Copy result back
+    KeyValuePair<int, float> h_output;
+    cudaMemcpy(&h_output, d_output, sizeof(KeyValuePair<int, float>), cudaMemcpyDeviceToHost);
 
-extern "C" int argmax(ArgmaxContext* context, const float* data,
-                      const bool* mask, const size_t size) {
-    // Zip input
-    int threads = 256;
-    int blocks = (size + threads - 1) / threads;
-    zip_kernel<<<blocks, threads>>>(data, mask, context->zipped, size);
+    // 7. Free
+    cudaFree(d_output);
+    cudaFree(d_temp_storage);
 
-    // CHECK_LAST_CUDA_ERROR();
-
-
-    // Actual reduction
-    cub::DeviceReduce::Reduce(context->temp_storage, context->temp_storage_bytes,
-                              context->zipped, context->output, size,
-                              MaskedArgMaxOp{}, MaskedValue(), cudaStreamDefault);
-    // CHECK_LAST_CUDA_ERROR();
-
-    // Copy result
-    int h_result;
-    cudaMemcpy(&h_result, &(context->output->index), sizeof(int), cudaMemcpyDeviceToHost);
-
-    return h_result;
+    return h_output.key;
 }
