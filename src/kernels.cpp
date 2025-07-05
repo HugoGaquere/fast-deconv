@@ -2,14 +2,15 @@
 #include <memory>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/pair.h>
 
-extern "C" int argmax(float* data, bool* mask, size_t size);
+extern "C" std::pair<int, float> argmax(float* data, bool* mask, size_t size, bool use_abs);
 
 namespace nb = nanobind;
+using namespace nb::literals;
 
-
-int _argmax(nb::ndarray<float>& data, nb::ndarray<bool>& mask) {
-    return argmax(data.data(), mask.data(), data.size());
+std::pair<int, float> _argmax(nb::ndarray<float>& data, nb::ndarray<bool>& mask, bool use_abs) {
+    return argmax(data.data(), mask.data(), data.size(), use_abs);
 }
 
 NB_MODULE(kernels, m) {

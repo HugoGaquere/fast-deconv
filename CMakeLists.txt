@@ -5,7 +5,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 #-------------------------------------------------------------------#
 # Nanobind
 #-------------------------------------------------------------------#
-find_package(Python 3.12 COMPONENTS Interpreter Development.Module REQUIRED)
+find_package(Python 3.10 COMPONENTS Interpreter Development.Module REQUIRED)
 
 # Perform an optimized release build by default unless another build type is specified
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
