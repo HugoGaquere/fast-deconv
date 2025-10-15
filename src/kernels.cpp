@@ -1,13 +1,15 @@
 #include <cstdio>
-#include <memory>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/pair.h>
+
+#include "wscms.h"
 
 extern "C" std::pair<int, float> argmax(float* data, bool* mask, size_t size, bool use_abs);
 
 namespace nb = nanobind;
 using namespace nb::literals;
+
 
 std::pair<int, float> _argmax(nb::ndarray<float>& data, nb::ndarray<bool>& mask, bool use_abs) {
     return argmax(data.data(), mask.data(), data.size(), use_abs);
@@ -16,6 +18,10 @@ std::pair<int, float> _argmax(nb::ndarray<float>& data, nb::ndarray<bool>& mask,
 NB_MODULE(kernels, m) {
 
     m.def("argmax", &_argmax);
+
+    nb::class_<WSCMS>(m, "WSCMS")
+        .def(nb::init<>())
+        .def("run", &WSCMS::run_subminor_loop);
     
     m.def("inspect", [](const nb::ndarray<>& a) {
         printf("Array data pointer : %p\n", a.data());

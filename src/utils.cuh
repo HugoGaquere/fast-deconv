@@ -7,7 +7,6 @@ inline void checkLast(const char *const file, const int line) {
   if (err != cudaSuccess) {
     std::cerr << "CUDA Runtime Error at: " << file << ":" << line << std::endl;
     std::cerr << cudaGetErrorString(err) << std::endl;
-    // We don't exit when we encounter CUDA errors in this example.
-    // std::exit(EXIT_FAILURE);
+    std::exit(EXIT_FAILURE);
   }
 }
