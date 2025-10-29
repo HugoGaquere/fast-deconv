@@ -28,10 +28,11 @@ struct masking_op_abs {
 
 template <typename MaskingOpT>
 void argmax_async(core::stream_resources& resources,
-                   const float* data,
-                   const bool* mask,
-                   size_t size,
-                   std::pair<int, float>* out)
+                  const float* data,
+                  const bool* mask,
+                  size_t size,
+                  std::pair<int, float>* out,
+                  cudaStream_t stream)
 {
   // Create the transform iterator that applies masking on-the-fly
   cub::CountingInputIterator<int> counting_iter{0};
@@ -44,21 +45,21 @@ void argmax_async(core::stream_resources& resources,
 
   // First call to get temp storage size
   size_t temp_storage_bytes = 0;
-  cub::DeviceReduce::ArgMax(resources.device_workspace,
-                       temp_storage_bytes,
-                       masked_iter,
-                       out_as_keyvalue,
-                       size,
-                       resources.stream);
-  resources.alloc_device(temp_storage_bytes);
+  cub::DeviceReduce::ArgMax(nullptr,
+                            temp_storage_bytes,
+                            masked_iter,
+                            out_as_keyvalue,
+                            size,
+                            stream);
+  resources.alloc_device(temp_storage_bytes, stream);
 
   // Actual ArgMax call
   cub::DeviceReduce::ArgMax(resources.device_workspace,
-                       temp_storage_bytes,
-                       masked_iter,
-                       out_as_keyvalue,
-                       size,
-                       resources.stream);
+                            temp_storage_bytes,
+                            masked_iter,
+                            out_as_keyvalue,
+                            size,
+                            stream);
 }
 
 }  // namespace fast_deconv::matrix::detail
