@@ -1,6 +1,7 @@
 [project]
 name = "fast-deconv"
 version = "0.0.1"
+description = "GPU-accelerated deconvolution for radio astronomy"
 readme = "README.md"
 authors = [
   { name = "Hugo Gaquere", email = "hugo.gaquere@obspm.fr" },
@@ -25,6 +26,13 @@ build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
 minimum-version = "build-system.requires"
+build-dir = "build"
+wheel.packages = ["python/fast_deconv"]
+# cmake.build-type = "Release"
+
+[tool.setuptools.packages.find]
+where = ["python"]
+include = ["fast_deconv*"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"

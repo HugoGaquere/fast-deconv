@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <driver_types.h>
 
 struct Rect {
     int x0, x1; // [x0, x1) exclusive
