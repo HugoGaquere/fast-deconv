@@ -3,24 +3,33 @@
 
 namespace fast_deconv::core {
 
-using Extents6D = cuda::std::dextents<int, 6>;
-using Extents5D = cuda::std::dextents<int, 5>;
-using Extents4D = cuda::std::dextents<int, 4>;
-using Extents3D = cuda::std::dextents<int, 3>;
-using Extents2D = cuda::std::dextents<int, 2>;
-using Extents1D = cuda::std::dextents<int, 1>;
+using span_idx_t = int;
 
-template<typename T> using Span6d   = cuda::std::mdspan<T, Extents6D>;
-template<typename T> using Span5d   = cuda::std::mdspan<T, Extents5D>;
-template<typename T> using Span4d   = cuda::std::mdspan<T, Extents4D>;
-template<typename T> using Span3d   = cuda::std::mdspan<T, Extents3D>;
-template<typename T> using Span2d   = cuda::std::mdspan<T, Extents2D>;
-template<typename T> using SpanVect = cuda::std::mdspan<T, Extents1D>;
+using extents_6d = cuda::std::dextents<span_idx_t, 6>;
+using extents_5d = cuda::std::dextents<span_idx_t, 5>;
+using extents_4d = cuda::std::dextents<span_idx_t, 4>;
+using extents_3d = cuda::std::dextents<span_idx_t, 3>;
+using extents_2d = cuda::std::dextents<span_idx_t, 2>;
+using extents_1d = cuda::std::dextents<span_idx_t, 1>;
+
+template<typename T> using span_6d   = cuda::std::mdspan<T, extents_6d>;
+template<typename T> using span_5d   = cuda::std::mdspan<T, extents_5d>;
+template<typename T> using span_4d   = cuda::std::mdspan<T, extents_4d>;
+template<typename T> using span_3d   = cuda::std::mdspan<T, extents_3d>;
+template<typename T> using span_2d   = cuda::std::mdspan<T, extents_2d>;
+template<typename T> using span_vect = cuda::std::mdspan<T, extents_1d>;
 
 template <typename T, typename Extent>
-inline auto make_span(T* ptr, Extent ext)
+inline auto make_mdspan(T* ptr, Extent ext)
 {
   return cuda::std::mdspan<T, Extent>(ptr, ext);
 }
+
+template <typename T, typename Extent>
+inline auto make_mdspan_from_cupy(T* ptr, Extent ext)
+{
+  return cuda::std::mdspan<T, Extent>(ptr, ext);
+}
+
 
 }  // namespace fast_deconv::core

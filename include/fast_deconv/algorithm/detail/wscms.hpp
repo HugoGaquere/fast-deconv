@@ -32,23 +32,23 @@ uint find_facet_idx(
   return facet_idx;
 }
 
-inline std::pair<int, float> find_peak(core::Span4d<float> cube,
-                                       core::Span2d<bool> mask,
+inline std::pair<int, float> find_peak(core::span_4d<float> cube,
+                                       core::span_2d<bool> mask,
                                        uint dirty_width,
                                        uint dirty_height,
                                        core::stream_resources& resources)
 {
-  auto data_view = core::make_span(cube.data_handle(), core::Extents2D(dirty_width, dirty_height));
+  auto data_view = core::make_mdspan(cube.data_handle(), core::extents_2d(dirty_width, dirty_height));
   return fast_deconv::matrix::argmax(
     data_view.data_handle(), mask.data_handle(), data_view.size(), false, resources);
 }
 
-void wscms_minor_cycle(core::Span4d<float> dirty,
-                       core::Span4d<float> scaled_dirty,
-                       core::Span2d<bool> mask,
-                       core::Span6d<float> psfs,
-                       core::Span4d<float> jones_norm,
-                       core::Span2d<float> gains,
+void wscms_minor_cycle(core::span_4d<float> dirty,
+                       core::span_4d<float> scaled_dirty,
+                       core::span_2d<bool> mask,
+                       core::span_6d<float> psfs,
+                       core::span_4d<float> jones_norm,
+                       core::span_2d<float> gains,
                        std::uint32_t scale_idx,
                        Facets facets,
                        Params params,

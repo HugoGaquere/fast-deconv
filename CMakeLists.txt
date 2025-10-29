@@ -30,32 +30,36 @@ target_compile_features(fast_deconv INTERFACE cxx_std_20 cuda_std_20)
 target_link_libraries(fast_deconv INTERFACE CUDA::cudart)
 set_target_properties(fast_deconv PROPERTIES CUDA_ARCHITECTURES native)
 
+
 #-------------------------------------------------------------------#
 # Nanobind configuration
 #-------------------------------------------------------------------#
-# find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
-#
-# # Detect the installed nanobind package and import it into CMake
-# execute_process(
-#   COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
-#   OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE nanobind_DIR)
-#
-# list(PREPEND CMAKE_PREFIX_PATH "${nanobind_DIR}")
-#
-# find_package(nanobind CONFIG REQUIRED)
+find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+
+# Detect the installed nanobind package and import it into CMake
+execute_process(
+  COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+  OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE nanobind_DIR)
+
+list(PREPEND CMAKE_PREFIX_PATH "${nanobind_DIR}")
+
+find_package(nanobind CONFIG REQUIRED)
 
 #-------------------------------------------------------------------#
 # Python extension
 #-------------------------------------------------------------------#
-# nanobind_add_module(_fast_deconv_ext
-#     src/python/module.cpp
-# )
-# target_link_libraries(_fast_deconv_ext PRIVATE fast_deconv)
-# set_target_properties(_fast_deconv_ext PROPERTIES
-#     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/fast_deconv")
+set_source_files_properties(
+    src/python/module.cpp
+    PROPERTIES LANGUAGE CUDA
+)
 
-# set_target_properties(_fast_deconv_ext  PROPERTIES
-    # LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/fast_deconv)
+nanobind_add_module(pyfast_deconv
+    src/python/module.cpp
+)
+target_link_libraries(pyfast_deconv PRIVATE fast_deconv)
+target_link_libraries(pyfast_deconv  PRIVATE CUDA::cudart)
+# set_target_properties(pyfast_deconv PROPERTIES
+#     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/fast_deconv")
 
 #-------------------------------------------------------------------#
 # Example executable
@@ -66,4 +70,6 @@ target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
 #-------------------------------------------------------------------#
 # Installation
 #-------------------------------------------------------------------#
-# Nothing for now
+install(TARGETS pyfast_deconv
+    LIBRARY DESTINATION pyfast_deconv
+)

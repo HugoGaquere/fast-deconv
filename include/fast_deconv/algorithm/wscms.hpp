@@ -9,12 +9,12 @@
 
 namespace fast_deconv::algorithm::wscms {
 
-void wscms_minor_cycle(core::Span4d<float> dirty,
-                       core::Span4d<float> scaled_dirty,
-                       core::Span2d<bool> mask,
-                       core::Span6d<float> psfs,
-                       core::Span4d<float> jones_norm,
-                       core::Span2d<float> gains,
+void wscms_minor_cycle(core::span_4d<float> dirty,
+                       core::span_4d<float> scaled_dirty,
+                       core::span_2d<bool> mask,
+                       core::span_6d<float> psfs,
+                       core::span_4d<float> jones_norm,
+                       core::span_2d<float> gains,
                        std::uint32_t scale_idx,
                        Facets facets,
                        Params params,

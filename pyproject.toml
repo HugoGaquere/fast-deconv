@@ -27,7 +27,7 @@ build-backend = "scikit_build_core.build"
 [tool.scikit-build]
 minimum-version = "build-system.requires"
 build-dir = "build"
-wheel.packages = ["python/fast_deconv"]
+# wheel.packages = ["python/fast_deconv"]
 # cmake.build-type = "Release"
 
 [tool.setuptools.packages.find]

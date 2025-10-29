@@ -1,3 +1,5 @@
+#include "fast_deconv/core/span_types.hpp"
+
 #include <fast_deconv/algorithm/wscms.hpp>
 #include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/mdarray.hpp>
@@ -5,6 +7,24 @@
 #include <fast_deconv/matrix/argmax.cuh>
 
 #include <chrono>
+
+template <typename T>
+void print_mdspan(const fast_deconv::core::span_2d<T>& M)
+{
+  using cuda::std::layout_left;
+  using cuda::std::layout_right;
+
+  const size_t rows = M.extent(0);
+  const size_t cols = M.extent(1);
+
+  for (size_t i = 0; i < rows; ++i) {
+    for (size_t j = 0; j < cols; ++j) {
+      printf("%8.3f ", static_cast<double>(M(i, j)));
+    }
+    printf("\n");
+  }
+  printf("\n");
+}
 
 int main(int argc, char** argv)
 {
@@ -48,6 +68,10 @@ int main(int argc, char** argv)
   fill_with_random(gains.view());
   fill_mask(mask.view());
 
+  auto matrix = fast_deconv::core::make_managed_mdarray<float>(5, 5);
+  fill_with_random(matrix.view());
+  print_mdspan<float>(matrix.view());
+
   fast_deconv::algorithm::wscms::Params params{
     .peak_factor      = 0.2,
     .max_iter         = 1000,
@@ -63,7 +87,7 @@ int main(int argc, char** argv)
   uint scale_idx = 1;
 
   std::printf("Running WSCMS minor cycle\n");
-  auto start     = std::chrono::high_resolution_clock::now();
+  auto start = std::chrono::high_resolution_clock::now();
 
   fast_deconv::algorithm::wscms::wscms_minor_cycle(dirty.view(),
                                                    scaled_dirty.view(),

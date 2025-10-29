@@ -4,6 +4,7 @@
 
 #include <cuda/std/mdspan>
 
+#include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/core/stream_resources.hpp>
 #include <fast_deconv/matrix/detail/argmax.cuh>
 
@@ -55,6 +56,16 @@ std::pair<int, float> argmax(cuda::std::mdspan<T1, ExtentsA> data,
                              cuda::std::mdspan<T2, ExtentsB> mask,
                              bool use_abs,
                              core::stream_resources& resources)
+{
+  return fast_deconv::matrix::argmax(
+    data.data_handle(), mask.data_handle(), data.size(), use_abs, resources);
+}
+
+template <typename T>
+std::pair<int, float> test_argmax(core::span_2d<T> data,
+                                  core::span_2d<bool> mask,
+                                  bool use_abs,
+                                  core::stream_resources& resources)
 {
   return fast_deconv::matrix::argmax(
     data.data_handle(), mask.data_handle(), data.size(), use_abs, resources);

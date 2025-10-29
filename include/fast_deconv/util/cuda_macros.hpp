@@ -13,8 +13,8 @@ inline void check(cudaError_t err, const char* const func, const char* const fil
   }
 }
 
-#define CHECK_LAST_CUDA_ERROR() checkLast(__FILE__, __LINE__)
-inline void checkLast(const char* const file, const int line)
+#define CHECK_LAST_CUDA_ERROR() check_last(__FILE__, __LINE__)
+inline void check_last(const char* const file, const int line)
 {
   cudaError_t const err{cudaGetLastError()};
   if (err != cudaSuccess) {
@@ -23,3 +23,5 @@ inline void checkLast(const char* const file, const int line)
     std::exit(EXIT_FAILURE);
   }
 }
+
+#define CEIL_DIV(a, b) (((a) + (b) - 1) / (b))
