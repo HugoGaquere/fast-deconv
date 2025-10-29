@@ -57,9 +57,6 @@ nanobind_add_module(pyfast_deconv
     src/python/module.cpp
 )
 target_link_libraries(pyfast_deconv PRIVATE fast_deconv)
-target_link_libraries(pyfast_deconv  PRIVATE CUDA::cudart)
-# set_target_properties(pyfast_deconv PROPERTIES
-#     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/fast_deconv")
 
 #-------------------------------------------------------------------#
 # Example executable
@@ -72,4 +69,8 @@ target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
 #-------------------------------------------------------------------#
 install(TARGETS pyfast_deconv
     LIBRARY DESTINATION pyfast_deconv
+)
+
+install(FILES python/pyfast_deconv/__init__.py
+    DESTINATION pyfast_deconv
 )

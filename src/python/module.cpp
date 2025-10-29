@@ -1,5 +1,5 @@
-#include "fast_deconv/core/stream_resources.hpp"
 
+#include <fast_deconv/core/stream_cache.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/matrix/argmax.cuh>
 #include <nanobind/nanobind.h>
@@ -21,9 +21,9 @@ std::pair<int, float> bind_argmax(nb::ndarray<float>& data, nb::ndarray<bool>& m
   fast_deconv::core::span_2d<float> data_span{data.data(), data.shape(0), data.shape(1)};
   fast_deconv::core::span_2d<bool> mask_span{mask.data(), mask.shape(0), mask.shape(1)};
 
-  fast_deconv::core::stream_resources resources;
-  // return fast_deconv::matrix::test_argmax(data_span, mask_span, data.size(), use_abs, resources);
-  return {0, 0};
+  auto& resources = fast_deconv::core::cached_stream_resources();
+  return fast_deconv::matrix::test_argmax(data_span, mask_span, use_abs, resources);
+  // return {0, 0};
 }
 
 NB_MODULE(pyfast_deconv, m)

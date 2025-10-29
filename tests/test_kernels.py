@@ -1,21 +1,21 @@
 import cupy as cp
 import numpy as np
-from fast_deconv import kernels
+import pyfast_deconv
 
-def test_wscms():
-    wscms = kernels.WSCMS()
-    import numpy as np
-    import numpy.fft as fft
-
-    X = np.random.rand(100, 100)
-    x, y = 10, 10
-    XF = fft.fft(X)
-    print(x, y, )
-    print(XF[x, y])
-
-    breakpoint()
-
-test_wscms()
+# def test_wscms():
+#     wscms = pyfast_deconv.WSCMS()
+#     import numpy as np
+#     import numpy.fft as fft
+#
+#     X = np.random.rand(100, 100)
+#     x, y = 10, 10
+#     XF = fft.fft(X)
+#     print(x, y, )
+#     print(XF[x, y])
+#
+#     breakpoint()
+#
+# test_wscms()
 
 
 def test_argmax():
@@ -28,7 +28,7 @@ def test_argmax():
         true_index = cp.argmax(masked_data)
         true_value = data[true_index]
 
-        actual_index, actual_value = kernels.argmax(data, mask, False)
+        actual_index, actual_value = pyfast_deconv.argmax(data, mask, False)
 
         assert true_index == actual_index
         assert true_value == actual_value
@@ -44,7 +44,7 @@ def test_argmax_abs():
         true_index = cp.argmax(masked_data)
         true_value = masked_data[true_index]
 
-        actual_index, actual_value = kernels.argmax(data, mask, True)
+        actual_index, actual_value = pyfast_deconv.argmax(data, mask, True)
 
         assert true_index == actual_index
         assert true_value == actual_value

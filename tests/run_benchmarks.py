@@ -1,7 +1,7 @@
 import time
 import cupy as cp
 from functools import wraps
-from fast_deconv import kernels
+import pyfast_deconv
 
 def timeit(func):
     @wraps(func)
@@ -16,11 +16,11 @@ def timeit(func):
 
 @timeit
 def bench_argmax(data, mask):
-    idx, value = kernels.argmax(data, mask, False)
+    idx, value = pyfast_deconv.argmax(data, mask, False)
 
 @timeit
 def bench_argmax_abs(data, mask):
-    idx, value = kernels.argmax(data, mask, True)
+    idx, value = pyfast_deconv.argmax(data, mask, True)
 
 @timeit
 def bench_argmax_cupy(data, mask):
