@@ -17,12 +17,15 @@ inline void argmax_async(std::pair<int, float>* out,
                          const bool* mask,
                          size_t size,
                          bool use_abs,
-                         core::stream_resources& resources)
+                         core::stream_resources& resources,
+                         cudaStream_t stream_override = nullptr)
 {
+  auto stream = stream_override != nullptr ? stream_override : resources.stream;
+
   if (use_abs)
-    detail::argmax_async<detail::masking_op_abs>(resources, data, mask, size, out);
+    detail::argmax_async<detail::masking_op_abs>(resources, data, mask, size, out, stream);
   else
-    detail::argmax_async<detail::masking_op>(resources, data, mask, size, out);
+    detail::argmax_async<detail::masking_op>(resources, data, mask, size, out, stream);
 }
 
 template <typename T1, typename T2, typename ExtentsA, typename ExtentsB>
@@ -30,25 +33,30 @@ void argmax_async(std::pair<int, float>* out,
                   cuda::std::mdspan<const T1, ExtentsA> data,
                   cuda::std::mdspan<const T2, ExtentsB> mask,
                   bool use_abs,
-                  core::stream_resources& resources)
+                  core::stream_resources& resources,
+                  cudaStream_t stream_override = nullptr)
 {
   fast_deconv::matrix::argmax_async(
-    out, data.data_handle(), mask.data_handle(), data.size(), use_abs, resources);
+    out, data.data_handle(), mask.data_handle(), data.size(), use_abs, resources, stream_override);
 }
 
 std::pair<int, float> argmax(
   const float* data, const bool* mask, size_t size, bool use_abs, core::stream_resources& resources)
 {
-  std::pair<int, float>* res;
-  CHECK_CUDA(cudaMallocManaged(reinterpret_cast<void**>(&res), sizeof(std::pair<int, float>)));
+  auto stream = resources.stream;
 
-  argmax_async(res, data, mask, size, use_abs, resources);
-  CHECK_CUDA(cudaStreamSynchronize(resources.stream));
+  resources.alloc_device_output(sizeof(std::pair<int, float>), stream);
+  auto* device_out = static_cast<std::pair<int, float>*>(resources.device_output_workspace);
 
-  auto out = *res;
-  CHECK_CUDA(cudaFree(res));
+  resources.alloc_host(sizeof(std::pair<int, float>));
+  auto* host_out = static_cast<std::pair<int, float>*>(resources.host_workspace);
 
-  return out;
+  argmax_async(device_out, data, mask, size, use_abs, resources, stream);
+  CHECK_CUDA(cudaMemcpyAsync(
+    host_out, device_out, sizeof(std::pair<int, float>), cudaMemcpyDeviceToHost, stream));
+  CHECK_CUDA(cudaStreamSynchronize(stream));
+
+  return *host_out;
 }
 
 template <typename T1, typename T2, typename ExtentsA, typename ExtentsB>
