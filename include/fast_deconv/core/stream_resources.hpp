@@ -13,6 +13,11 @@ class stream_resources {
  public:
   stream_resources() { CHECK_CUDA(cudaStreamCreate(&this->stream)); };
 
+  stream_resources(const stream_resources&)            = delete;
+  stream_resources(stream_resources&&)                 = delete;
+  stream_resources& operator=(const stream_resources&) = delete;
+  stream_resources& operator=(stream_resources&&)      = delete;
+
   ~stream_resources()
   {
     if (this->device_workspace != nullptr) {

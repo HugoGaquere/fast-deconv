@@ -1,5 +1,4 @@
 
-#include <fast_deconv/core/stream_cache.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/matrix/argmax.cuh>
 #include <nanobind/nanobind.h>
@@ -15,6 +14,12 @@ using namespace nb::literals;
 // void init_matrix_bindings(nb::module_& m);
 
 namespace {
+
+fast_deconv::core::stream_resources& python_stream_resources()
+{
+  static fast_deconv::core::stream_resources resources{};
+  return resources;
+}
 
 template <typename ArrayT>
 bool is_c_contiguous(const ArrayT& array)
@@ -63,7 +68,7 @@ std::pair<int, float> bind_argmax(nb::ndarray<const float>& data,
   auto data_span = make_span_2d(data);
   auto mask_span = make_span_2d(mask);
 
-  auto& resources = fast_deconv::core::cached_stream_resources();
+  auto& resources = python_stream_resources();
   return fast_deconv::matrix::test_argmax(data_span, mask_span, use_abs, resources);
   // return {0, 0};
 }
@@ -91,7 +96,7 @@ void bind_argmax_async(nb::ndarray<const float>& data,
   if (out_ptr.value() == 0)
     throw nb::value_error("device output pointer must be non-null");
 
-  auto& resources = fast_deconv::core::cached_stream_resources();
+  auto& resources = python_stream_resources();
   auto* out = reinterpret_cast<std::pair<int, float>*>(out_ptr.value());
 
   cudaStream_t stream = stream_ptr.value() == 0
