@@ -42,45 +42,38 @@ class stream_resources {
     CHECK_CUDA(cudaStreamDestroy(this->stream));
   };
 
-  void alloc_device(size_t bytes, cudaStream_t request_stream = nullptr)
+  void alloc_device(size_t bytes)
   {
     if (bytes == 0) { return; }
-
-    cudaStream_t stream_to_use = request_stream != nullptr ? request_stream : this->stream;
-
     if (this->device_workspace_size >= bytes) { return; }
 
     if (this->device_workspace != nullptr) {
-      CHECK_CUDA(cudaFreeAsync(this->device_workspace, stream_to_use));
+      CHECK_CUDA(cudaFreeAsync(this->device_workspace, this->stream));
       this->device_workspace = nullptr;
     }
 
-    CHECK_CUDA(cudaMallocAsync(static_cast<void**>(&this->device_workspace), bytes, stream_to_use));
+    CHECK_CUDA(cudaMallocAsync(static_cast<void**>(&this->device_workspace), bytes, this->stream));
     this->device_workspace_size = bytes;
   }
 
-  void alloc_device_output(size_t bytes, cudaStream_t request_stream = nullptr)
+  void alloc_device_output(size_t bytes)
   {
     if (bytes == 0) { return; }
-
-    cudaStream_t stream_to_use = request_stream != nullptr ? request_stream : this->stream;
-
     if (this->device_output_workspace_size >= bytes) { return; }
 
     if (this->device_output_workspace != nullptr) {
-      CHECK_CUDA(cudaFreeAsync(this->device_output_workspace, stream_to_use));
+      CHECK_CUDA(cudaFreeAsync(this->device_output_workspace, this->stream));
       this->device_output_workspace = nullptr;
     }
 
     CHECK_CUDA(
-      cudaMallocAsync(static_cast<void**>(&this->device_output_workspace), bytes, stream_to_use));
+      cudaMallocAsync(static_cast<void**>(&this->device_output_workspace), bytes, this->stream));
     this->device_output_workspace_size = bytes;
   }
 
   void alloc_host(size_t bytes)
   {
     if (bytes == 0) { return; }
-
     if (this->host_workspace_size >= bytes) { return; }
 
     if (this->host_workspace != nullptr) {

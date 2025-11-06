@@ -1,8 +1,13 @@
 #pragma once
 
 #include <cub/cub.cuh>
+#include <cub/util_allocator.cuh>
+#include <cuda/std/cstdint>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
 
 #include <fast_deconv/core/stream_resources.hpp>
+#include <fast_deconv/util/cuda_macros.hpp>
 
 namespace fast_deconv::matrix::detail {
 
@@ -31,35 +36,23 @@ void argmax_async(core::stream_resources& resources,
                   const float* data,
                   const bool* mask,
                   size_t size,
-                  std::pair<int, float>* out,
-                  cudaStream_t stream)
+                  std::pair<int, float>* out)
 {
-  // Create the transform iterator that applies masking on-the-fly
-  cub::CountingInputIterator<int> counting_iter{0};
   MaskingOpT op{data, mask};
-  cub::TransformInputIterator<float, MaskingOpT, cub::CountingInputIterator<int>> masked_iter{counting_iter,
-                                                                                    op};
+  thrust::counting_iterator<int> counting_iter{0};
+  auto masked_iter = thrust::make_transform_iterator(counting_iter, op);
 
-  // Cast out to cub::KeyValuePair
-  auto out_as_keyvalue = reinterpret_cast<cub::KeyValuePair<int, float>*>(out);
+  auto stream      = resources.stream;
+  auto* casted_out = reinterpret_cast<cub::KeyValuePair<int, float>*>(out);
 
-  // First call to get temp storage size
   size_t temp_storage_bytes = 0;
-  cub::DeviceReduce::ArgMax(nullptr,
-                            temp_storage_bytes,
-                            masked_iter,
-                            out_as_keyvalue,
-                            size,
-                            stream);
-  resources.alloc_device(temp_storage_bytes, stream);
+  CHECK_CUDA(
+    cub::DeviceReduce::ArgMax(nullptr, temp_storage_bytes, masked_iter, casted_out, size, stream));
 
-  // Actual ArgMax call
-  cub::DeviceReduce::ArgMax(resources.device_workspace,
-                            temp_storage_bytes,
-                            masked_iter,
-                            out_as_keyvalue,
-                            size,
-                            stream);
+  resources.alloc_device(temp_storage_bytes);
+
+  CHECK_CUDA(cub::DeviceReduce::ArgMax(
+    resources.device_workspace, temp_storage_bytes, masked_iter, casted_out, size, stream));
 }
 
 }  // namespace fast_deconv::matrix::detail

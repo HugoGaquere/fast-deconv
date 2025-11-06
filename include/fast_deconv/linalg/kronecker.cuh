@@ -5,14 +5,16 @@
 namespace fast_deconv::linalg {
 
 template <typename T>
-inline void kronecker_async(core::stream_resources& resources,
-                            core::span_2d<T> A,
-                            core::span_2d<T> B,
-                            core::span_2d<T> C)
+inline void kronecker_async(
+  core::stream_resources& resources, const T* A, const T* B, T* C, uint m, uint n, uint k, uint p)
 {
-  dim3 block(16, 16);
-  dim3 grid(CEIL_DIV(C.extent(1), block.x), CEIL_DIV(C.extent(0), block.y));
-  detail::kron_kernel_async<<<grid, block, 0, resources.stream>>>(A, B, C);
+  auto stream        = resources.stream;
+  const size_t total = m * k * n * p;
+  if (total == 0) return;
+
+  constexpr int threads = 256;
+  int blocks            = static_cast<int>(CEIL_DIV(total, threads));
+  detail::kron_kernel_async<T><<<blocks, threads, 0, stream>>>(A, B, C, m, n, k, p);
 }
 
 }  // namespace fast_deconv::linalg

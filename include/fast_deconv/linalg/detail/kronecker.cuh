@@ -4,26 +4,28 @@
 namespace fast_deconv::linalg::detail {
 
 template <typename T>
-__global__ void kron_kernel_async(core::span_2d<T> A, core::span_2d<T> B, core::span_2d<T> C)
+__global__ void kron_kernel_async(const T* A, const T* B, T* C, uint m, uint n, uint k, uint p)
 {
-  using index_t = core::span_idx_t;
+  const uint NP    = n * p;
+  const uint MK    = m * k;
+  const uint total = MK * NP;
 
-  const auto mp = static_cast<index_t>(C.extent(0));
-  const auto nq = static_cast<index_t>(C.extent(1));
-  const auto p  = static_cast<index_t>(B.extent(0));
-  const auto q  = static_cast<index_t>(B.extent(1));
+  for (size_t idx = blockIdx.x * blockDim.x + threadIdx.x; idx < total;
+       idx += blockDim.x * gridDim.x) {
+    const uint rowC = idx / NP;
+    const uint colC = idx % NP;
 
-  const index_t col = blockIdx.x * blockDim.x + threadIdx.x;
-  const index_t row = blockIdx.y * blockDim.y + threadIdx.y;
-  if (row >= mp || col >= nq) return;
+    const uint r = rowC / k;
+    const uint u = rowC % k;
+    const uint c = colC / p;
+    const uint v = colC % p;
 
-  // Decompose C(row, col) -> A(a_row, a_col) and B(b_row, b_col)
-  const index_t a_row = row / p;  // 0..A.extent(0)-1
-  const index_t b_row = row % p;  // 0..p-1
-  const index_t a_col = col / q;  // 0..A.extent(1)-1
-  const index_t b_col = col % q;  // 0..q-1
+    // Row-major indexing
+    const T a = A[r * n + c];
+    const T b = B[u * p + v];
 
-  C(row, col) = A(a_row, a_col) * B(b_row, b_col);
+    C[idx] = a * b;
+  }
 }
 
 }  // namespace fast_deconv::linalg::detail
