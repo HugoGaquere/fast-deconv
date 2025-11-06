@@ -2,7 +2,7 @@
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/core/stream_resources.hpp>
 #include <fast_deconv/linalg/kronecker.cuh>
-#include <fast_deconv/matrix/argmax.cuh>
+#include <fast_deconv/matrix/argmax.hpp>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/pair.h>

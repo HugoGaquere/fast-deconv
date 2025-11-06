@@ -3,7 +3,7 @@
 
 #include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/span_types.hpp>
-#include <fast_deconv/matrix/argmax.cuh>
+#include <fast_deconv/matrix/argmax.hpp>
 
 #include <cstdio>
 #include <vector>

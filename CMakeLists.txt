@@ -68,9 +68,9 @@ set_target_properties(fast_deconv PROPERTIES CUDA_ARCHITECTURES native)
 # Example executable
 #-------------------------------------------------------------------#
 add_executable(fast_deconv_app 
-src/main.cu
-src/kronecker_example.cu
-src/wscms_example.cu
+  src/main.cu
+  src/examples/kronecker_example.cu
+  src/examples/wscms_example.cu
 )
 target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
 

@@ -6,7 +6,7 @@
 
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/core/stream_resources.hpp>
-#include <fast_deconv/matrix/detail/argmax.cuh>
+#include <fast_deconv/matrix/detail/argmax.hpp>
 
 #include <utility>
 

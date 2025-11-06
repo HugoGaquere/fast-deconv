@@ -1,8 +1,8 @@
 #include <cstdio>
 #include <cstddef>
 
-#include "kronecker_example.cuh"
-#include "wscms_example.cuh"
+#include "examples/kronecker_example.cuh"
+#include "examples/wscms_example.cuh"
 
 
 int main(int argc, char** argv)
