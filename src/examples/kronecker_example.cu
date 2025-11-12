@@ -4,6 +4,7 @@
 #include <fast_deconv/core/stream_resources.hpp>
 #include <fast_deconv/linalg/kronecker.cuh>
 #include <fast_deconv/util/cuda_macros.hpp>
+#include <fast_deconv/util/kernel_bench.hpp>
 
 #include <cstdio>
 
@@ -64,10 +65,10 @@ void run_kronecker_example()
 {
   std::printf("Running kronecker example\n");
   fast_deconv::core::stream_resources resources;
-  uint m = 100;
-  uint n = 100;
-  uint k = 100;
-  uint p = 100;
+  uint m     = 10;
+  uint n     = 10;
+  uint k     = 601;
+  uint p     = 601;
   uint total = m * n * p * k;
 
   auto A     = fast_deconv::core::make_managed_mdarray<float>(m, n);
@@ -77,14 +78,17 @@ void run_kronecker_example()
 
   fill_with_random(A.view());
   fill_with_random(B.view());
-  fast_deconv::linalg::kronecker_async(resources,
-                                       A.view().data_handle(),
-                                       B.view().data_handle(),
-                                       C_gpu.view().data_handle(),
-                                       m,
-                                       n,
-                                       p,
-                                       k);
+
+  fast_deconv::util::run_benchmark([&]() -> void {
+    fast_deconv::linalg::kronecker_async(resources,
+                                         A.view().data_handle(),
+                                         B.view().data_handle(),
+                                         C_gpu.view().data_handle(),
+                                         m,
+                                         n,
+                                         p,
+                                         k);
+  });
 
   kron_cpu(A.view().data_handle(), B.view().data_handle(), C_cpu.view().data_handle(), m, n, k, p);
 
