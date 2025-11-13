@@ -4,19 +4,57 @@
 cmake_minimum_required(VERSION 3.26)
 project(fast_deconv LANGUAGES CXX CUDA)
 
-set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type")
-# set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    message(STATUS "Setting build type to 'Debug' as none was specified.")
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the type of build." FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+else()
+    message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+endif()
 
 #-------------------------------------------------------------------#
 # Cuda configuration
 #-------------------------------------------------------------------#
-# find_package(CUDAToolkit 12.9 REQUIRED)
+find_package(CUDA 12.8 REQUIRED)
+include_directories("${CUDA_INCLUDE_DIRS}")
+
+# Global CXX flags/options
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Global CUDA CXX flags/options
+set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_EXTENSIONS OFF)
 
 #-------------------------------------------------------------------#
-# Emu configuration
+# cuTensor configuration
 #-------------------------------------------------------------------#
-# find_package(emu REQUIRED)
+if(NOT DEFINED ENV{CUTENSOR_ROOT} AND NOT DEFINED CUTENSOR_ROOT)
+  message(FATAL_ERROR "CUTENSOR_ROOT not set!")
+else()
+  if(DEFINED ENV{CUTENSOR_ROOT})
+    set(CUTENSOR_ROOT "$ENV{CUTENSOR_ROOT}")
+  endif()
+  message("-- Looking for cuTENSOR in ${CUTENSOR_ROOT}")
+  if(NOT EXISTS ${CUTENSOR_ROOT})
+    message(FATAL_ERROR "Cannot find CUTENSOR_ROOT")
+  endif()
+endif()
+
+if(NOT TARGET cutensor)
+  add_library(cutensor SHARED IMPORTED)
+  set(LIB_DIR "/lib64/libcutensor/${CUDA_VERSION_MAJOR}")
+  set(CUTENSOR_LIBRARY_NAME "libcutensor.so")
+  set_target_properties(cutensor PROPERTIES
+    IMPORTED_LOCATION "${CUTENSOR_ROOT}/${LIB_DIR}/${CUTENSOR_LIBRARY_NAME}"
+    IMPORTED_IMPLIB "${CUTENSOR_ROOT}/${LIB_DIR}/${CUTENSOR_LIBRARY_DEF}"
+    INTERFACE_INCLUDE_DIRECTORIES "${CUTENSOR_ROOT}/include")
+endif()
 
 #-------------------------------------------------------------------#
 # Core library
@@ -31,9 +69,7 @@ add_library(fast_deconv INTERFACE)
 target_include_directories(fast_deconv INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
-# target_compile_features(fast_deconv INTERFACE cxx_std_20 cuda_std_20)
-# target_link_libraries(fast_deconv INTERFACE CUDA::cudart)
-# target_link_libraries(fast_deconv INTERFACE emu::emu)
+target_link_libraries(fast_deconv INTERFACE cutensor)
 set_target_properties(fast_deconv PROPERTIES CUDA_ARCHITECTURES native)
 
 
@@ -70,6 +106,7 @@ set_target_properties(fast_deconv PROPERTIES CUDA_ARCHITECTURES native)
 add_executable(fast_deconv_app 
   src/main.cu
   src/examples/kronecker_example.cu
+  src/examples/kronecker_tensor_example.cu
   src/examples/wscms_example.cu
 )
 target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
