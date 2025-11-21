@@ -1,6 +1,8 @@
 #pragma once
 
+#include "cublas_v2.h"
 #include "fast_deconv/util/cuda_macros.hpp"
+#include "fast_deconv/util/cublas_macros.hpp"
 
 #include <cuda_runtime_api.h>
 #include <driver_types.h>
@@ -11,7 +13,11 @@ namespace fast_deconv::core {
 
 class stream_resources {
  public:
-  stream_resources() { CHECK_CUDA(cudaStreamCreate(&this->stream)); };
+  stream_resources() { 
+    CHECK_CUDA(cudaStreamCreate(&this->stream));
+    CHECK_CUBLAS(cublasCreate(&this->cublas_handle));
+    CHECK_CUBLAS(cublasSetStream(this->cublas_handle, this->stream));
+  };
 
   stream_resources(const stream_resources&)            = delete;
   stream_resources(stream_resources&&)                 = delete;
@@ -22,8 +28,8 @@ class stream_resources {
   {
     if (this->device_workspace != nullptr) {
       CHECK_CUDA(cudaFreeAsync(this->device_workspace, this->stream));
-      this->device_workspace       = nullptr;
-      this->device_workspace_size  = 0;
+      this->device_workspace      = nullptr;
+      this->device_workspace_size = 0;
     }
 
     if (this->device_output_workspace != nullptr) {
@@ -32,13 +38,14 @@ class stream_resources {
       this->device_output_workspace_size = 0;
     }
 
-    CHECK_CUDA(cudaStreamSynchronize(this->stream));
-
     if (this->host_workspace != nullptr) {
       CHECK_CUDA(cudaFreeHost(this->host_workspace));
       this->host_workspace      = nullptr;
       this->host_workspace_size = 0;
     }
+
+    CHECK_CUDA(cudaStreamSynchronize(this->stream));
+    CHECK_CUBLAS(cublasDestroy(this->cublas_handle));
     CHECK_CUDA(cudaStreamDestroy(this->stream));
   };
 
@@ -86,12 +93,14 @@ class stream_resources {
   }
 
   cudaStream_t stream;
-  size_t host_workspace_size            = 0;
-  size_t device_workspace_size          = 0;
-  size_t device_output_workspace_size   = 0;
-  void* host_workspace                  = nullptr;
-  void* device_workspace                = nullptr;
-  void* device_output_workspace         = nullptr;
+  cublasHandle_t cublas_handle;
+
+  size_t host_workspace_size          = 0;
+  size_t device_workspace_size        = 0;
+  size_t device_output_workspace_size = 0;
+  void* host_workspace                = nullptr;
+  void* device_workspace              = nullptr;
+  void* device_output_workspace       = nullptr;
 };
 
 }  // namespace fast_deconv::core

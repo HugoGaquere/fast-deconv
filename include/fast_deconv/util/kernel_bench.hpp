@@ -8,10 +8,10 @@
 
 namespace fast_deconv::util {
 
-constexpr int WARMUP_ITERS = 1000;
-constexpr int ITERS        = 5000;
+constexpr int WARMUP_ITERS = 100;
+constexpr int ITERS        = 1000;
 
-inline void run_benchmark(std::function<void()> kernel)
+inline void run_benchmark(std::function<void()> kernel, cudaStream_t stream)
 {
   cudaEvent_t start, stop;
   CHECK_CUDA(cudaEventCreate(&start));
@@ -25,10 +25,10 @@ inline void run_benchmark(std::function<void()> kernel)
   std::vector<float> runtimes(ITERS);
   for (int i = 0; i < ITERS; i++) {
     detail::flush_l2_cache();
-    CHECK_CUDA(cudaEventRecord(start, 0));
+    CHECK_CUDA(cudaEventRecord(start, stream));
     kernel();
     CHECK_LAST_CUDA_ERROR();
-    CHECK_CUDA(cudaEventRecord(stop, 0));
+    CHECK_CUDA(cudaEventRecord(stop, stream));
     CHECK_CUDA(cudaEventSynchronize(stop));
     float milliseconds = 0;
     CHECK_CUDA(cudaEventElapsedTime(&milliseconds, start, stop));

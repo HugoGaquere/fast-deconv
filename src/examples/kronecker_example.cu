@@ -88,7 +88,7 @@ void run_kronecker_example()
                                          n,
                                          p,
                                          k);
-  });
+  }, resources.stream);
 
   kron_cpu(A.view().data_handle(), B.view().data_handle(), C_cpu.view().data_handle(), m, n, k, p);
 
