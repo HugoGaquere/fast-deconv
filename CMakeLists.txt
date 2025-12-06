@@ -1,14 +1,13 @@
 #-------------------------------------------------------------------#
 # Project configuration
 #-------------------------------------------------------------------#
-# Force CUDA compiler
-set(CMAKE_CUDA_COMPILER "/usr/local/cuda-12.8/bin/nvcc" CACHE FILEPATH "NVCC compiler" FORCE)
-# Set cuTENSOR root
-# set(CUTENSOR_ROOT "/usr" CACHE PATH "cuTENSOR install prefix")
+cmake_minimum_required(VERSION 3.26)
 
 set(CMAKE_CUDA_ARCHITECTURES "native")
-cmake_minimum_required(VERSION 3.26)
+
 project(fast_deconv LANGUAGES CXX CUDA)
+
+find_package(CUDAToolkit 12 EXACT)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -20,9 +19,6 @@ set(
 
 # Only when building the python module
 if(SKBUILD)
-  # CONAN_INSTALL_ARGS is used by cmake-conan.
-  # We want to tell conan to call the install command with the python_module
-  # option set to True.
   set(CONAN_INSTALL_ARGS "--build=missing;--options=fast_deconv/*:python_module=True;${CONAN_ARGS}")
 endif()
 
@@ -38,44 +34,7 @@ endif()
 #-------------------------------------------------------------------#
 # Cuda configuration
 #-------------------------------------------------------------------#
-# find_package(CUDA 12.8 REQUIRED)
-# include_directories("${CUDA_INCLUDE_DIRS}")
-
-# Global CXX flags/options
-# set(CMAKE_CXX_STANDARD 20)
-# set(CMAKE_CXX_STANDARD_REQUIRED ON)
-# set(CMAKE_CXX_EXTENSIONS OFF)
-
-# Global CUDA CXX flags/options
- # set(CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
-# set(CMAKE_CUDA_STANDARD 17)
-# set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-# set(CMAKE_CUDA_EXTENSIONS OFF)
-
-#-------------------------------------------------------------------#
-# cuTensor configuration
-#-------------------------------------------------------------------#
-# if(NOT DEFINED ENV{CUTENSOR_ROOT} AND NOT DEFINED CUTENSOR_ROOT)
-#   message(FATAL_ERROR "CUTENSOR_ROOT not set!")
-# else()
-#   if(DEFINED ENV{CUTENSOR_ROOT})
-#     set(CUTENSOR_ROOT "$ENV{CUTENSOR_ROOT}")
-#   endif()
-#   message("-- Looking for cuTENSOR in ${CUTENSOR_ROOT}")
-#   if(NOT EXISTS ${CUTENSOR_ROOT})
-#     message(FATAL_ERROR "Cannot find CUTENSOR_ROOT")
-#   endif()
-# endif()
-#
-# if(NOT TARGET cutensor)
-#   add_library(cutensor SHARED IMPORTED)
-#   set(LIB_DIR "/lib64/libcutensor/${CUDA_VERSION_MAJOR}")
-#   set(CUTENSOR_LIBRARY_NAME "libcutensor.so")
-#   set_target_properties(cutensor PROPERTIES
-#     IMPORTED_LOCATION "${CUTENSOR_ROOT}/${LIB_DIR}/${CUTENSOR_LIBRARY_NAME}"
-#     IMPORTED_IMPLIB "${CUTENSOR_ROOT}/${LIB_DIR}/${CUTENSOR_LIBRARY_DEF}"
-#     INTERFACE_INCLUDE_DIRECTORIES "${CUTENSOR_ROOT}/include")
-# endif()
+set(CMAKE_CUDA_FLAGS "-Wall")
 
 #-------------------------------------------------------------------#
 # Dependencies
@@ -101,14 +60,16 @@ target_include_directories(fast_deconv INTERFACE
 target_link_libraries(fast_deconv INTERFACE 
   fmt::fmt
   emu::emu
-  cublas
-  # cutensor
+  CUDA::cublas
+  # CUDA::thrust
 )
 
 # Set the targeting architectures
-set_target_properties(fast_deconv PROPERTIES CUDA_ARCHITECTURES native)
-# Set the minimum C++ standard required
-# target_compile_features(fast_deconv INTERFACE cxx_std_20)
+set_target_properties(fast_deconv PROPERTIES
+                CUDA_ARCHITECTURES native
+)
+
+target_compile_features(fast_deconv INTERFACE cxx_std_20)
 
 #-------------------------------------------------------------------#
 # Python extension
@@ -119,7 +80,7 @@ if (SKBUILD)
   set(PYBIND11_FINDPYTHON ON)
   find_package(pybind11 CONFIG REQUIRED)
 
-  pybind11_add_module(_fast_deconv src/python/fast_deconv.cpp)
+  pybind11_add_module(_fast_deconv src/python/fast_deconv.cu)
 
   target_link_libraries(_fast_deconv PRIVATE fast_deconv)
 
@@ -141,10 +102,13 @@ endif()
 #-------------------------------------------------------------------#
  add_executable(fast_deconv_app 
    src/main.cu
-   src/examples/kronecker_example.cu
-   src/examples/kronecker_mixed_product_example.cu
+   # src/examples/argmax_example.hpp
+   # src/examples/cufft_convolution_example.cu
+   # src/examples/kronecker_example.cu
+   # src/examples/kronecker_mixed_product_example.cu
+   # src/examples/kronecker_mixed_product_complex_example.cu
    # src/examples/kronecker_tensor_example.cu
-   src/examples/wscms_example.cu
+   # src/examples/wscms_example.cu
  )
  target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
 
@@ -157,3 +121,31 @@ if (NOT SKBUILD)
         FILE_SET HEADERS
   )
 endif()
+
+
+
+
+#-------------------------------------------------------------------#
+# cuTensor configuration
+#-------------------------------------------------------------------#
+# if(NOT DEFINED ENV{CUTENSOR_ROOT} AND NOT DEFINED CUTENSOR_ROOT)
+#   message(FATAL_ERROR "CUTENSOR_ROOT not set!")
+# else()
+#   if(DEFINED ENV{CUTENSOR_ROOT})
+#     set(CUTENSOR_ROOT "$ENV{CUTENSOR_ROOT}")
+#   endif()
+#   message("-- Looking for cuTENSOR in ${CUTENSOR_ROOT}")
+#   if(NOT EXISTS ${CUTENSOR_ROOT})
+#     message(FATAL_ERROR "Cannot find CUTENSOR_ROOT")
+#   endif()
+# endif()
+#
+# if(NOT TARGET cutensor)
+#   add_library(cutensor SHARED IMPORTED)
+#   set(LIB_DIR "/lib64/libcutensor/${CUDA_VERSION_MAJOR}")
+#   set(CUTENSOR_LIBRARY_NAME "libcutensor.so")
+#   set_target_properties(cutensor PROPERTIES
+#     IMPORTED_LOCATION "${CUTENSOR_ROOT}/${LIB_DIR}/${CUTENSOR_LIBRARY_NAME}"
+#     IMPORTED_IMPLIB "${CUTENSOR_ROOT}/${LIB_DIR}/${CUTENSOR_LIBRARY_DEF}"
+#     INTERFACE_INCLUDE_DIRECTORIES "${CUTENSOR_ROOT}/include")
+# endif()

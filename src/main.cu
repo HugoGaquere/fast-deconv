@@ -1,19 +1,12 @@
-#include <cstdio>
+#include "examples/argmax_example.hpp"
 
-#include "examples/kronecker_example.cuh"
-#include "examples/kronecker_mixed_product_example.cuh"
-// #include "examples/kronecker_tensor_example.cuh"
-#include "examples/wscms_example.cuh"
-
+#include <fmt/base.h>
 
 int main(int argc, char** argv)
 {
-  std::printf("Hello gpu world\n");
+  fmt::println("Hello gpu world");
 
-  run_kronecker_example();
-  // run_kronecker_tensor();
-  run_kronecker_mixed_product_example();
-
+  fast_deconv::example::run_argmax();
 
   return 0;
 }

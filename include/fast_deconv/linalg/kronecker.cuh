@@ -14,7 +14,7 @@ inline void kronecker_async(
 
   constexpr int threads = 256;
   int blocks            = static_cast<int>(CEIL_DIV(total, threads));
-  detail::kron_kernel_async<T><<<blocks, threads, 0, stream>>>(A, B, C, m, n, k, p);
+  detail::kron_kernel<T><<<blocks, threads, 0, stream>>>(A, B, C, m, n, k, p);
 }
 
 }  // namespace fast_deconv::linalg

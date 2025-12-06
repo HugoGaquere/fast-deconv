@@ -1,5 +1,2 @@
-from fast_deconv._fast_deconv import hello_from_bin, take_mdspan, return_mdspan
+from fast_deconv._fast_deconv import *
 
-
-def hello() -> str:
-    return hello_from_bin()

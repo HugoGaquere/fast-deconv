@@ -1,7 +1,7 @@
 import time
 import cupy as cp
 from functools import wraps
-import pyfast_deconv
+import fast_deconv
 
 def timeit(func):
     @wraps(func)
@@ -15,12 +15,12 @@ def timeit(func):
     return wrapper
 
 @timeit
-def bench_argmax(data, mask):
-    idx, value = pyfast_deconv.argmax(data, mask, False)
+def bench_argmax(data, mask, resources):
+    idx, value = fast_deconv.matrix.argmax(data, mask, False, resources)
 
 @timeit
-def bench_argmax_abs(data, mask):
-    idx, value = pyfast_deconv.argmax(data, mask, True)
+def bench_argmax_abs(data, mask, resources):
+    idx, value = fast_deconv.matrix.argmax(data, mask, True, resources)
 
 @timeit
 def bench_argmax_cupy(data, mask):
@@ -34,14 +34,16 @@ def bench_argmax_abs_cupy(data, mask):
     true_index = cp.argmax(masked_data)
     true_value = masked_data[true_index]
 
-size = 10_000_000
-data = cp.random.randn(size).astype(cp.float32)
-mask = cp.random.rand(size) > 0.5  # ~50% ~50% False
+size = 10_000
+data = cp.random.randn(size, size).astype(cp.float32)
+mask = cp.random.rand(size, size) > 0.5  # ~50% ~50% False
+
+resources = fast_deconv.stream_resources()
 
 for _ in range(10):
-    bench_argmax(data, mask)
+    bench_argmax(data, mask, resources)
 for _ in range(10):
-    bench_argmax_abs(data, mask)
+    bench_argmax_abs(data, mask, resources)
 for _ in range(10):
     bench_argmax_cupy(data, mask)
 for _ in range(10):

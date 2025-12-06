@@ -21,7 +21,7 @@ class Recipe(ConanFile):
     def requirements(self):
         self.requires("fmt/11.2.0")
         self.requires('emu/0.1.0-rc.3',
-                      options={"python": self.options.python_module}
+                      options={"python": self.options.python_module, "cuda": True}
                       )
 
     def layout(self):

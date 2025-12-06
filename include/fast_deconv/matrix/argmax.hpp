@@ -2,17 +2,13 @@
 
 #include "fast_deconv/util/cuda_macros.hpp"
 
-#include <cuda/std/mdspan>
-
-#include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/core/stream_resources.hpp>
 #include <fast_deconv/matrix/detail/argmax.hpp>
 
-#include <utility>
-
 namespace fast_deconv::matrix {
 
-inline void argmax_async(std::pair<int, float>* out,
+inline void argmax_async(float* d_max_out,
+                         uint* d_index_out,
                          const float* data,
                          const bool* mask,
                          size_t size,
@@ -20,26 +16,33 @@ inline void argmax_async(std::pair<int, float>* out,
                          core::stream_resources& resources)
 {
   if (use_abs)
-    detail::argmax_async<detail::masking_op_abs>(resources, data, mask, size, out);
+    detail::argmax_async<detail::masking_op_abs>(
+      resources, data, mask, size, d_max_out, d_index_out);
   else
-    detail::argmax_async<detail::masking_op>(resources, data, mask, size, out);
+    detail::argmax_async<detail::masking_op>(resources, data, mask, size, d_max_out, d_index_out);
 }
 
-std::pair<int, float> argmax(
+inline std::pair<int, float> argmax(
   const float* data, const bool* mask, size_t size, bool use_abs, core::stream_resources& resources)
 {
-  std::pair<int, float> out{-1, 0};
   auto stream = resources.stream;
-  resources.alloc_device_output(sizeof(std::pair<int, float>));
-  auto* device_out = static_cast<std::pair<int, float>*>(resources.device_output_workspace);
 
-  argmax_async(device_out, data, mask, size, use_abs, resources);
+  float* d_max_out;   // memory for the maximum value
+  uint* d_index_out;  // memory for the index of the returned value
+  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&d_max_out), sizeof(float), stream));
+  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&d_index_out), sizeof(uint), stream));
 
-  CHECK_CUDA(cudaMemcpyAsync(
-    &out, device_out, sizeof(std::pair<int, float>), cudaMemcpyDeviceToHost, stream));
-  CHECK_CUDA(cudaStreamSynchronize(stream));
+  argmax_async(d_max_out, d_index_out, data, mask, size, use_abs, resources);
 
-  return out;
+  float h_max_out;
+  uint h_index_out;
+  CHECK_CUDA(cudaMemcpyAsync(&h_max_out, d_max_out, sizeof(float), cudaMemcpyDeviceToHost, stream));
+  CHECK_CUDA(
+    cudaMemcpyAsync(&h_index_out, d_index_out, sizeof(uint), cudaMemcpyDeviceToHost, stream));
+
+  resources.sync();
+
+  return {h_index_out, h_max_out};
 }
 
 }  // namespace fast_deconv::matrix

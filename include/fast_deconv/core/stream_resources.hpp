@@ -1,8 +1,8 @@
 #pragma once
 
 #include "cublas_v2.h"
-#include "fast_deconv/util/cuda_macros.hpp"
 #include "fast_deconv/util/cublas_macros.hpp"
+#include "fast_deconv/util/cuda_macros.hpp"
 
 #include <cuda_runtime_api.h>
 #include <driver_types.h>
@@ -13,7 +13,8 @@ namespace fast_deconv::core {
 
 class stream_resources {
  public:
-  stream_resources() { 
+  stream_resources()
+  {
     CHECK_CUDA(cudaStreamCreate(&this->stream));
     CHECK_CUBLAS(cublasCreate(&this->cublas_handle));
     CHECK_CUBLAS(cublasSetStream(this->cublas_handle, this->stream));
@@ -28,20 +29,6 @@ class stream_resources {
   {
     if (this->device_workspace != nullptr) {
       CHECK_CUDA(cudaFreeAsync(this->device_workspace, this->stream));
-      this->device_workspace      = nullptr;
-      this->device_workspace_size = 0;
-    }
-
-    if (this->device_output_workspace != nullptr) {
-      CHECK_CUDA(cudaFreeAsync(this->device_output_workspace, this->stream));
-      this->device_output_workspace      = nullptr;
-      this->device_output_workspace_size = 0;
-    }
-
-    if (this->host_workspace != nullptr) {
-      CHECK_CUDA(cudaFreeHost(this->host_workspace));
-      this->host_workspace      = nullptr;
-      this->host_workspace_size = 0;
     }
 
     CHECK_CUDA(cudaStreamSynchronize(this->stream));
@@ -63,44 +50,12 @@ class stream_resources {
     this->device_workspace_size = bytes;
   }
 
-  void alloc_device_output(size_t bytes)
-  {
-    if (bytes == 0) { return; }
-    if (this->device_output_workspace_size >= bytes) { return; }
-
-    if (this->device_output_workspace != nullptr) {
-      CHECK_CUDA(cudaFreeAsync(this->device_output_workspace, this->stream));
-      this->device_output_workspace = nullptr;
-    }
-
-    CHECK_CUDA(
-      cudaMallocAsync(static_cast<void**>(&this->device_output_workspace), bytes, this->stream));
-    this->device_output_workspace_size = bytes;
-  }
-
-  void alloc_host(size_t bytes)
-  {
-    if (bytes == 0) { return; }
-    if (this->host_workspace_size >= bytes) { return; }
-
-    if (this->host_workspace != nullptr) {
-      CHECK_CUDA(cudaFreeHost(this->host_workspace));
-      this->host_workspace = nullptr;
-    }
-
-    CHECK_CUDA(cudaMallocHost(&this->host_workspace, bytes));
-    this->host_workspace_size = bytes;
-  }
+  void sync() { CHECK_CUDA(cudaStreamSynchronize(stream)); }
 
   cudaStream_t stream;
   cublasHandle_t cublas_handle;
-
-  size_t host_workspace_size          = 0;
-  size_t device_workspace_size        = 0;
-  size_t device_output_workspace_size = 0;
-  void* host_workspace                = nullptr;
-  void* device_workspace              = nullptr;
-  void* device_output_workspace       = nullptr;
+  size_t device_workspace_size = 0;
+  void* device_workspace       = nullptr;
 };
 
 }  // namespace fast_deconv::core

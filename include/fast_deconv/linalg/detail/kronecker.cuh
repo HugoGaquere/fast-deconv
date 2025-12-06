@@ -4,7 +4,19 @@
 namespace fast_deconv::linalg::detail {
 
 template <typename T>
-__global__ void kron_kernel_async(const T* A, const T* B, T* C, uint m, uint n, uint k, uint p)
+__device__ inline T mult_op(T a, T b)
+{
+  return a * b;
+}
+
+template <>
+__device__ inline cuFloatComplex mult_op(cuFloatComplex a, cuFloatComplex b)
+{
+    return cuCmulf(a, b);
+}
+
+template <typename T>
+__global__ void kron_kernel(const T* A, const T* B, T* C, uint m, uint n, uint k, uint p)
 {
   const uint NP    = n * p;
   const uint MK    = m * k;
@@ -24,7 +36,7 @@ __global__ void kron_kernel_async(const T* A, const T* B, T* C, uint m, uint n, 
     const T a = A[r * n + c];
     const T b = B[u * p + v];
 
-    C[idx] = a * b;
+    C[idx] = mult_op(a, b);
   }
 }
 
