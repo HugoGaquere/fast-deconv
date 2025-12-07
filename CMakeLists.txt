@@ -7,7 +7,9 @@ set(CMAKE_CUDA_ARCHITECTURES "native")
 
 project(fast_deconv LANGUAGES CXX CUDA)
 
-find_package(CUDAToolkit 12 EXACT)
+#find_package(CUDAToolkit 12 EXACT)
+find_package(CUDAToolkit REQUIRED)
+#find_package(CCCL CONFIG REQUIRED)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
