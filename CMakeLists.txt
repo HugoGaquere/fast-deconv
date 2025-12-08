@@ -104,13 +104,6 @@ endif()
 #-------------------------------------------------------------------#
  add_executable(fast_deconv_app 
    src/main.cu
-   # src/examples/argmax_example.hpp
-   # src/examples/cufft_convolution_example.cu
-   # src/examples/kronecker_example.cu
-   # src/examples/kronecker_mixed_product_example.cu
-   # src/examples/kronecker_mixed_product_complex_example.cu
-   # src/examples/kronecker_tensor_example.cu
-   # src/examples/wscms_example.cu
  )
  target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
 
