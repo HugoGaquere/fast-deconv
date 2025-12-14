@@ -77,12 +77,12 @@ IncludeCategories:
     Priority:        1
   - Regex:           '^<(common|benchmarks|tests)/' # benchmark/test includes
     Priority:        2
-  - Regex:           '^<raft/' # RAFT includes
-    Priority:        3
-  - Regex:           '^<(cudf|cuml|raft|kvikio)' # Other RAPIDS includes
-    Priority:        4
-  - Regex:           '^<rmm/' # RMM includes
-    Priority:        5
+  # - Regex:           '^<raft/' # RAFT includes
+  #   Priority:        3
+  # - Regex:           '^<(cudf|cuml|raft|kvikio)' # Other RAPIDS includes
+  #   Priority:        4
+  # - Regex:           '^<rmm/' # RMM includes
+    # Priority:        5
   - Regex:           '^<(thrust|cub|cuda)/' # CCCL includes
     Priority:        6
   - Regex:           '^<(cooperative_groups|cuco|cuda|device_types|driver_types|math_constants|nvtx3)' # CUDA includes

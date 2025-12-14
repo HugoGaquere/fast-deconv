@@ -14,7 +14,7 @@ void run_argmax()
   const auto device_id = emu::cuda::device::current();
   fast_deconv::core::stream_resources resources;
 
-  const size_t n = 10000;
+  const size_t n = 10000*10000;
 
   auto data = emu::cuda::device::make_container<float>(device_id, n);
   auto mask = emu::cuda::device::make_container<bool>(device_id, n);

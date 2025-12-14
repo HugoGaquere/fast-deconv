@@ -2,8 +2,9 @@
 
 #include "fast_deconv/util/cuda_macros.hpp"
 
+#include <emu/cuda/device/mdspan.hpp>
 #include <fast_deconv/core/stream_resources.hpp>
-#include <fast_deconv/matrix/detail/argmax.hpp>
+#include <fast_deconv/matrix/detail/argmax.cuh>
 
 namespace fast_deconv::matrix {
 
@@ -33,6 +34,45 @@ inline std::pair<int, float> argmax(
   CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&d_index_out), sizeof(uint), stream));
 
   argmax_async(d_max_out, d_index_out, data, mask, size, use_abs, resources);
+
+  float h_max_out;
+  uint h_index_out;
+  CHECK_CUDA(cudaMemcpyAsync(&h_max_out, d_max_out, sizeof(float), cudaMemcpyDeviceToHost, stream));
+  CHECK_CUDA(
+    cudaMemcpyAsync(&h_index_out, d_index_out, sizeof(uint), cudaMemcpyDeviceToHost, stream));
+
+  resources.sync();
+
+  return {h_index_out, h_max_out};
+}
+
+inline void argmax_async(float* d_max_out,
+                         uint* d_index_out,
+                         const emu::cuda::device::mdspan_2d<float> data,
+                         const emu::cuda::device::mdspan_2d<bool> mask,
+                         bool use_abs,
+                         core::stream_resources& resources)
+{
+  if (use_abs)
+    detail::argmax_async<detail::span_masking_op_abs>(
+      resources, data, mask, d_max_out, d_index_out);
+  else
+    detail::argmax_async<detail::span_masking_op>(resources, data, mask, d_max_out, d_index_out);
+}
+
+inline std::pair<int, float> argmax(const emu::cuda::device::mdspan_2d<float> data,
+                                    const emu::cuda::device::mdspan_2d<bool> mask,
+                                    bool use_abs,
+                                    core::stream_resources& resources)
+{
+  auto stream = resources.stream;
+
+  float* d_max_out;   // memory for the maximum value
+  uint* d_index_out;  // memory for the index of the returned value
+  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&d_max_out), sizeof(float), stream));
+  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&d_index_out), sizeof(uint), stream));
+
+  argmax_async(d_max_out, d_index_out, data, mask, use_abs, resources);
 
   float h_max_out;
   uint h_index_out;

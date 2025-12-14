@@ -1,7 +1,5 @@
 #pragma once
 
-#include "fast_deconv/util/cuda_macros.hpp"
-
 #include <fast_deconv/core/stream_resources.hpp>
 #include <fast_deconv/matrix/detail/subtract.cuh>
 
