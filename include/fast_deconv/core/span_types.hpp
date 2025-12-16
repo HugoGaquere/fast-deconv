@@ -32,7 +32,12 @@ using device_span4d_fs = mdspan_strided<float, 4>;
 using device_span5d_fs = mdspan_strided<float, 5>;
 using device_span6d_fs = mdspan_strided<float, 6>;
 
-
+using device_vect_bs   = mdspan_strided<bool, 1>;
+using device_span2d_bs = mdspan_strided<bool, 2>;
+using device_span3d_bs = mdspan_strided<bool, 3>;
+using device_span4d_bs = mdspan_strided<bool, 4>;
+using device_span5d_bs = mdspan_strided<bool, 5>;
+using device_span6d_bs = mdspan_strided<bool, 6>;
 
 
 }  // namespace fast_deconv::core

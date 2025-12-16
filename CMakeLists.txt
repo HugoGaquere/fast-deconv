@@ -73,6 +73,13 @@ set_target_properties(fast_deconv PROPERTIES
 
 target_compile_features(fast_deconv INTERFACE cxx_std_20)
 
+target_compile_options(fast_deconv INTERFACE
+  $<$<COMPILE_LANGUAGE:CUDA>:
+  --extended-lambda
+  --expt-relaxed-constexpr
+  >
+)
+
 #-------------------------------------------------------------------#
 # Python extension
 #-------------------------------------------------------------------#

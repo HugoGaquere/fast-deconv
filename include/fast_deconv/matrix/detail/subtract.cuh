@@ -7,6 +7,17 @@
 
 namespace fast_deconv::matrix::detail {
 
+// template <typename Mdspan>
+// __global__ void simple_subtract_kernel(const Mdspan A, const Mdspan B, Mdspan C)
+// {
+//   const uint tix = blockIdx.x * blockDim.x + threadIdx.x;
+//
+//   constexpr uint size = A.size();
+//   if (tid >= size) return;
+//
+//   if constexpr()
+// }
+
 __global__ void subtract_kernel_vect_load(const float* __restrict__ A,
                                           const float* __restrict__ B,
                                           float* __restrict__ C,

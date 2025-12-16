@@ -1,14 +1,12 @@
 import cupy as cp
-import numpy as np
 from benchmarks import benchmark, print_bench
 import fast_deconv as fd
 from functools import partial
 
 rng = cp.random.default_rng(12345)
-rng_h = np.random.default_rng(12345)
 resources = fd.stream_resources()
 
-shape = (1, 1, 5, 5)
+shape = (5, 5)
 
 A = rng.standard_normal(shape, dtype=cp.float32)
 B = rng.standard_normal(shape, dtype=cp.float32)
@@ -16,37 +14,8 @@ C = cp.zeros(shape).astype(cp.float32)
 mask = rng.random(shape) > 0.3
 
 
-print(A)
-print(B)
-
-breakpoint()
-fd.matrix.subtract(A, B, C, resources)
-
-cp.testing.assert_array_equal(C, A - B)
-
-
-
-
-
-if False:
-    mask = cp.ones(shape, bool)
-
-    A_v = A[:, :2]
-    mask_v = mask[:, :2]
-# fd.print_host(A_h[0])
-
-    print("A")
-    print(A)
-    print("A[:, :2]")
-    print(A_v)
-    print("Mdspan Host view: A[:, :2]")
-# fd.print_host(A_v.get())
-    print("Mdspan Device view: A[:, :2]")
-    fd.print(A_v)
-    breakpoint()
-
-# m = fd.matrix.argmax(A_v, mask_v, True, resources)
-# print(f"{m=}")
+# fd.argmax(A, mask, False, resources)
+# breakpoint()
 
 
 print("==[ Module benchmark ]==")
@@ -61,6 +30,11 @@ def argmax_cupy(data, mask, do_abs):
     ret_val = float(cp.abs(orig_val).item()) if do_abs else float(orig_val.item())
     return flat_idx, ret_val
 
+# m = fd.matrix.argmax(A[:,:4], mask[:,:4], True, resources)
+# print(f"{m=}")
+# m_true = argmax_cupy(A[:, :4], mask[:, :4], True)
+# print(f"{m_true=}")
+# breakpoint()
 
 print("[+] Running benchmarks ...")
 bench = partial(benchmark, n_warmup=2, n_runs=10, n_iter=500)

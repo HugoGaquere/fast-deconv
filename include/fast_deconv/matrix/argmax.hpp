@@ -1,5 +1,6 @@
 #pragma once
 
+#include "fast_deconv/core/span_types.hpp"
 #include "fast_deconv/util/cuda_macros.hpp"
 
 #include <emu/cuda/device/mdspan.hpp>
@@ -20,7 +21,8 @@ inline void argmax_async(float* d_max_out,
     detail::argmax_async<detail::masking_op_abs>(
       resources, data, mask, size, d_max_out, d_index_out);
   else
-    detail::argmax_async<detail::masking_op>(resources, data, mask, size, d_max_out, d_index_out);
+    detail::argmax_async<detail::masking_op>(resources, data, mask, size, d_max_out,
+    d_index_out);
 }
 
 inline std::pair<int, float> argmax(
@@ -37,8 +39,8 @@ inline std::pair<int, float> argmax(
 
   float h_max_out;
   uint h_index_out;
-  CHECK_CUDA(cudaMemcpyAsync(&h_max_out, d_max_out, sizeof(float), cudaMemcpyDeviceToHost, stream));
-  CHECK_CUDA(
+  CHECK_CUDA(cudaMemcpyAsync(&h_max_out, d_max_out, sizeof(float), cudaMemcpyDeviceToHost,
+  stream)); CHECK_CUDA(
     cudaMemcpyAsync(&h_index_out, d_index_out, sizeof(uint), cudaMemcpyDeviceToHost, stream));
 
   resources.sync();
@@ -48,22 +50,21 @@ inline std::pair<int, float> argmax(
 
 inline void argmax_async(float* d_max_out,
                          uint* d_index_out,
-                         const emu::cuda::device::mdspan_2d<float> data,
-                         const emu::cuda::device::mdspan_2d<bool> mask,
                          bool use_abs,
-                         core::stream_resources& resources)
+                         core::stream_resources& resources,
+                         const core::device_span2d_f& data,
+                         const core::device_span2d_b& mask)
 {
   if (use_abs)
-    detail::argmax_async<detail::span_masking_op_abs>(
-      resources, data, mask, d_max_out, d_index_out);
+    detail::argmax_async<detail::span_masking_op_abs>( resources, d_max_out, d_index_out, data, mask);
   else
-    detail::argmax_async<detail::span_masking_op>(resources, data, mask, d_max_out, d_index_out);
+    detail::argmax_async<detail::span_masking_op>( resources, d_max_out, d_index_out, data, mask);
 }
 
-inline std::pair<int, float> argmax(const emu::cuda::device::mdspan_2d<float> data,
-                                    const emu::cuda::device::mdspan_2d<bool> mask,
-                                    bool use_abs,
-                                    core::stream_resources& resources)
+inline std::pair<int, float> argmax(bool use_abs,
+                                    core::stream_resources& resources,
+                                    const core::device_span2d_f& data,
+                                    const core::device_span2d_b& mask)
 {
   auto stream = resources.stream;
 
@@ -72,7 +73,7 @@ inline std::pair<int, float> argmax(const emu::cuda::device::mdspan_2d<float> da
   CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&d_max_out), sizeof(float), stream));
   CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&d_index_out), sizeof(uint), stream));
 
-  argmax_async(d_max_out, d_index_out, data, mask, use_abs, resources);
+  argmax_async(d_max_out, d_index_out, use_abs, resources, data, mask);
 
   float h_max_out;
   uint h_index_out;

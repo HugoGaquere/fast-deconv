@@ -1,5 +1,6 @@
 #pragma once
 
+#include "fast_deconv/core/span_types.hpp"
 #include <cub/cub.cuh>
 #include <cuda/std/cstdint>
 #include <thrust/iterator/counting_iterator.h>
@@ -33,9 +34,9 @@ struct masking_op_abs {
 };
 
 struct span_masking_op {
-  const emu::cuda::device::mdspan_2d<float> data;
-  const emu::cuda::device::mdspan_2d<bool> mask;
-  int cols;
+  const core::device_span2d_f data;
+  const core::device_span2d_b mask;
+  const int cols;
 
   __device__ __forceinline__ float operator()(const int& i) const
   {
@@ -47,9 +48,9 @@ struct span_masking_op {
 };
 
 struct span_masking_op_abs {
-  const emu::cuda::device::mdspan_2d<float> data;
-  const emu::cuda::device::mdspan_2d<bool> mask;
-  int cols;
+  const core::device_span2d_f data;
+  const core::device_span2d_b mask;
+  const int cols;
 
   __device__ __forceinline__ float operator()(const int& i) const
   {
@@ -91,10 +92,10 @@ void argmax_async(core::stream_resources& resources,
 
 template <typename MaskingOpT>
 void argmax_async(core::stream_resources& resources,
-                  const emu::cuda::device::mdspan_2d<float> data,
-                  const emu::cuda::device::mdspan_2d<bool> mask,
                   float* d_max_out,
-                  uint* d_index_out)
+                  uint* d_index_out,
+                  const core::device_span2d_f& data,
+                  const core::device_span2d_b& mask)
 {
   int rows = static_cast<int>(data.extent(0));
   int cols = static_cast<int>(data.extent(1));
