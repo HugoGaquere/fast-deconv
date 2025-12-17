@@ -7,16 +7,13 @@
 
 namespace fast_deconv::matrix::detail {
 
-// template <typename Mdspan>
-// __global__ void simple_subtract_kernel(const Mdspan A, const Mdspan B, Mdspan C)
-// {
-//   const uint tix = blockIdx.x * blockDim.x + threadIdx.x;
-//
-//   constexpr uint size = A.size();
-//   if (tid >= size) return;
-//
-//   if constexpr()
-// }
+template <typename Mdspan>
+__global__ void simple_subtract_kernel(const Mdspan A, const Mdspan B, Mdspan C)
+{
+  const uint tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid >= A.size()) return;
+  C.data_handle()[tid] = A.data_handle()[tid] - B.data_handle()[tid];
+}
 
 __global__ void subtract_kernel_vect_load(const float* __restrict__ A,
                                           const float* __restrict__ B,
@@ -84,12 +81,18 @@ __global__ void subtract_kernel_cub_load(const T* __restrict__ A,
   block_store().Store(C + block_offset, thread_c);
 }
 
+template <typename Mdspan>
+void subtract_async(const Mdspan& A, const Mdspan& B, Mdspan& C, core::stream_resources& resources)
+{
+  simple_subtract_kernel<<<CEIL_DIV(A.size(), 256), 256, 0, resources.stream>>>(A, B, C);
+}
+
 void subtract_async(
   const float* A, const float* B, float* C, size_t size, core::stream_resources& resources)
 {
   auto stream = resources.stream;
 
-  // const int TILE_SIZE = BLOCK_THREADS * ITEMS_PER_THREAD;
+// const int TILE_SIZE = BLOCK_THREADS * ITEMS_PER_THREAD;
   // int grid_size       = static_cast<int>((size + TILE_SIZE - 1) / TILE_SIZE);
   // dim3 block(BLOCK_THREADS);
   // dim3 grid(grid_size);

@@ -8,15 +8,10 @@ resources = fd.stream_resources()
 
 shape = (5, 5)
 
-A = rng.standard_normal(shape, dtype=cp.float32)
+A = rng.standard_normal(shape, dtype=cp.float32)# cp.arange(5*5, dtype=float).reshape(shape)
 B = rng.standard_normal(shape, dtype=cp.float32)
 C = cp.zeros(shape).astype(cp.float32)
 mask = rng.random(shape) > 0.3
-
-
-# fd.argmax(A, mask, False, resources)
-# breakpoint()
-
 
 print("==[ Module benchmark ]==")
 
@@ -49,12 +44,11 @@ print_bench(" argmax(A, mask)", bench_res)
 bench_res = bench(fd.matrix.argmax, A, mask, True, resources)
 print_bench(" argmax(abs(A), mask)", bench_res)
 
-bench_res = bench(fd.matrix.argmax_mdspan, A, mask, False, resources)
+bench_res = bench(fd.matrix.argmax, A[:,:3], mask[:, :3], False, resources)
 print_bench(" argmax_mdspan(A, mask)", bench_res)
 
-bench_res = bench(fd.matrix.argmax_mdspan, A, mask, True, resources)
-print_bench(" argmax_mdspan(abs(A), mask)", bench_res)
 
+print(A[:, :3].__cuda_array_interface__)
 bench_res = bench(fd.matrix.subtract, A, B, C, resources)
 print_bench(" subtract(A, B)", bench_res)
 

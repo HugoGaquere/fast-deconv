@@ -13,12 +13,9 @@
 
 namespace py = pybind11;
 
-using stream_resources = fast_deconv::core::stream_resources;
-using device_vect_f = fast_deconv::core::device_vect_f;
-using device_span2d_f = fast_deconv::core::device_span2d_f;
-using device_span2d_fs = fast_deconv::core::device_span2d_fs;
-using device_span2d_b = fast_deconv::core::device_span2d_b;
-using device_span2d_bs = fast_deconv::core::device_span2d_bs;
+namespace fd_core = fast_deconv::core;
+namespace fd_matrix = fast_deconv::matrix;
+
 
 template <typename Mdspan>
 void inspect(const Mdspan& a)
@@ -69,59 +66,33 @@ void print_mdspan(const Mdspan& ms)
   cudaDeviceSynchronize();
 }
 
-template <typename DataMdspan, typename MaskMdspan>
-std::pair<int, float> argmax(const DataMdspan& data,
-                             const MaskMdspan& mask,
-                             bool use_abs,
-                             stream_resources& resources)
-{
-  return fast_deconv::matrix::argmax(
-    data.data_handle(), mask.data_handle(), data.size(), use_abs, resources);
-}
-
-template <typename DataMdspan, typename MaskMdspan>
-std::pair<int, float> argmax_mdspan(const DataMdspan& data,
-                                    const MaskMdspan& mask,
-                                    bool use_abs,
-                                    stream_resources& resources)
-{
-  return fast_deconv::matrix::argmax(use_abs, resources, data, mask);
-}
-
-template <typename Mdspan>
-void subtract(const Mdspan& A, const Mdspan& B, Mdspan& C, stream_resources& resources)
-{
-  return fast_deconv::matrix::subtract(
-    A.data_handle(), B.data_handle(), C.data_handle(), A.size(), resources);
-}
-
 PYBIND11_MODULE(_fast_deconv, m)
 {
   m.doc()            = "fast_deconv hello module";
   auto matrix_module = m.def_submodule("matrix", "Matrix module");
 
-  matrix_module.def("argmax", &argmax<device_span2d_f, device_span2d_b>, R"pbdoc( Argmax.)pbdoc");
-  matrix_module.def("argmax_mdspan", &argmax_mdspan<device_span2d_f, device_span2d_b>, R"pbdoc( Argmax.)pbdoc");
-  matrix_module.def("argmax_mdspan", &argmax_mdspan<device_span2d_fs, device_span2d_bs>, R"pbdoc( Argmax.)pbdoc");
+  matrix_module.def("argmax", &fd_matrix::argmax<fd_core::device_span2d_f, fd_core::device_span2d_b>, R"pbdoc( Argmax.)pbdoc");
+  matrix_module.def("argmax", &fd_matrix::argmax<fd_core::device_span2d_fs, fd_core::device_span2d_bs>, R"pbdoc( Argmax.)pbdoc");
 
-  matrix_module.def(
-    "subtract", &subtract<fast_deconv::core::device_vect_f>, R"pbdoc( C = A - B)pbdoc");
-  matrix_module.def(
-    "subtract", &subtract<fast_deconv::core::device_span2d_f>, R"pbdoc( C = A - B)pbdoc");
-  matrix_module.def(
-    "subtract", &subtract<fast_deconv::core::device_span3d_f>, R"pbdoc( C = A - B)pbdoc");
-  matrix_module.def(
-    "subtract", &subtract<fast_deconv::core::device_span4d_f>, R"pbdoc( C = A - B)pbdoc");
-  matrix_module.def(
-    "subtract", &subtract<fast_deconv::core::device_span5d_f>, R"pbdoc( C = A - B)pbdoc");
-  matrix_module.def(
-    "subtract", &subtract<fast_deconv::core::device_span6d_f>, R"pbdoc( C = A - B)pbdoc");
+  matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_vect_f>, R"pbdoc( C = A - B)pbdoc");
+  matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span2d_f>, R"pbdoc( C = A - B)pbdoc");
+  matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span3d_f>, R"pbdoc( C = A - B)pbdoc");
+  matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span4d_f>, R"pbdoc( C = A - B)pbdoc");
+  matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span5d_f>, R"pbdoc( C = A - B)pbdoc");
+  matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span6d_f>, R"pbdoc( C = A - B)pbdoc");
 
-  py::class_<fast_deconv::core::stream_resources>(m, "stream_resources").def(py::init<>());
+  matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_vect_fs>, R"pbdoc( C = A - B)pbdoc");
+  matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span2d_fs>, R"pbdoc( C = A - B)pbdoc");
+  matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span3d_fs>, R"pbdoc( C = A - B)pbdoc");
+  matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span4d_fs>, R"pbdoc( C = A - B)pbdoc");
+  matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span5d_fs>, R"pbdoc( C = A - B)pbdoc");
+  matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span6d_fs>, R"pbdoc( C = A - B)pbdoc");
 
-  m.def("inspect", &inspect<fast_deconv::core::device_vect_f>, R"pbdoc(Inspect)pbdoc");
-  m.def("inspect", &inspect<fast_deconv::core::device_span2d_f>, R"pbdoc(Inspect)pbdoc");
+  py::class_<fd_core::stream_resources>(m, "stream_resources").def(py::init<>());
+
+  m.def("inspect", &inspect<fd_core::device_vect_f>, R"pbdoc(Inspect)pbdoc");
+  m.def("inspect", &inspect<fd_core::device_span2d_f>, R"pbdoc(Inspect)pbdoc");
   // m.def("print", &print_mdspan<fast_deconv::core::device_span2d_f>, R"pbdoc(Print)pbdoc");
-  m.def("print", &print_mdspan<fast_deconv::core::device_span2d_fs>, R"pbdoc(Print)pbdoc");
+  // m.def("print", &print_mdspan<fd_core::device_span2d_fs>, R"pbdoc(Print)pbdoc");
   // m.def("print", &print_mdspan<fast_deconv::core::device_span2d_f>, R"pbdoc(Print)pbdoc");
 }

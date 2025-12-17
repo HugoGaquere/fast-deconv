@@ -59,7 +59,7 @@ target_include_directories(fast_deconv INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 
-target_link_libraries(fast_deconv INTERFACE 
+target_link_libraries(fast_deconv INTERFACE
   fmt::fmt
   emu::emu
   CUDA::cublas
@@ -109,7 +109,7 @@ endif()
 #-------------------------------------------------------------------#
 # Example executable
 #-------------------------------------------------------------------#
- add_executable(fast_deconv_app 
+ add_executable(fast_deconv_app
    src/main.cu
    # src/examples/argmax_example.hpp
    # src/examples/cufft_convolution_example.cu
