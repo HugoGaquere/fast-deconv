@@ -2,17 +2,57 @@
 
 #include <cub/cub.cuh>
 
+#include <fast_deconv/core/concepts.hpp>
 #include <fast_deconv/core/stream_resources.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
 
-namespace fast_deconv::matrix::detail {
+namespace cpts = fast_deconv::core::cpts;
+
+namespace {
+
+template <cpts::mdspan Mdspan>
+__device__ inline auto linear_to_indices(typename Mdspan::size_type lin, const Mdspan& m)
+{
+  using index_t   = typename Mdspan::index_type;
+  constexpr int R = Mdspan::rank();
+
+  std::array<index_t, R> idx{};
+#pragma unroll
+  for (int d = R - 1; d >= 0; --d) {
+    const auto e = static_cast<index_t>(m.extent(d));
+    idx[d]       = static_cast<index_t>(lin % e);
+    lin          = static_cast<typename Mdspan::size_type>(lin / e);
+  }
+  return idx;
+}
+
+template <typename  Mdspan, std::size_t... Is>
+__device__ inline decltype(auto) at_impl(
+  Mdspan&& m,
+  const std::array<typename std::remove_reference_t<Mdspan>::index_type,
+                   std::remove_reference_t<Mdspan>::rank()>& idx,
+  std::index_sequence<Is...>)
+{
+  return m(idx[Is]...);
+}
 
 template <typename Mdspan>
+__device__ inline decltype(auto) at(
+  Mdspan&& m,
+  const std::array<typename std::remove_reference_t<Mdspan>::index_type,
+                   std::remove_reference_t<Mdspan>::rank()>& idx)
+{
+  using M = std::remove_reference_t<Mdspan>;
+  return at_impl(std::forward<Mdspan>(m), idx, std::make_index_sequence<M::rank()>{});
+}
+
+template <cpts::mdspan Mdspan>
 __global__ void simple_subtract_kernel(const Mdspan A, const Mdspan B, Mdspan C)
 {
   const uint tid = blockIdx.x * blockDim.x + threadIdx.x;
   if (tid >= A.size()) return;
-  C.data_handle()[tid] = A.data_handle()[tid] - B.data_handle()[tid];
+  auto idx   = linear_to_indices<Mdspan>(tid, A);
+  at(C, idx) = at(A, idx) - at(B, idx);
 }
 
 __global__ void subtract_kernel_vect_load(const float* __restrict__ A,
@@ -81,36 +121,70 @@ __global__ void subtract_kernel_cub_load(const T* __restrict__ A,
   block_store().Store(C + block_offset, thread_c);
 }
 
-template <typename Mdspan>
-void subtract_async(const Mdspan& A, const Mdspan& B, Mdspan& C, core::stream_resources& resources)
+}  // namespace
+
+namespace fast_deconv::matrix::detail {
+
+
+template <cpts::mdspan Mdspan>
+  requires cpts::is_layout_stride<Mdspan> or
+  cpts::is_layout_right<Mdspan> void subtract_async(const Mdspan& A,
+                                                    const Mdspan& B,
+                                                    Mdspan& C,
+                                                    core::stream_resources& resources)
 {
   simple_subtract_kernel<<<CEIL_DIV(A.size(), 256), 256, 0, resources.stream>>>(A, B, C);
-}
-
-void subtract_async(
-  const float* A, const float* B, float* C, size_t size, core::stream_resources& resources)
-{
-  auto stream = resources.stream;
-
-// const int TILE_SIZE = BLOCK_THREADS * ITEMS_PER_THREAD;
-  // int grid_size       = static_cast<int>((size + TILE_SIZE - 1) / TILE_SIZE);
-  // dim3 block(BLOCK_THREADS);
-  // dim3 grid(grid_size);
-  // subtract_kernel_cub_load<<<grid, block, 0, stream>>>(A, B, C, size);
-  // resources.sync();
-
-  constexpr int items_per_thread = 4;
-  constexpr int block_dim        = 128;
-  const int grid_dim             = CEIL_DIV(size / items_per_thread, block_dim);
-
-  constexpr auto subtract_kernel = subtract_kernel_cub_load<float,
-                                                            block_dim,
-                                                            items_per_thread,
-                                                            cub::BLOCK_LOAD_VECTORIZE,
-                                                            cub::BLOCK_STORE_VECTORIZE>;
-
-  subtract_kernel<<<grid_dim, block_dim, 0, stream>>>(A, B, C, size);
   CHECK_LAST_CUDA_ERROR();
 }
+
+// template <emu::cuda::device::cpts::mdspan Mdspan>
+// requires is_layout_right<Mdspan> void subtract_async(const Mdspan& A,
+//                                                      const Mdspan& B,
+//                                                      Mdspan& C,
+//                                                      core::stream_resources& resources)
+// {
+//   const auto stream          = resources.stream;
+//   const size_t size          = A.size();
+//   const int items_per_thread = 4;
+//   const int block_dim        = 128;
+//   const int grid_dim         = CEIL_DIV(size / items_per_thread, block_dim);
+//
+//   subtract_kernel_cub_load<float,
+//                            block_dim,
+//                            items_per_thread,
+//                            cub::BLOCK_LOAD_VECTORIZE,
+//                            cub::BLOCK_STORE_VECTORIZE>
+//     <<<grid_dim, block_dim, 0, stream>>>(A.data_handle(), B.data_handle(), C.data_handle(),
+//     size);
+//   CHECK_LAST_CUDA_ERROR();
+// }
+
+template <cpts::mdspan Mdspan>
+requires cpts::is_layout_left<Mdspan> void subtract_async(const Mdspan& A,
+                                                          const Mdspan& B,
+                                                          Mdspan& C,
+                                                          core::stream_resources& resources)
+{
+  static_assert(!cpts::is_layout_left<Mdspan>,
+                "subtract_async: layout_left is not implemented yet.");
+}
+
+// void subtract_async(
+//   const float* A, const float* B, float* C, size_t size, core::stream_resources& resources)
+// {
+//   const auto stream          = resources.stream;
+//   const int items_per_thread = 4;
+//   const int block_dim        = 128;
+//   const int grid_dim         = CEIL_DIV(size / items_per_thread, block_dim);
+//
+//   subtract_kernel_cub_load<float,
+//                            block_dim,
+//                            items_per_thread,
+//                            cub::BLOCK_LOAD_VECTORIZE,
+//                            cub::BLOCK_STORE_VECTORIZE>
+//     <<<grid_dim, block_dim, 0, stream>>>(A, B, C, size);
+//
+//   CHECK_LAST_CUDA_ERROR();
+// }
 
 }  // namespace fast_deconv::matrix::detail

@@ -23,7 +23,7 @@ void run_subtract()
   fill_device_random(A.data(), N);
   fill_device_random(B.data(), N);
 
-  fast_deconv::matrix::subtract_async(A.data(), B.data(), C.data(), N, resources);
+  // fast_deconv::matrix::subtract_async(A, B, C, N, resources);
 
   resources.sync();
 }

@@ -71,8 +71,12 @@ PYBIND11_MODULE(_fast_deconv, m)
   m.doc()            = "fast_deconv hello module";
   auto matrix_module = m.def_submodule("matrix", "Matrix module");
 
+  matrix_module.def("argmax", &fd_matrix::argmax<fd_core::device_vect_f, fd_core::device_vect_b>, R"pbdoc( Argmax.)pbdoc");
   matrix_module.def("argmax", &fd_matrix::argmax<fd_core::device_span2d_f, fd_core::device_span2d_b>, R"pbdoc( Argmax.)pbdoc");
-  matrix_module.def("argmax", &fd_matrix::argmax<fd_core::device_span2d_fs, fd_core::device_span2d_bs>, R"pbdoc( Argmax.)pbdoc");
+  matrix_module.def("argmax", &fd_matrix::argmax<fd_core::device_span3d_f, fd_core::device_span3d_b>, R"pbdoc( Argmax.)pbdoc");
+  matrix_module.def("argmax", &fd_matrix::argmax<fd_core::device_span4d_f, fd_core::device_span4d_b>, R"pbdoc( Argmax.)pbdoc");
+  matrix_module.def("argmax", &fd_matrix::argmax<fd_core::device_span5d_f, fd_core::device_span5d_b>, R"pbdoc( Argmax.)pbdoc");
+  matrix_module.def("argmax", &fd_matrix::argmax<fd_core::device_span6d_f, fd_core::device_span6d_b>, R"pbdoc( Argmax.)pbdoc");
 
   matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_vect_f>, R"pbdoc( C = A - B)pbdoc");
   matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span2d_f>, R"pbdoc( C = A - B)pbdoc");

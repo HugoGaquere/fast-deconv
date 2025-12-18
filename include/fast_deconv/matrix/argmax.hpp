@@ -4,9 +4,12 @@
 
 #include <emu/cuda/device/mdspan.hpp>
 #include <fast_deconv/core/stream_resources.hpp>
+#include <fast_deconv/core/concepts.hpp>
 #include <fast_deconv/matrix/detail/argmax.cuh>
 
 namespace fast_deconv::matrix {
+
+namespace cpts = fast_deconv::core::cpts;
 
 inline void argmax_async(float* d_max_out,
                          uint* d_index_out,
@@ -46,12 +49,14 @@ inline std::pair<int, float> argmax(
   return {h_index_out, h_max_out};
 }
 
-template <typename DataMdspan, typename MaskMdspan>
-inline std::pair<int, float> argmax(const DataMdspan& data,
-                                    const MaskMdspan& mask,
+template <cpts::mdspan Data, cpts::mdspan Mask>
+inline std::pair<int, float> argmax(const Data& data,
+                                    const Mask& mask,
                                     bool use_abs,
                                     core::stream_resources& resources)
 {
+  static_assert(!cpts::is_layout_stride<Data>, "argmax: layout_stride is not implemented yet.");
+  static_assert(!cpts::is_layout_stride<Mask>, "argmax: layout_stride is not implemented yet.");
   return argmax(data.data_handle(), mask.data_handle(), data.size(), use_abs, resources);
 }
 
