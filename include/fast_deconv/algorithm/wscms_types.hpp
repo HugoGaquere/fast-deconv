@@ -1,20 +1,10 @@
 #pragma once
 
-#include <vector_types.h>
-#include <cstdint>
-#include <vector>
+#include <fast_deconv/core/span_types.hpp>
 
-namespace fast_deconv::algorithm::wscms {
+namespace fast_deconv::algo::wscms {
 
-struct Facets {
-  std::vector<std::vector<float>> edges;
-  std::vector<float2> centers;
-};
-
-struct Params {
-  float peak_factor;
-  std::uint32_t max_iter;
-  float2 cell_size_radian;
-};
+// using PSF = core::device_span4d_f;
+// using psf_strided = core::device_span4d_fs;
 
 }  // namespace fast_deconv::algorithm::wscms

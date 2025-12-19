@@ -5,6 +5,7 @@
 #include <emu/pybind11/cast/mdspan.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/core/stream_resources.hpp>
+#include <fast_deconv/algorithm/wscms_op.hpp>
 #include <fast_deconv/matrix/argmax.hpp>
 #include <fast_deconv/matrix/subtract.hpp>
 #include <fmt/base.h>
@@ -15,6 +16,7 @@ namespace py = pybind11;
 
 namespace fd_core = fast_deconv::core;
 namespace fd_matrix = fast_deconv::matrix;
+namespace fd_wscms = fast_deconv::algo::wscms;
 
 
 template <typename Mdspan>
@@ -70,6 +72,7 @@ PYBIND11_MODULE(_fast_deconv, m)
 {
   m.doc()            = "fast_deconv hello module";
   auto matrix_module = m.def_submodule("matrix", "Matrix module");
+  auto wscms_module = m.def_submodule("wscms", "WSCMS module");
 
   matrix_module.def("argmax", &fd_matrix::argmax<fd_core::device_vect_f, fd_core::device_vect_b>, R"pbdoc( Argmax.)pbdoc");
   matrix_module.def("argmax", &fd_matrix::argmax<fd_core::device_span2d_f, fd_core::device_span2d_b>, R"pbdoc( Argmax.)pbdoc");
@@ -91,6 +94,8 @@ PYBIND11_MODULE(_fast_deconv, m)
   matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span4d_fs>, R"pbdoc( C = A - B)pbdoc");
   matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span5d_fs>, R"pbdoc( C = A - B)pbdoc");
   matrix_module.def("subtract", &fd_matrix::subtract<fd_core::device_span6d_fs>, R"pbdoc( C = A - B)pbdoc");
+
+  wscms_module.def("subtract_psf_from_dirty", &fd_wscms::subtract_psf_from_dirty, R"pbdoc( TODO )pbdoc");
 
   py::class_<fd_core::stream_resources>(m, "stream_resources").def(py::init<>());
 

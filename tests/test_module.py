@@ -46,7 +46,7 @@ ARGMAX_SUPPORTED_SLICES = [
 ]
 
 
-@pytest.mark.parametrize("ndim", [2, 3, 4, 5, 6])
+@pytest.mark.parametrize("ndim", [1, 2, 3, 4, 5, 6])
 @pytest.mark.parametrize("slice_factory", ARGMAX_SUPPORTED_SLICES)
 @pytest.mark.parametrize("do_abs", [False, True])
 def test_argmax(ndim, slice_factory, do_abs):
