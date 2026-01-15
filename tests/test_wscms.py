@@ -1,5 +1,4 @@
 import cupy as cp
-import numpy as np
 import fast_deconv as fd
 import pytest
 

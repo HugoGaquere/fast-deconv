@@ -23,20 +23,21 @@ void subtract_psf_from_dirty_async(
 {
   // TODO: check psf.extent(0) == dirty.extent(0) == coeffs.size()
 
-  detail::subtract_psf_from_dirty(psf, dirty, coeffs, out, gain, resources);
+  detail::subtract_psf_from_dirty_async(psf, dirty, coeffs, out, gain, resources);
 }
 
-void subtract_psf_from_dirty(
-    core::device_span4d_fs& psf,
-    core::device_span4d_fs& dirty,
-    core::device_vect_f& coeffs,
-    core::device_span4d_fs& out,
-    float gain,
-    core::stream_resources& resources)
-{
-  subtract_psf_from_dirty_async(psf, dirty, coeffs, out, gain, resources);
-  resources.sync();
-}
+// void subtract_psf_from_dirty(
+//     core::device_span4d_fs& psf,
+//     // core::device_span4d_fs& dirty,
+//     // core::device_vect_f& coeffs,
+//     // core::device_span4d_fs& out,
+//     float gain,
+//     core::stream_resources& resources)
+// {
+//   fmt::println("TEST");
+//   // subtract_psf_from_dirty_async(psf, dirty, coeffs, out, gain, resources);
+//   resources.sync();
+// }
 
 
 

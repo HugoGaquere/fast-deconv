@@ -38,10 +38,9 @@ __global__ void subtract_psf_from_dirty_kernel_naive(core::device_span4d_fs psf,
   auto [i0, i1, i2, i3] = linear_to_4d(tid, out);
 
   out(i0, i1, i2, i3) = dirty(i0, i1, i2, i3) - psf(i0, i1, i2, i3) * coeffs(i0) * gain;
-  // out(i0, i1, i2, i3) = dirty(i0, i1, i2, i3) - psf(i0, i1, i2, i3);
 }
 
-void subtract_psf_from_dirty(core::device_span4d_fs& psf,
+void subtract_psf_from_dirty_async(core::device_span4d_fs& psf,
                              core::device_span4d_fs& dirty,
                              core::device_vect_f& coeffs,
                              core::device_span4d_fs& out,

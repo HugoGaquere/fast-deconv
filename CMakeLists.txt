@@ -89,7 +89,13 @@ if (SKBUILD)
   set(PYBIND11_FINDPYTHON ON)
   find_package(pybind11 CONFIG REQUIRED)
 
-  pybind11_add_module(_fast_deconv src/python/fast_deconv.cu)
+  pybind11_add_module(_fast_deconv
+    src/python/fast_deconv_module.cu
+    src/python/bindings/core.cu
+    src/python/bindings/debug.cu
+    src/python/bindings/matrix.cu
+    src/python/bindings/wscms.cu
+  )
 
   target_link_libraries(_fast_deconv PRIVATE fast_deconv)
 
@@ -119,7 +125,7 @@ endif()
    # src/examples/kronecker_tensor_example.cu
    # src/examples/wscms_example.cu
  )
- target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
+ target_link_libraries(fast_deconv_app PRIVATE fast_deconv CUDA::curand)
 
 #-------------------------------------------------------------------#
 # Installation
