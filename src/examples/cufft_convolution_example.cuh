@@ -1,4 +1,0 @@
-
-void run_convolution() {
-
-}
