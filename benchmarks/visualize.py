@@ -43,7 +43,7 @@ def extract_category(name: str) -> str:
     """Extract category from benchmark name."""
     if "argmax" in name:
         return "argmax"
-    elif "subtract_psf" in name or "wscms" in name:
+    elif "subtract_psf" in name or "wscms" in name or "clean_dirties" in name:
         return "wscms"
     elif "subtract" in name:
         return "subtract"
@@ -54,6 +54,7 @@ def simplify_name(name: str) -> str:
     """Simplify benchmark name for display."""
     name = name.replace("fast_deconv:", "")
     name = name.replace("subtract_psf_from_dirty", "psf_subtract")
+    name = name.replace("clean_dirties", "clean_dirties")
     name = name.replace("_strided", " (strided)")
     name = name.replace("_inplace", " (inplace)")
     name = name.replace("_masked", " (masked)")

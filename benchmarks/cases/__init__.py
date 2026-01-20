@@ -7,7 +7,11 @@ Each case defines a comparison between fast-deconv and CuPy implementations.
 from .base import BenchmarkCase, BenchmarkConfig
 from .argmax import ArgmaxBenchmark, ArgmaxAbsBenchmark, MaskedArgmaxBenchmark
 from .subtract import SubtractBenchmark, SubtractStridedBenchmark
-from .wscms import SubtractPsfFromDirtyBenchmark
+from .wscms import (
+    SubtractPsfFromDirtyBenchmark,
+    CleanDirtiesBenchmark,
+    CleanDirtiesStridedBenchmark,
+)
 
 __all__ = [
     "BenchmarkCase",
@@ -18,4 +22,6 @@ __all__ = [
     "SubtractBenchmark",
     "SubtractStridedBenchmark",
     "SubtractPsfFromDirtyBenchmark",
+    "CleanDirtiesBenchmark",
+    "CleanDirtiesStridedBenchmark",
 ]

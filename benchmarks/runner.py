@@ -13,6 +13,9 @@ Usage:
     # Quick mode for sanity checks
     python -m benchmarks.runner --quick
 
+    # Include large-scale benchmarks (10000x10000+)
+    python -m benchmarks.runner --large
+
     # Profiling mode (few iterations for Nsight)
     python -m benchmarks.runner --profile
 
@@ -39,6 +42,8 @@ from benchmarks.cases import (
     SubtractBenchmark,
     SubtractStridedBenchmark,
     SubtractPsfFromDirtyBenchmark,
+    CleanDirtiesBenchmark,
+    CleanDirtiesStridedBenchmark,
 )
 from benchmarks.cases.subtract import SubtractInPlaceBenchmark
 from benchmarks.cases.wscms import SubtractPsfFromDirtyStridedBenchmark
@@ -84,12 +89,37 @@ BENCHMARK_REGISTRY: dict[str, list[BenchmarkCase]] = {
         # Strided variants (realistic memory layouts)
         SubtractPsfFromDirtyStridedBenchmark(n_channels=16, height=512, width=512),
         SubtractPsfFromDirtyStridedBenchmark(n_channels=32, height=512, width=512),
+        # Fused clean_dirties operation
+        CleanDirtiesBenchmark(n_channels=8, height=256, width=256),
+        CleanDirtiesBenchmark(n_channels=16, height=512, width=512),
+        CleanDirtiesBenchmark(n_channels=32, height=512, width=512),
+        CleanDirtiesBenchmark(n_channels=16, height=1024, width=1024),
+        # Strided clean_dirties
+        CleanDirtiesStridedBenchmark(n_channels=16, height=512, width=512),
+        CleanDirtiesStridedBenchmark(n_channels=32, height=512, width=512),
+    ],
+}
+
+# Large-scale benchmarks (10000x10000 and bigger) - only run with --large flag
+LARGE_BENCHMARK_REGISTRY: dict[str, list[BenchmarkCase]] = {
+    "wscms": [
+        # Large-scale clean_dirties (radio astronomy scale)
+        CleanDirtiesBenchmark(n_channels=16, height=10000, width=10000),
+        CleanDirtiesBenchmark(n_channels=4, height=20000, width=20000),
     ],
 }
 
 
-def get_benchmarks(categories: Sequence[str] | None = None) -> list[BenchmarkCase]:
-    """Get benchmark cases for specified categories (or all if None)."""
+def get_benchmarks(
+    categories: Sequence[str] | None = None,
+    include_large: bool = False,
+) -> list[BenchmarkCase]:
+    """Get benchmark cases for specified categories (or all if None).
+
+    Args:
+        categories: List of categories to include, or None for all.
+        include_large: If True, include large-scale benchmarks (10000x10000+).
+    """
     if categories is None:
         categories = list(BENCHMARK_REGISTRY.keys())
 
@@ -99,6 +129,10 @@ def get_benchmarks(categories: Sequence[str] | None = None) -> list[BenchmarkCas
             print(f"Warning: Unknown category '{cat}', skipping")
             continue
         benchmarks.extend(BENCHMARK_REGISTRY[cat])
+
+        # Add large benchmarks if requested
+        if include_large and cat in LARGE_BENCHMARK_REGISTRY:
+            benchmarks.extend(LARGE_BENCHMARK_REGISTRY[cat])
 
     return benchmarks
 
@@ -204,6 +238,12 @@ def main():
         action="store_true",
         help="List available benchmarks and exit",
     )
+    parser.add_argument(
+        "--large",
+        "-L",
+        action="store_true",
+        help="Include large-scale benchmarks (10000x10000 and bigger)",
+    )
 
     args = parser.parse_args()
 
@@ -214,10 +254,16 @@ def main():
             print(f"\n{cat}:")
             for bench in benchmarks:
                 print(f"  - {bench.name}: {bench.description}")
+        if LARGE_BENCHMARK_REGISTRY:
+            print("\nLarge-scale benchmarks (--large flag):")
+            for cat, benchmarks in LARGE_BENCHMARK_REGISTRY.items():
+                print(f"\n{cat}:")
+                for bench in benchmarks:
+                    print(f"  - {bench.name}: {bench.description}")
         return 0
 
     # Get benchmarks
-    benchmarks = get_benchmarks(args.category)
+    benchmarks = get_benchmarks(args.category, include_large=args.large)
     if not benchmarks:
         print("No benchmarks to run")
         return 1
