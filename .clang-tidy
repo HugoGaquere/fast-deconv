@@ -95,7 +95,7 @@ CheckOptions:
   - key:             readability-identifier-naming.ClassConstantCase
     value:           CamelCase
   - key:             readability-identifier-naming.ClassConstantPrefix
-    value:           'k'
+    value:           ''
   - key:             readability-identifier-naming.ClassConstantSuffix
     value:           ''
   - key:             readability-identifier-naming.ClassMemberCase
@@ -123,9 +123,9 @@ CheckOptions:
   - key:             readability-identifier-naming.ConstexprMethodSuffix
     value:           ''
   - key:             readability-identifier-naming.ConstexprVariableCase
-    value:           CamelCase
+    value:           lower_case
   - key:             readability-identifier-naming.ConstexprVariablePrefix
-    value:           'k'
+    value:           ''
   - key:             readability-identifier-naming.ConstexprVariableSuffix
     value:           ''
   - key:             readability-identifier-naming.EnumCase
@@ -137,7 +137,7 @@ CheckOptions:
   - key:             readability-identifier-naming.EnumConstantCase
     value:           CamelCase
   - key:             readability-identifier-naming.EnumConstantPrefix
-    value:           'k'
+    value:           ''
   - key:             readability-identifier-naming.EnumConstantSuffix
     value:           ''
   - key:             readability-identifier-naming.FunctionCase
@@ -149,7 +149,7 @@ CheckOptions:
   - key:             readability-identifier-naming.GlobalConstantCase
     value:           CamelCase
   - key:             readability-identifier-naming.GlobalConstantPrefix
-    value:           'k'
+    value:           ''
   - key:             readability-identifier-naming.GlobalConstantSuffix
     value:           ''
   - key:             readability-identifier-naming.IgnoreFailedSplit
@@ -161,9 +161,9 @@ CheckOptions:
   - key:             readability-identifier-naming.LocalVariableSuffix
     value:           ''
   - key:             readability-identifier-naming.ConstExprVariableCase
-    value:           'CamelCase'
+    value:           'lower_case'
   - key:             readability-identifier-naming.ConstExprVariablePrefix
-    value:           'k'
+    value:           ''
   - key:             readability-identifier-naming.ConstExprVariableSuffix
     value:           ''
   - key:             readability-identifier-naming.MemberCase
@@ -191,9 +191,9 @@ CheckOptions:
   - key:             readability-identifier-naming.ProtectedMemberSuffix
     value:           '_'
   - key:             readability-identifier-naming.StaticConstantCase
-    value:           CamelCase
+    value:           lower_case
   - key:             readability-identifier-naming.StaticConstantPrefix
-    value:           'k'
+    value:           ''
   - key:             readability-identifier-naming.StaticConstantSuffix
     value:           ''
   - key:             readability-identifier-naming.StructCase

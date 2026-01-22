@@ -128,40 +128,21 @@ __global__ void subtract_kernel_cub_load(const T* __restrict__ A,
 namespace fast_deconv::matrix::detail {
 
 template <cpts::mdspan Mdspan>
-requires cpts::is_layout_stride<Mdspan>  // or cpts::is_layout_right<Mdspan>
-  void subtract_async(const Mdspan& A,
+requires cpts::is_layout_stride<Mdspan>
+  void subtract_async(core::stream_resources& resources,
+                      const Mdspan& A,
                       const Mdspan& B,
-                      Mdspan& C,
-                      core::stream_resources& resources)
+                      Mdspan& C)
 {
-  constexpr std::size_t vec_bytes = 16;  // float4
-
-  bool are_all_inner_unit_stride = util::all_inner_unit_stride(A, B, C);
-  bool are_all_aligned_for_vec   = util::all_aligned_for_vec(vec_bytes, A, B, C);
-  fmt::println("unit_stride: {}, aligned: {}", are_all_inner_unit_stride, are_all_aligned_for_vec);
-
-  if (!util::all_inner_unit_stride(A, B, C)) {
-    simple_subtract_kernel<<<CEIL_DIV(A.size(), 256), 256, 0, resources.stream>>>(A, B, C);
-    CHECK_LAST_CUDA_ERROR();
-    return;
-  }
-
-  if(util::all_aligned_for_vec(16, A, B, C)) {
-    // run with 4 float vect
-  }
-  else if(util::all_aligned_for_vec(8, A, B, C)) {
-    // run with 2 float vect
-  } else {
-    // 1 float
-  }
-
+  simple_subtract_kernel<<<CEIL_DIV(A.size(), 256), 256, 0, resources.stream>>>(A, B, C);
+  CHECK_LAST_CUDA_ERROR();
 }
 
-template <emu::cuda::device::cpts::mdspan Mdspan>
-requires cpts::is_layout_right<Mdspan> void subtract_async(const Mdspan& A,
+template <cpts::mdspan Mdspan>
+requires cpts::is_layout_right<Mdspan> void subtract_async(core::stream_resources& resources,
+                                                           const Mdspan& A,
                                                            const Mdspan& B,
-                                                           Mdspan& C,
-                                                           core::stream_resources& resources)
+                                                           Mdspan& C)
 {
   const auto stream          = resources.stream;
   const size_t size          = A.size();
@@ -179,31 +160,14 @@ requires cpts::is_layout_right<Mdspan> void subtract_async(const Mdspan& A,
 }
 
 template <cpts::mdspan Mdspan>
-requires cpts::is_layout_left<Mdspan> void subtract_async(const Mdspan& A,
+requires cpts::is_layout_left<Mdspan> void subtract_async(core::stream_resources& resources,
+                                                          const Mdspan& A,
                                                           const Mdspan& B,
-                                                          Mdspan& C,
-                                                          core::stream_resources& resources)
+                                                          Mdspan& C)
 {
   static_assert(!cpts::is_layout_left<Mdspan>,
                 "subtract_async: layout_left is not implemented yet.");
 }
 
-// void subtract_async(
-//   const float* A, const float* B, float* C, size_t size, core::stream_resources& resources)
-// {
-//   const auto stream          = resources.stream;
-//   const int items_per_thread = 4;
-//   const int block_dim        = 128;
-//   const int grid_dim         = CEIL_DIV(size / items_per_thread, block_dim);
-//
-//   subtract_kernel_cub_load<float,
-//                            block_dim,
-//                            items_per_thread,
-//                            cub::BLOCK_LOAD_VECTORIZE,
-//                            cub::BLOCK_STORE_VECTORIZE>
-//     <<<grid_dim, block_dim, 0, stream>>>(A, B, C, size);
-//
-//   CHECK_LAST_CUDA_ERROR();
-// }
 
 }  // namespace fast_deconv::matrix::detail
