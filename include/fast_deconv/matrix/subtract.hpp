@@ -1,8 +1,8 @@
 #pragma once
 
-#include "fast_deconv/core/dispatcher.hpp"
 
 #include <emu/cuda/device/mdspan.hpp>
+#include <fast_deconv/core/dispatcher.hpp>
 #include <fast_deconv/core/access_policy.hpp>
 #include <fast_deconv/core/concepts.hpp>
 #include <fast_deconv/core/kernel_traits.hpp>

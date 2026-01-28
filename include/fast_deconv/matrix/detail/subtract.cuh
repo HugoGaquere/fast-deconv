@@ -11,12 +11,12 @@
 
 #include <tuple>
 
-namespace cpts = fast_deconv::core::cpts;
-
 namespace {
 
+namespace cpts = fast_deconv::core::cpts;
+
 template <cpts::mdspan Mdspan>
-__device__ inline auto linear_to_indices(typename Mdspan::size_type lin, const Mdspan& m)
+__device__ __forceinline__ auto linear_to_indices(typename Mdspan::size_type lin, const Mdspan& m)
 {
   using size_t_   = typename Mdspan::size_type;
   using index_t   = typename Mdspan::index_type;
@@ -35,7 +35,7 @@ __device__ inline auto linear_to_indices(typename Mdspan::size_type lin, const M
 }
 
 template <typename Mdspan, std::size_t... Is>
-__device__ inline decltype(auto) at_impl(
+__device__ __forceinline__ decltype(auto) at_impl(
   Mdspan&& m,
   const std::array<typename std::remove_reference_t<Mdspan>::index_type,
                    std::remove_reference_t<Mdspan>::rank()>& idx,
@@ -45,7 +45,7 @@ __device__ inline decltype(auto) at_impl(
 }
 
 template <typename Mdspan>
-__device__ inline decltype(auto) at(
+__device__ __forceinline__ decltype(auto) at(
   Mdspan&& m,
   const std::array<typename std::remove_reference_t<Mdspan>::index_type,
                    std::remove_reference_t<Mdspan>::rank()>& idx)
@@ -98,70 +98,113 @@ __global__ void subtract_kernel_vect_load(const float* __restrict__ A,
   }
 }
 
-template <typename VectType, cpts::mdspan Mdspan>
-__device__ __inline__ VectType load(const Mdspan m, uint idx)
+template <cpts::mdspan Mdspan>
+__device__ __forceinline__ auto item_offset(uint idx, const Mdspan& m)
 {
   const auto tid_md = linear_to_indices(idx, m);
   const auto offset = std::apply([&m](auto... i) { return m.mapping()(i...); }, tid_md);
+  return offset;
+}
+
+template <typename VectType, cpts::mdspan Mdspan>
+__device__ __forceinline__ VectType load(uint idx, const Mdspan& m)
+{
+  // using item_type = Mdspan::element_type;
+  const auto offset = item_offset(idx, m);
   const auto* ptr   = m.data_handle() + offset;
-  const auto m_vect = *reinterpret_cast<const VectType*>(ptr);
-  return m_vect;
+  return *reinterpret_cast<const VectType*>(ptr);
+  // const auto m_vect = *reinterpret_cast<const VectType*>(ptr);
+  // return m_vect;
 }
 
 template <typename VectType, typename ScalarType, int ITEMS_PER_THREAD, cpts::mdspan Mdspan>
-__global__ void subtract_kernel_vect_load_stride_2d(const Mdspan A, const Mdspan B, Mdspan C)
+__global__ void subtract_kernel_vect_load_stride_2d(
+  const Mdspan A, const Mdspan B, Mdspan C, uint nb_rows, uint nb_cols)
 {
-  constexpr int rank          = Mdspan::rank();
-  const size_t nb_col_per_dim = A.extent(rank - 1);
-  const size_t nb_rows        = A.size() / nb_col_per_dim;
-
   const size_t row = blockIdx.y + gridDim.y * blockIdx.z;
-  if (row >= nb_rows) return;
+  const size_t col = blockIdx.x * blockDim.x + threadIdx.x * ITEMS_PER_THREAD;
+  if (row >= nb_rows || col >= nb_cols) return;
 
-  const size_t vec_col = blockIdx.x * blockDim.x + threadIdx.x;
-  const size_t col     = vec_col * ITEMS_PER_THREAD;
-  if (col >= nb_col_per_dim) return;
+  const int rem_in_row = static_cast<int>(nb_cols - col);
+  const int lanes      = min(ITEMS_PER_THREAD, rem_in_row);
+  const size_t lin     = row * nb_cols + col;
 
-  const size_t lin  = row * nb_col_per_dim + col;
+  // Compute indices once
   const auto tid_md = linear_to_indices(lin, A);
 
-  const auto a_offset = std::apply([&](auto... i) { return A.mapping()(i...); }, tid_md);
-  const auto* a_ptr   = A.data_handle() + a_offset;
+  // Compute all pointers upfront
+  const auto* a_ptr = A.data_handle() + std::apply([&](auto... i) { return A.mapping()(i...); }, tid_md);
+  const auto* b_ptr = B.data_handle() + std::apply([&](auto... i) { return B.mapping()(i...); }, tid_md);
+  auto* c_ptr       = C.data_handle() + std::apply([&](auto... i) { return C.mapping()(i...); }, tid_md);
 
-  const auto b_offset = std::apply([&](auto... i) { return B.mapping()(i...); }, tid_md);
-  const auto* b_ptr   = B.data_handle() + b_offset;
-
-  const auto c_offset = std::apply([&](auto... i) { return C.mapping()(i...); }, tid_md);
-  auto* c_ptr         = C.data_handle() + c_offset;
-
+  // Load vect
   const auto a_vect = *reinterpret_cast<const VectType*>(a_ptr);
   const auto b_vect = *reinterpret_cast<const VectType*>(b_ptr);
   VectType c_vect;
 
+  // Convert to scalar ptr in order to use the []operator
   const auto* a_scalar = reinterpret_cast<const ScalarType*>(&a_vect);
   const auto* b_scalar = reinterpret_cast<const ScalarType*>(&b_vect);
   auto* c_scalar       = reinterpret_cast<ScalarType*>(&c_vect);
 
-  int rem_in_row = int(nb_col_per_dim - col);
-  int lanes      = min(ITEMS_PER_THREAD, rem_in_row);
-
+  // Apply op
 #pragma unroll
   for (int j = 0; j < ITEMS_PER_THREAD; j++) {
     if (j < lanes)
       c_scalar[j] = a_scalar[j] - b_scalar[j];
     else
-      c_scalar[j] = 0;  // won't be stored
+      c_scalar[j] = 0;
   }
 
-  // masked store
+  // Store the result
   if (lanes == ITEMS_PER_THREAD)
     *reinterpret_cast<VectType*>(c_ptr) = c_vect;
   else {
     for (int j = 0; j < lanes; j++)
       c_ptr[j] = c_scalar[j];
   }
-}
 
+  // OLD
+
+  // const size_t lin     = row * nb_cols + col;
+  // const auto tid_md = linear_to_indices(lin, A);
+  //
+  // const auto a_offset = std::apply([&](auto... i) { return A.mapping()(i...); }, tid_md);
+  // const auto* a_ptr   = A.data_handle() + a_offset;
+  //
+  // const auto b_offset = std::apply([&](auto... i) { return B.mapping()(i...); }, tid_md);
+  // const auto* b_ptr   = B.data_handle() + b_offset;
+  //
+  // const auto c_offset = std::apply([&](auto... i) { return C.mapping()(i...); }, tid_md);
+  // auto* c_ptr         = C.data_handle() + c_offset;
+  //
+  // const auto a_vect = *reinterpret_cast<const VectType*>(a_ptr);
+  // const auto b_vect = *reinterpret_cast<const VectType*>(b_ptr);
+  // VectType c_vect;
+  //
+  // const auto* a_scalar = reinterpret_cast<const ScalarType*>(&a_vect);
+  // const auto* b_scalar = reinterpret_cast<const ScalarType*>(&b_vect);
+  // auto* c_scalar       = reinterpret_cast<ScalarType*>(&c_vect);
+  //
+  //   int rem_in_row = int(nb_cols - col);
+  //   int lanes      = min(ITEMS_PER_THREAD, rem_in_row);
+  //
+  // #pragma unroll
+  //   for (int j = 0; j < ITEMS_PER_THREAD; j++) {
+  //     if (j < lanes)
+  //       c_scalar[j] = a_scalar[j] - b_scalar[j];
+  //     else
+  //       c_scalar[j] = 0;  // won't be stored
+  //   }
+  //
+  //   // masked store
+  //   if (lanes == ITEMS_PER_THREAD)
+  //     *reinterpret_cast<VectType*>(c_ptr) = c_vect;
+  //   else {
+  //     for (int j = 0; j < lanes; j++)
+  //       c_ptr[j] = c_scalar[j];
+  //   }
+}
 
 template <typename T,
           int BLOCK_THREADS,
@@ -199,53 +242,37 @@ __global__ void subtract_kernel_cub_load(const T* __restrict__ A,
 
 namespace fast_deconv::matrix::detail {
 
-template <cpts::mdspan Mdspan>
+template <core::cpts::mdspan Mdspan>
 void subtract_async(core::AccessPolicy access_policy,
                     core::stream_resources& resources,
                     const Mdspan& A,
                     const Mdspan& B,
                     Mdspan& C)
 {
-  static_assert(!cpts::is_layout_left<Mdspan>,
+  static_assert(!core::cpts::is_layout_left<Mdspan>,
                 "subtract_async: layout_left is not implemented yet.");
 
+  constexpr int rank = Mdspan::rank();
+  const size_t nb_cols = A.extent(rank - 1);
+  const size_t nb_rows = A.size() / nb_cols;
+
   if (access_policy.load_policy == core::AccessType::Scalar) {
-    // fmt::println("Scalar");
     simple_subtract_kernel<<<CEIL_DIV(A.size(), 256), 256, 0, resources.stream>>>(A, B, C);
   } else if (access_policy.load_policy == core::AccessType::Vec2) {
-    // fmt::println("Vect2");
     constexpr int items_per_thread = 2;
-    const size_t nb_col_per_dim    = A.extent(Mdspan::rank() - 1);
-    const size_t nb_rows           = A.size() / nb_col_per_dim;
-    const size_t nb_vec_cols       = CEIL_DIV(nb_col_per_dim, items_per_thread);
+    const size_t nb_vec_cols       = CEIL_DIV(nb_cols, items_per_thread);
 
     dim3 block(256, 1, 1);
-    dim3 grid(CEIL_DIV(nb_vec_cols, block.x),
-              static_cast<unsigned int>(nb_rows < 65535 ? nb_rows : 65535),
-              static_cast<unsigned int>(CEIL_DIV(nb_rows, nb_rows < 65535 ? nb_rows : 65535)));
-    subtract_kernel_vect_load_stride_2d<float2, float, items_per_thread>
-      <<<grid, block, 0, resources.stream>>>(A, B, C);
+    dim3 grid(CEIL_DIV(nb_vec_cols, block.x), static_cast<unsigned int>(nb_rows < 65535 ? nb_rows : 65535), static_cast<unsigned int>(CEIL_DIV(nb_rows, nb_rows < 65535 ? nb_rows : 65535)));
+    subtract_kernel_vect_load_stride_2d<float2, float, items_per_thread> <<<grid, block, 0, resources.stream>>>(A, B, C, nb_rows, nb_cols);
   } else if (access_policy.load_policy == core::AccessType::Vec4) {
-    // fmt::println("Vect4");
     constexpr int items_per_thread = 4;
-    const size_t nb_col_per_dim    = A.extent(Mdspan::rank() - 1);
-    const size_t nb_rows           = A.size() / nb_col_per_dim;
-    const size_t nb_vec_cols       = CEIL_DIV(nb_col_per_dim, items_per_thread);
+    const size_t nb_vec_cols       = CEIL_DIV(nb_cols, items_per_thread);
 
     dim3 block(256, 1, 1);
-    dim3 grid(CEIL_DIV(nb_vec_cols, block.x),
-              static_cast<unsigned int>(nb_rows < 65535 ? nb_rows : 65535),
-              static_cast<unsigned int>(CEIL_DIV(nb_rows, nb_rows < 65535 ? nb_rows : 65535)));
-    subtract_kernel_vect_load_stride_2d<float4, float, items_per_thread>
-      <<<grid, block, 0, resources.stream>>>(A, B, C);
+    dim3 grid(CEIL_DIV(nb_vec_cols, block.x), static_cast<unsigned int>(nb_rows < 65535 ? nb_rows : 65535), static_cast<unsigned int>(CEIL_DIV(nb_rows, nb_rows < 65535 ? nb_rows : 65535)));
+    subtract_kernel_vect_load_stride_2d<float4, float, items_per_thread> <<<grid, block, 0, resources.stream>>>(A, B, C, nb_rows, nb_cols);
   }
-
-  // else if (access_policy.load_policy == core::AccessType::Vec2)
-  //   subtract_kernel_vect_load<float2, 2><<<CEIL_DIV(A.size(), 256), 256, 0, resources.stream>>>(
-  //     A.data_handle(), B.data_handle(), C.data_handle(), A.size());
-  // else if (access_policy.load_policy == core::AccessType::Vec4)
-  //   subtract_kernel_vect_load<float4, 4><<<CEIL_DIV(A.size(), 256), 256, 0, resources.stream>>>(
-  //     A.data_handle(), B.data_handle(), C.data_handle(), A.size());
 
   CHECK_LAST_CUDA_ERROR();
 }

@@ -1,8 +1,9 @@
 #pragma once
 
-#include "fast_deconv/core/stream_resources.hpp"
-#include <fast_deconv/core/concepts.hpp>
+#include <fast_deconv/core/stream_resources.hpp>
+#include <fast_deconv/core/dispatcher.hpp>
 #include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/kernel_traits.hpp>
 #include <fast_deconv/algorithm/detail/wscms_op.cuh>
 
 namespace fast_deconv::algo::wscms {
@@ -22,8 +23,8 @@ void subtract_psf_from_dirty_async(
     core::stream_resources& resources)
 {
   // TODO: check psf.extent(0) == dirty.extent(0) == coeffs.size()
-
-  detail::subtract_psf_from_dirty_async(psf, dirty, coeffs, out, gain, resources);
+  core::dispatch<core::subtract_psf_from_dirty_tag>(resources, detail::subtract_psf_from_dirty_async, psf, dirty, coeffs, out, gain);
+  // detail::subtract_psf_from_dirty_async(psf, dirty, coeffs, out, gain, resources);
 }
 
 // void subtract_psf_from_dirty(
