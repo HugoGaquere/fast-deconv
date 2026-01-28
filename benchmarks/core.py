@@ -127,6 +127,7 @@ def benchmark_gpu(
     iterations: int = 200,
     use_nvtx: bool = True,
     metadata: dict[str, Any] | None = None,
+    stream: cp.cuda.Stream | None = None,
 ) -> BenchmarkResult:
     """
     Benchmark a GPU function using CUDA events.
@@ -138,14 +139,19 @@ def benchmark_gpu(
         iterations: Number of timed iterations
         use_nvtx: Whether to wrap execution in NVTX markers
         metadata: Optional metadata to attach to results
+        stream: CuPy stream for event recording and synchronization.
+                If None, uses the null stream.
 
     Returns:
         BenchmarkResult with timing statistics
     """
+    if stream is None:
+        stream = cp.cuda.Stream.null
+
     # Warm-up phase
     for _ in range(warmup):
         fn()
-    cp.cuda.Stream.null.synchronize()
+    stream.synchronize()
 
     # Timed runs with CUDA events
     times: list[float] = []
@@ -154,13 +160,13 @@ def benchmark_gpu(
         start = cp.cuda.Event()
         end = cp.cuda.Event()
 
-        start.record()
+        start.record(stream)
         if use_nvtx:
             with nvtx_range(name):
                 fn()
         else:
             fn()
-        end.record()
+        end.record(stream)
 
         end.synchronize()
         times.append(cp.cuda.get_elapsed_time(start, end))
@@ -181,6 +187,7 @@ def compare(
     iterations: int = 200,
     use_nvtx: bool = True,
     metadata: dict[str, Any] | None = None,
+    stream: cp.cuda.Stream | None = None,
 ) -> ComparisonResult:
     """
     Compare two GPU implementations.
@@ -194,6 +201,7 @@ def compare(
         iterations: Number of timed iterations
         use_nvtx: Whether to use NVTX markers
         metadata: Optional metadata for both results
+        stream: CuPy stream for event recording and synchronization.
 
     Returns:
         ComparisonResult with speedup analysis
@@ -205,6 +213,7 @@ def compare(
         iterations=iterations,
         use_nvtx=use_nvtx,
         metadata=metadata,
+        stream=stream,
     )
 
     contender = benchmark_gpu(
@@ -214,6 +223,7 @@ def compare(
         iterations=iterations,
         use_nvtx=use_nvtx,
         metadata=metadata,
+        stream=stream,
     )
 
     return ComparisonResult(baseline=baseline, contender=contender)

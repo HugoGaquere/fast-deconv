@@ -72,10 +72,43 @@ BENCHMARK_REGISTRY: dict[str, list[BenchmarkCase]] = {
         SubtractBenchmark(shape=(2048, 2048)),
         SubtractBenchmark(shape=(256, 256, 256)),
         SubtractBenchmark(shape=(64, 64, 64, 64)),
-        # Strided arrays
-        SubtractStridedBenchmark(shape=(512, 512), stride_factor=2),
-        SubtractStridedBenchmark(shape=(1024, 1024), stride_factor=2),
-        SubtractStridedBenchmark(shape=(128, 128, 128), stride_factor=2),
+        # =================================================================
+        # Strided arrays (contiguous inner stride) - 1D to 6D
+        # Testing various aspect ratios: square, wide, tall configurations
+        # =================================================================
+        # --- 1D strided views ---
+        SubtractStridedBenchmark(view_shape=(1024,), padding=16, label="small"),
+        SubtractStridedBenchmark(view_shape=(1024 * 1024,), padding=16, label="large"),
+        # --- 2D strided views ---
+        # Square
+        SubtractStridedBenchmark(view_shape=(512, 512), padding=16, label="square"),
+        SubtractStridedBenchmark(view_shape=(1024, 1024), padding=16, label="square"),
+        # Wide (more columns than rows)
+        SubtractStridedBenchmark(view_shape=(256, 2048), padding=16, label="wide_1x8"),
+        SubtractStridedBenchmark(view_shape=(512, 2048), padding=16, label="wide_1x4"),
+        SubtractStridedBenchmark(view_shape=(128, 8192), padding=16, label="wide_1x64"),
+        # Tall (more rows than columns)
+        SubtractStridedBenchmark(view_shape=(2048, 256), padding=16, label="tall_8x1"),
+        SubtractStridedBenchmark(view_shape=(2048, 512), padding=16, label="tall_4x1"),
+        SubtractStridedBenchmark(view_shape=(8192, 128), padding=16, label="tall_64x1"),
+        # --- 3D strided views ---
+        SubtractStridedBenchmark(view_shape=(128, 128, 128), padding=8, label="cube"),
+        SubtractStridedBenchmark(view_shape=(64, 64, 512), padding=8, label="deep"),
+        SubtractStridedBenchmark(view_shape=(32, 256, 256), padding=8, label="flat"),
+        SubtractStridedBenchmark(view_shape=(256, 64, 64), padding=8, label="tall"),
+        # --- 4D strided views ---
+        SubtractStridedBenchmark(view_shape=(32, 32, 64, 64), padding=4, label="balanced"),
+        SubtractStridedBenchmark(view_shape=(16, 16, 128, 128), padding=4, label="image_batch"),
+        SubtractStridedBenchmark(view_shape=(64, 64, 32, 32), padding=4, label="channel_heavy"),
+        SubtractStridedBenchmark(view_shape=(8, 32, 64, 256), padding=4, label="varied"),
+        # --- 5D strided views ---
+        SubtractStridedBenchmark(view_shape=(8, 16, 32, 32, 32), padding=2, label="balanced"),
+        SubtractStridedBenchmark(view_shape=(4, 8, 64, 64, 64), padding=2, label="spatial_heavy"),
+        SubtractStridedBenchmark(view_shape=(16, 32, 16, 16, 32), padding=2, label="channel_heavy"),
+        # --- 6D strided views ---
+        SubtractStridedBenchmark(view_shape=(4, 8, 8, 16, 16, 16), padding=2, label="balanced"),
+        SubtractStridedBenchmark(view_shape=(2, 4, 8, 16, 32, 64), padding=2, label="increasing"),
+        SubtractStridedBenchmark(view_shape=(8, 8, 8, 8, 8, 32), padding=2, label="uniform_inner"),
         # In-place operations
         SubtractInPlaceBenchmark(shape=(1024, 1024)),
         SubtractInPlaceBenchmark(shape=(2048, 2048)),
@@ -102,6 +135,27 @@ BENCHMARK_REGISTRY: dict[str, list[BenchmarkCase]] = {
 
 # Large-scale benchmarks (10000x10000 and bigger) - only run with --large flag
 LARGE_BENCHMARK_REGISTRY: dict[str, list[BenchmarkCase]] = {
+    "subtract": [
+        # =================================================================
+        # Large-scale strided benchmarks (radio astronomy / HPC scale)
+        # =================================================================
+        # --- 2D large-scale ---
+        SubtractStridedBenchmark(view_shape=(10000, 10000), padding=32, label="10k_square"),
+        SubtractStridedBenchmark(view_shape=(20000, 20000), padding=32, label="20k_square"),
+        SubtractStridedBenchmark(view_shape=(5000, 40000), padding=32, label="20k_wide"),
+        SubtractStridedBenchmark(view_shape=(40000, 5000), padding=32, label="20k_tall"),
+        # --- 3D large-scale ---
+        SubtractStridedBenchmark(view_shape=(512, 512, 512), padding=16, label="512_cube"),
+        SubtractStridedBenchmark(view_shape=(256, 1024, 1024), padding=16, label="large_flat"),
+        SubtractStridedBenchmark(view_shape=(1024, 512, 512), padding=16, label="large_tall"),
+        # --- 4D large-scale ---
+        SubtractStridedBenchmark(view_shape=(64, 128, 256, 256), padding=8, label="large_4d"),
+        SubtractStridedBenchmark(view_shape=(32, 64, 512, 512), padding=8, label="large_4d_spatial"),
+        # --- 5D large-scale ---
+        SubtractStridedBenchmark(view_shape=(16, 32, 64, 128, 128), padding=4, label="large_5d"),
+        # --- 6D large-scale ---
+        SubtractStridedBenchmark(view_shape=(8, 16, 32, 64, 64, 64), padding=4, label="large_6d"),
+    ],
     "wscms": [
         # Large-scale clean_dirties (radio astronomy scale)
         CleanDirtiesBenchmark(n_channels=16, height=10000, width=10000),

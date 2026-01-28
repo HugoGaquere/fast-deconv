@@ -46,7 +46,7 @@ class BenchmarkCase(ABC):
     Base class for benchmark cases.
 
     Subclasses must implement:
-    - setup(): Prepare data and return (cupy_fn, fast_deconv_fn)
+    - setup(stream): Prepare data and return (cupy_fn, fast_deconv_fn)
     - name: A descriptive name for the benchmark
     - description: What this benchmark tests
 
@@ -61,9 +61,13 @@ class BenchmarkCase(ABC):
     description: str = field(init=False)
 
     @abstractmethod
-    def setup(self) -> tuple[Callable[[], Any], Callable[[], Any]]:
+    def setup(self, stream: cp.cuda.Stream) -> tuple[Callable[[], Any], Callable[[], Any]]:
         """
         Set up the benchmark and return callables.
+
+        Args:
+            stream: CuPy stream to use for GPU operations. Use this stream
+                    when creating stream_resources via from_cupy_stream().
 
         Returns:
             Tuple of (cupy_fn, fast_deconv_fn) where each is a
@@ -88,7 +92,10 @@ class BenchmarkCase(ABC):
         if config is None:
             config = BenchmarkConfig()
 
-        cupy_fn, fast_deconv_fn = self.setup()
+        # Create a dedicated stream for this benchmark
+        stream = cp.cuda.Stream(non_blocking=True)
+
+        cupy_fn, fast_deconv_fn = self.setup(stream)
 
         return compare(
             baseline_fn=cupy_fn,
@@ -99,6 +106,7 @@ class BenchmarkCase(ABC):
             iterations=config.iterations,
             use_nvtx=config.use_nvtx,
             metadata=self.get_metadata(),
+            stream=stream,
         )
 
     def validate(self) -> bool:
@@ -108,14 +116,17 @@ class BenchmarkCase(ABC):
         Returns:
             True if outputs match, False otherwise
         """
-        cupy_fn, fast_deconv_fn = self.setup()
+        # Create a dedicated stream for validation
+        stream = cp.cuda.Stream(non_blocking=True)
+
+        cupy_fn, fast_deconv_fn = self.setup(stream)
 
         # Run both and compare
-        cp.cuda.Stream.null.synchronize()
+        stream.synchronize()
         cupy_result = cupy_fn()
-        cp.cuda.Stream.null.synchronize()
+        stream.synchronize()
         fast_deconv_result = fast_deconv_fn()
-        cp.cuda.Stream.null.synchronize()
+        stream.synchronize()
 
         return self._compare_results(cupy_result, fast_deconv_result)
 

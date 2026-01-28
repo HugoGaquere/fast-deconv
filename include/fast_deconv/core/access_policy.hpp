@@ -8,6 +8,7 @@ namespace fast_deconv::core {
 template <core::cpts::mdspan Mdspan>
 constexpr bool inner_unit_stride(const Mdspan& m)
 {
+  // fmt::println("strides {} {}", m.mapping().stride(0), m.mapping().stride(1));
   if constexpr (cpts::is_layout_right<Mdspan>) {
     return true;
   } else if constexpr (cpts::is_layout_left<Mdspan>) {
@@ -15,6 +16,24 @@ constexpr bool inner_unit_stride(const Mdspan& m)
   } else {
     constexpr int R = Mdspan::rank();
     return m.mapping().stride(R - 1) == 1;
+  }
+}
+
+template <core::cpts::mdspan Mdspan>
+bool rows_aligned_for_vec(const Mdspan& m, std::size_t vec_bytes)
+{
+  if constexpr (cpts::is_layout_right<Mdspan>) {
+    return true;
+  } else if constexpr (!cpts::is_layout_stride<Mdspan>) {
+    return false;
+  } else {
+    constexpr int R = Mdspan::rank();
+    constexpr std::size_t elem_size = sizeof(typename Mdspan::element_type);
+    for (int d = 0; d < R - 1; ++d) {
+      const std::size_t stride_bytes = static_cast<std::size_t>(m.mapping().stride(d)) * elem_size;
+      if ((stride_bytes & (vec_bytes - 1)) != 0) return false;
+    }
+    return true;
   }
 }
 
@@ -72,21 +91,37 @@ constexpr AccessPolicy determine_policy_mdspan(const Mdspan& mdspan)
   bool can_vectorize = false;
   if constexpr (cpts::is_layout_right<Mdspan>) {
     can_vectorize = true;
+    // fmt::println("is_layout_right");
   } else if constexpr (cpts::is_layout_stride<Mdspan>) {
-    can_vectorize = inner_unit_stride(mdspan);
+    // fmt::println("is_layout_stride");
+    const bool unit_stride = inner_unit_stride(mdspan);
+    // if (!unit_stride) // fmt::println("no vectorize: innermost stride != 1");
+    can_vectorize = unit_stride;
+  } else {
+    // fmt::println("no vectorize: unsupported layout");
   }
 
   if (can_vectorize) {
-    if (is_aligned_for_vec(static_cast<int>(AccessType::Vec4), mdspan))
+    // fmt::println("can_vectorize");
+    constexpr std::size_t elem_size = sizeof(typename Mdspan::element_type);
+    const std::size_t vec4_bytes = static_cast<std::size_t>(AccessType::Vec4) * elem_size;
+    const std::size_t vec2_bytes = static_cast<std::size_t>(AccessType::Vec2) * elem_size;
+    if (is_aligned_for_vec(vec4_bytes, mdspan) && rows_aligned_for_vec(mdspan, vec4_bytes))
       return {
         .load_policy  = AccessType::Vec4,
         .store_policy = AccessType::Vec4,
       };
-    if (is_aligned_for_vec(static_cast<int>(AccessType::Vec2), mdspan))
+    if (is_aligned_for_vec(vec2_bytes, mdspan) && rows_aligned_for_vec(mdspan, vec2_bytes))
       return {
         .load_policy  = AccessType::Vec2,
         .store_policy = AccessType::Vec2,
       };
+    // if (!rows_aligned_for_vec(mdspan, vec4_bytes))
+      // fmt::println("no vectorize: row starts not aligned for vec4");
+    // if (!rows_aligned_for_vec(mdspan, vec2_bytes))
+      // fmt::println("no vectorize: row starts not aligned for vec2");
+    // else
+      // fmt::println("no vectorize: base pointer alignment insufficient");
   }
 
   // fallback to scalar

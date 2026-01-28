@@ -40,7 +40,7 @@ class SubtractPsfFromDirtyBenchmark(BenchmarkCase):
             f"PSF subtraction ({self.n_channels}ch x {self.height}x{self.width})"
         )
 
-    def setup(self) -> tuple[Callable[[], Any], Callable[[], Any]]:
+    def setup(self, stream: cp.cuda.Stream) -> tuple[Callable[[], Any], Callable[[], Any]]:
         shape = (self.n_channels, self.n_pol, self.height, self.width)
 
         # Create 4D arrays with an extra element in last dim to create strided views
@@ -61,22 +61,22 @@ class SubtractPsfFromDirtyBenchmark(BenchmarkCase):
         coeffs = cp.random.randn(self.n_channels, dtype=self.dtype)
 
         gain = self.gain
-        resources = fd.stream_resources()
+        resources = fd.stream_resources.from_cupy_stream(stream)
 
         def cupy_fn():
-            # CuPy equivalent: broadcasting coeffs across spatial dims
-            # coeffs shape: (nch,) -> (nch, 1, 1, 1) for broadcasting
-            coeffs_broadcast = coeffs[:, cp.newaxis, cp.newaxis, cp.newaxis]
-            cp.subtract(
-                dirty, psf * coeffs_broadcast * gain, out=out_cupy
-            )
+            with stream:
+                # CuPy equivalent: broadcasting coeffs across spatial dims
+                # coeffs shape: (nch,) -> (nch, 1, 1, 1) for broadcasting
+                coeffs_broadcast = coeffs[:, cp.newaxis, cp.newaxis, cp.newaxis]
+                cp.subtract(
+                    dirty, psf * coeffs_broadcast * gain, out=out_cupy
+                )
             return out_cupy
 
         def fast_deconv_fn():
             fd.wscms.subtract_psf_from_dirty_async(
                 psf, dirty, coeffs, out_fd, gain, resources
             )
-            cp.cuda.runtime.deviceSynchronize()
             return out_fd
 
         return cupy_fn, fast_deconv_fn
@@ -119,7 +119,7 @@ class SubtractPsfFromDirtyStridedBenchmark(BenchmarkCase):
             f"PSF subtraction strided ({self.n_channels}ch x {self.height}x{self.width})"
         )
 
-    def setup(self) -> tuple[Callable[[], Any], Callable[[], Any]]:
+    def setup(self, stream: cp.cuda.Stream) -> tuple[Callable[[], Any], Callable[[], Any]]:
         # Create larger arrays and slice to get strided views
         full_shape = (
             self.n_channels * self.stride_factor,
@@ -142,20 +142,20 @@ class SubtractPsfFromDirtyStridedBenchmark(BenchmarkCase):
 
         coeffs = cp.random.randn(self.n_channels, dtype=self.dtype)
         gain = self.gain
-        resources = fd.stream_resources()
+        resources = fd.stream_resources.from_cupy_stream(stream)
 
         def cupy_fn():
-            coeffs_broadcast = coeffs[:, cp.newaxis, cp.newaxis, cp.newaxis]
-            cp.subtract(
-                dirty, psf * coeffs_broadcast * gain, out=out_cupy
-            )
+            with stream:
+                coeffs_broadcast = coeffs[:, cp.newaxis, cp.newaxis, cp.newaxis]
+                cp.subtract(
+                    dirty, psf * coeffs_broadcast * gain, out=out_cupy
+                )
             return out_cupy
 
         def fast_deconv_fn():
             fd.wscms.subtract_psf_from_dirty_async(
                 psf, dirty, coeffs, out_fd, gain, resources
             )
-            cp.cuda.runtime.deviceSynchronize()
             return out_fd
 
         return cupy_fn, fast_deconv_fn
@@ -204,7 +204,7 @@ class CleanDirtiesBenchmark(BenchmarkCase):
             f"Clean dirties fused ({self.n_channels}ch x {self.height}x{self.width})"
         )
 
-    def setup(self) -> tuple[Callable[[], Any], Callable[[], Any]]:
+    def setup(self, stream: cp.cuda.Stream) -> tuple[Callable[[], Any], Callable[[], Any]]:
         shape = (self.n_channels, self.n_pol, self.height, self.width)
 
         # Create padded arrays to get strided views (required by the kernel)
@@ -230,14 +230,15 @@ class CleanDirtiesBenchmark(BenchmarkCase):
 
         coeffs = cp.random.randn(self.n_channels, dtype=self.dtype)
         gain = self.gain
-        resources = fd.stream_resources()
+        resources = fd.stream_resources.from_cupy_stream(stream)
 
         def cupy_fn():
-            # Operation 1: dirty -= psf * coeffs * gain
-            coeffs_broadcast = coeffs[:, cp.newaxis, cp.newaxis, cp.newaxis]
-            dirty_cupy[...] -= psf * coeffs_broadcast * gain
-            # Operation 2: scaled_dirty -= psf_2 * gain * mask
-            scaled_dirty_cupy[...] -= psf_2 * gain * mask
+            with stream:
+                # Operation 1: dirty -= psf * coeffs * gain
+                coeffs_broadcast = coeffs[:, cp.newaxis, cp.newaxis, cp.newaxis]
+                dirty_cupy[...] -= psf * coeffs_broadcast * gain
+                # Operation 2: scaled_dirty -= psf_2 * gain * mask
+                scaled_dirty_cupy[...] -= psf_2 * gain * mask
             return (dirty_cupy, scaled_dirty_cupy)
 
         def fast_deconv_fn():
@@ -245,7 +246,6 @@ class CleanDirtiesBenchmark(BenchmarkCase):
                 psf, psf_2, dirty_fd, scaled_dirty_fd,
                 coeffs, mask, gain, resources
             )
-            cp.cuda.runtime.deviceSynchronize()
             return (dirty_fd, scaled_dirty_fd)
 
         return cupy_fn, fast_deconv_fn
@@ -299,7 +299,7 @@ class CleanDirtiesStridedBenchmark(BenchmarkCase):
             f"Clean dirties strided ({self.n_channels}ch x {self.height}x{self.width})"
         )
 
-    def setup(self) -> tuple[Callable[[], Any], Callable[[], Any]]:
+    def setup(self, stream: cp.cuda.Stream) -> tuple[Callable[[], Any], Callable[[], Any]]:
         # Create larger arrays and slice to get strided views
         sf = self.stride_factor
         full_shape = (
@@ -328,12 +328,13 @@ class CleanDirtiesStridedBenchmark(BenchmarkCase):
 
         coeffs = cp.random.randn(self.n_channels, dtype=self.dtype)
         gain = self.gain
-        resources = fd.stream_resources()
+        resources = fd.stream_resources.from_cupy_stream(stream)
 
         def cupy_fn():
-            coeffs_broadcast = coeffs[:, cp.newaxis, cp.newaxis, cp.newaxis]
-            dirty_cupy[...] -= psf * coeffs_broadcast * gain
-            scaled_dirty_cupy[...] -= psf_2 * gain * mask
+            with stream:
+                coeffs_broadcast = coeffs[:, cp.newaxis, cp.newaxis, cp.newaxis]
+                dirty_cupy[...] -= psf * coeffs_broadcast * gain
+                scaled_dirty_cupy[...] -= psf_2 * gain * mask
             return (dirty_cupy, scaled_dirty_cupy)
 
         def fast_deconv_fn():
@@ -341,7 +342,6 @@ class CleanDirtiesStridedBenchmark(BenchmarkCase):
                 psf, psf_2, dirty_fd, scaled_dirty_fd,
                 coeffs, mask, gain, resources
             )
-            cp.cuda.runtime.deviceSynchronize()
             return (dirty_fd, scaled_dirty_fd)
 
         return cupy_fn, fast_deconv_fn

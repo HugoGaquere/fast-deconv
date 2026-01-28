@@ -28,17 +28,18 @@ class ArgmaxBenchmark(BenchmarkCase):
         self.name = f"argmax_{len(self.shape)}d"
         self.description = f"Find maximum element in {len(self.shape)}D array"
 
-    def setup(self) -> tuple[Callable[[], Any], Callable[[], Any]]:
+    def setup(self, stream: cp.cuda.Stream) -> tuple[Callable[[], Any], Callable[[], Any]]:
         # Generate random data
         data = cp.random.randn(*self.shape, dtype=self.dtype)
         # Full mask (all True = no masking)
         mask = cp.ones(self.shape, dtype=cp.bool_)
 
-        resources = fd.stream_resources()
+        resources = fd.stream_resources.from_cupy_stream(stream)
 
         def cupy_fn():
-            idx = int(cp.argmax(data))
-            val = float(data.flat[idx])
+            with stream:
+                idx = int(cp.argmax(data))
+                val = float(data.flat[idx])
             return idx, val
 
         def fast_deconv_fn():
@@ -68,17 +69,18 @@ class ArgmaxAbsBenchmark(BenchmarkCase):
         self.name = f"argmax_abs_{len(self.shape)}d"
         self.description = f"Find maximum absolute value in {len(self.shape)}D array"
 
-    def setup(self) -> tuple[Callable[[], Any], Callable[[], Any]]:
+    def setup(self, stream: cp.cuda.Stream) -> tuple[Callable[[], Any], Callable[[], Any]]:
         # Generate random data with negative values
         data = cp.random.randn(*self.shape, dtype=self.dtype) * 10
         mask = cp.ones(self.shape, dtype=cp.bool_)
 
-        resources = fd.stream_resources()
+        resources = fd.stream_resources.from_cupy_stream(stream)
 
         def cupy_fn():
-            abs_data = cp.abs(data)
-            idx = int(cp.argmax(abs_data))
-            val = float(abs_data.flat[idx])  # Return absolute value to match fast_deconv
+            with stream:
+                abs_data = cp.abs(data)
+                idx = int(cp.argmax(abs_data))
+                val = float(abs_data.flat[idx])  # Return absolute value to match fast_deconv
             return idx, val
 
         def fast_deconv_fn():
@@ -112,18 +114,19 @@ class MaskedArgmaxBenchmark(BenchmarkCase):
             f"Find maximum in {len(self.shape)}D array with {self.mask_ratio:.0%} masked"
         )
 
-    def setup(self) -> tuple[Callable[[], Any], Callable[[], Any]]:
+    def setup(self, stream: cp.cuda.Stream) -> tuple[Callable[[], Any], Callable[[], Any]]:
         data = cp.random.randn(*self.shape, dtype=self.dtype)
         # Random mask
         mask = cp.random.rand(*self.shape) > self.mask_ratio
 
-        resources = fd.stream_resources()
+        resources = fd.stream_resources.from_cupy_stream(stream)
 
         def cupy_fn():
-            # CuPy approach: set masked values to -inf
-            masked_data = cp.where(mask, data, -cp.inf)
-            idx = int(cp.argmax(masked_data))
-            val = float(data.flat[idx])
+            with stream:
+                # CuPy approach: set masked values to -inf
+                masked_data = cp.where(mask, data, -cp.inf)
+                idx = int(cp.argmax(masked_data))
+                val = float(data.flat[idx])
             return idx, val
 
         def fast_deconv_fn():

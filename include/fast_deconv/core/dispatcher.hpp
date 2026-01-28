@@ -20,12 +20,12 @@ void dispatch(stream_resources& resources, F&& function, Mdspans&&... mdspans)
   // Load / Store policy
   AccessPolicy access_policy = determine_policy<KernelTag>(mdspans...);
 
-  fmt::println("DISPATCHER");
-  fmt::println("access_policy  {} {}",
-               static_cast<int>(access_policy.load_policy),
-               static_cast<int>(access_policy.store_policy));
+  // fmt::println("DISPATCHER");
+  // fmt::println("access_policy  {} {}",
+  //              static_cast<int>(access_policy.load_policy),
+  //              static_cast<int>(access_policy.store_policy));
 
-  function(resources, std::forward<Mdspans>(mdspans)...);
+  function(access_policy, resources, std::forward<Mdspans>(mdspans)...);
 
 }
 
