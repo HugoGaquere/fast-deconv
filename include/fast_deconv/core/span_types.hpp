@@ -8,6 +8,14 @@ template <std::size_t N> using dims = emu::dextents<std::size_t, N>;
 // Layout right
 template <typename T, std::size_t N> using mdspan = emu::cuda::device::mdspan<T, dims<N>, emu::layout_right>;
 
+// Generic typed span aliases (layout_right)
+template <typename T> using span_1d = mdspan<T, 1>;
+template <typename T> using span_2d = mdspan<T, 2>;
+template <typename T> using span_3d = mdspan<T, 3>;
+template <typename T> using span_4d = mdspan<T, 4>;
+template <typename T> using span_5d = mdspan<T, 5>;
+template <typename T> using span_6d = mdspan<T, 6>;
+
 using device_vect_f   = mdspan<float, 1>;
 using device_span2d_f = mdspan<float, 2>;
 using device_span3d_f = mdspan<float, 3>;

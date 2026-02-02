@@ -1,211 +1,278 @@
 #pragma once
 #include <cuda/std/mdspan>
 
+#include <fast_deconv/algorithm/detail/rect.hpp>
+#include <fast_deconv/algorithm/detail/spectral_fit.cuh>
+#include <fast_deconv/algorithm/detail/update_mask.cuh>
 #include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/matrix/argmax.hpp>
 
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 namespace fast_deconv::algorithm::wscms::detail {
 
-// Typical dirty fron DDFacet (freq, pol, height, width) => float32
-// PSFs (facet, scale, freq, pol, heigt, width) => float32
-
-uint find_facet_idx(
-  Facets facets, uint dirty_width, uint dirty_height, uint peak_x, uint peak_y, Params params)
+// Broadcast 2D mask (h, w) to 4D (nch, npol, h, w) via modulo
+__global__ void broadcast_mask_2d_to_4d(const bool* __restrict__ mask_2d,
+                                         bool* __restrict__ mask_4d,
+                                         size_t spatial_size,
+                                         size_t total_size)
 {
-  uint facet_idx = 0;
-  float min_dist = std::numeric_limits<float>::max();
-  for (uint i = 0; i < facets.centers.size(); i++) {
-    float l = params.cell_size_radian.x * (peak_x - static_cast<float>(dirty_width) / 2);
-    float m = params.cell_size_radian.y * (peak_y - static_cast<float>(dirty_height) / 2);
-    float2 facet_center = facets.centers[i];
-    float distance      = std::sqrt((l - facet_center.x) * (l - facet_center.x) +
-                               (m - facet_center.y) * (m - facet_center.y));
-    if (distance < min_dist) {
-      facet_idx = i;
-      min_dist  = distance;
-    }
-  }
-  return facet_idx;
+    const size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= total_size) return;
+    mask_4d[idx] = mask_2d[idx % spatial_size];
 }
 
-inline std::pair<int, float> find_peak(core::span_4d<float> cube,
-                                       core::span_2d<bool> mask,
-                                       uint dirty_width,
-                                       uint dirty_height,
-                                       core::stream_resources& resources)
+// scaled_dirty[i] -= psf_2[i] * gain_scaled * mask[i]
+// mask is 2D (h, w) broadcast over channels/pols via modulo on spatial index
+__global__ void subtract_scaled_dirty_kernel(core::device_span4d_fs psf_2,
+                                              core::device_span4d_fs scaled_dirty,
+                                              const bool* __restrict__ mask_2d,
+                                              float gain_scaled,
+                                              size_t spatial_size,
+                                              uint n_elements)
 {
-  auto data_view = core::make_mdspan(cube.data_handle(), core::extents_2d(dirty_width, dirty_height));
-  return fast_deconv::matrix::argmax(
-    data_view.data_handle(), mask.data_handle(), data_view.size(), false, resources);
+    const uint tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= n_elements) return;
+
+    using index_t = typename core::device_span4d_fs::index_type;
+    auto lin = tid;
+    index_t i3 = lin % scaled_dirty.extent(3); lin /= scaled_dirty.extent(3);
+    index_t i2 = lin % scaled_dirty.extent(2); lin /= scaled_dirty.extent(2);
+    index_t i1 = lin % scaled_dirty.extent(1); lin /= scaled_dirty.extent(1);
+    index_t i0 = lin;
+
+    size_t sp_idx = static_cast<size_t>(i2) * scaled_dirty.extent(3) + i3;
+    float m = mask_2d[sp_idx % spatial_size] ? 1.0f : 0.0f;
+
+    scaled_dirty(i0, i1, i2, i3) -= psf_2(i0, i1, i2, i3) * gain_scaled * m;
 }
+
+// Subtract kernel with explicit element count for strided mdspans.
+// out[i] = dirty[i] - psf[i] * coeffs[ch] * gain
+__global__ void subtract_dirty_patch_kernel(core::device_span4d_fs psf,
+                                             core::device_span4d_fs dirty,
+                                             core::device_vect_f coeffs,
+                                             core::device_span4d_fs out,
+                                             float gain,
+                                             uint n_elements)
+{
+    const uint tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= n_elements) return;
+
+    using index_t = typename core::device_span4d_fs::index_type;
+    auto lin = tid;
+    index_t i3 = lin % out.extent(3); lin /= out.extent(3);
+    index_t i2 = lin % out.extent(2); lin /= out.extent(2);
+    index_t i1 = lin % out.extent(1); lin /= out.extent(1);
+    index_t i0 = lin;
+
+    out(i0, i1, i2, i3) = dirty(i0, i1, i2, i3) - psf(i0, i1, i2, i3) * coeffs(i0) * gain;
+}
+
+// Extract 4D subview from 6D psfs at [facet_idx, scale_idx, :, :, :, :]
+inline core::device_span4d_fs extract_psf_4d(core::span_6d<float>& psfs,
+                                              int facet_idx, int scale_idx)
+{
+    const size_t nch  = psfs.extent(2);
+    const size_t npol = psfs.extent(3);
+    const size_t h    = psfs.extent(4);
+    const size_t w    = psfs.extent(5);
+
+    const size_t offset = static_cast<size_t>(facet_idx) * psfs.extent(1) * nch * npol * h * w
+                        + static_cast<size_t>(scale_idx) * nch * npol * h * w;
+
+    float* ptr = psfs.data_handle() + offset;
+    std::array<size_t, 4> strides = {npol * h * w, h * w, w, 1};
+
+    return core::device_span4d_fs(ptr, emu::layout_stride::mapping<core::dims<4>>(
+        core::dims<4>(nch, npol, h, w), strides));
+}
+
+// Create 4D strided subview at patch region from contiguous base.
+// Rect.x maps to the row dimension (h), Rect.y to the column dimension (w).
+// So patch rows = rect.width() and patch cols = rect.height().
+inline core::device_span4d_fs make_patch_subview(float* base_ptr,
+                                                   size_t nch, size_t npol,
+                                                   size_t full_h, size_t full_w,
+                                                   const Rect& rect)
+{
+    float* ptr = base_ptr + rect.x0 * full_w + rect.y0;
+    std::array<size_t, 4> strides = {npol * full_h * full_w, full_h * full_w, full_w, 1};
+    return core::device_span4d_fs(ptr, emu::layout_stride::mapping<core::dims<4>>(
+        core::dims<4>(nch, npol, static_cast<size_t>(rect.width()),
+                      static_cast<size_t>(rect.height())), strides));
+}
+
+// Create 4D strided subview at patch region from existing strided 4D.
+// Rect.x maps to rows (dim 2), Rect.y maps to cols (dim 3).
+inline core::device_span4d_fs make_patch_subview_from_4d(core::device_span4d_fs& src,
+                                                          const Rect& rect)
+{
+    const size_t nch  = src.extent(0);
+    const size_t npol = src.extent(1);
+    const size_t stride_ch  = src.mapping().stride(0);
+    const size_t stride_pol = src.mapping().stride(1);
+    const size_t stride_row = src.mapping().stride(2);
+
+    float* ptr = src.data_handle() + rect.x0 * stride_row + rect.y0;
+    std::array<size_t, 4> strides = {stride_ch, stride_pol, stride_row, 1};
+    return core::device_span4d_fs(ptr, emu::layout_stride::mapping<core::dims<4>>(
+        core::dims<4>(nch, npol, static_cast<size_t>(rect.width()),
+                      static_cast<size_t>(rect.height())), strides));
+}
+
 
 void wscms_minor_cycle(core::span_4d<float> dirty,
                        core::span_4d<float> scaled_dirty,
-                       core::span_2d<bool> mask,
-                       core::span_6d<float> psfs,
-                       core::span_4d<float> jones_norm,
-                       core::span_2d<float> gains,
                        std::uint32_t scale_idx,
-                       Facets facets,
-                       Params params,
+                       const MinorCycleContext& ctx,
+                       ComponentBuffer& components,
                        core::stream_resources& resources)
 {
-  // 1. Find peak x,y
-  // 2. Load Facet / PSF at pos x,y
-  // 3. Compute sky model component
-  // 4. Compute aligned patch edges
-  // 5. Clean dirty
-  //   a. compute flux_scaled_dirty
-  //   b. subtract flux scaled_dirty from dirty
-  // 6. Clean Scaled Dirty
-  //   a. scaled_dirty - conv2_PSF
+    auto stream = resources.stream;
 
-  size_t nof_elements = dirty.size();
-  uint n_frequencies  = dirty.extent(0);
-  uint n_pol          = dirty.extent(1);
-  uint dirty_width    = dirty.extent(2);
-  uint dirty_height   = dirty.extent(3);
-  uint n_facets       = psfs.extent(0);
-  uint n_scales       = psfs.extent(1);
-  uint psf_width      = psfs.extent(4);
-  uint psf_height     = psfs.extent(5);
+    const size_t nch  = dirty.extent(0);
+    const size_t npol = dirty.extent(1);
+    const size_t h    = dirty.extent(2);
+    const size_t w    = dirty.extent(3);
+    const size_t spatial_size = h * w;
+    const size_t total_4d_size = nch * npol * h * w;
+    const int order = static_cast<int>(ctx.Xdes.extent(1));
+    const size_t psf_h = ctx.psfs.extent(4);
+    const size_t psf_w = ctx.psfs.extent(5);
 
-  auto max_dirty   = find_peak(dirty, mask, dirty_width, dirty_height, resources);
-  size_t peak_idx  = max_dirty.first;
-  float peak_value = max_dirty.second;
+    // Allocate 4D bool mask for argmax (broadcast from 2D mask)
+    bool* d_mask_4d;
+    CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&d_mask_4d),
+                                sizeof(bool) * total_4d_size, stream));
 
-  float threshold = params.peak_factor * peak_value;
-  // Update the mask where scaled_dirty > threshold and mask==False
-  // We do not follow Cyril's convention (searching for peaks where mask==False)
-  // Here we search for peaks where mask==True
-  // FIXME: MAYBE, we do not need to update the mask
+    // Allocate spectral fitting workspace
+    auto fit_ws = SpectralFitWorkspace::allocate(static_cast<int>(nch), order, stream);
 
-  uint n_iter = 0;
-  while (peak_value > threshold && n_iter < params.max_iter) {
-    uint peak_x = peak_idx / dirty_height;
-    uint peak_y = peak_idx % dirty_width;
+    // Broadcast mask 2D -> 4D bool
+    broadcast_mask_2d_to_4d<<<CEIL_DIV(total_4d_size, 256), 256, 0, stream>>>(
+        ctx.mask.data_handle(), d_mask_4d, spatial_size, total_4d_size);
+    CHECK_LAST_CUDA_ERROR();
 
-    //  Find facet idx
-    uint facet_idx = find_facet_idx(facets, dirty_width, dirty_height, peak_x, peak_y, params);
-    // Get the corresponding gain
-    float gain = gains(facet_idx, scale_idx);
+    // Initial peak finding
+    auto [peak_idx, peak_val] = matrix::argmax(
+        scaled_dirty.data_handle(), d_mask_4d, total_4d_size, ctx.do_abs, resources);
 
-    // 3. Compute offset until the corresponding psf
-    // uint psf_offset = facet_idx * psf_width * psf_height;
-    // auto psf_view = core::make_span(psfs.data_handle() + psf_offset, core::Extents2D(psf_width, psf_height));
+    // Unravel: layout_right (nch, npol, h, w) -> spatial coords
+    size_t peak_x = (peak_idx / w) % h;
+    size_t peak_y = peak_idx % w;
 
-    if (n_frequencies > 1) {
-      // Get peak and jones norm for each frequency
-      std::vector<float> peak_per_freq;
-      std::vector<float> jn_per_freq;
-      for (int i = 0; i < n_frequencies; i++) {
-        peak_per_freq.push_back(dirty(i, 0, peak_x, peak_y));
-        jn_per_freq.push_back(jones_norm(i, 0, peak_x, peak_y));
-      }
+    float threshold = ctx.peak_factor * peak_val;
+
+    // Update mask: mask &= (|scaled_dirty| > threshold)
+    update_mask(ctx.mask, scaled_dirty, threshold, ctx.do_abs, resources);
+
+    // Re-broadcast updated mask to 4D bool and compute 2D float mask
+    broadcast_mask_2d_to_4d<<<CEIL_DIV(total_4d_size, 256), 256, 0, stream>>>(
+        ctx.mask.data_handle(), d_mask_4d, spatial_size, total_4d_size);
+    CHECK_LAST_CUDA_ERROR();
+
+    int sub_iter = 0;
+    auto psfs_mut = ctx.psfs;
+    auto psfs_2_mut = ctx.psfs_2;
+
+    while (peak_val > threshold && sub_iter < ctx.n_subminor_iter) {
+        int ix = static_cast<int>(peak_x);
+        int iy = static_cast<int>(peak_y);
+
+        // Get facet index
+        int facet_idx;
+        CHECK_CUDA(cudaMemcpyAsync(&facet_idx,
+            ctx.map_pixels_facets.data_handle() + ix * static_cast<int>(w) + iy,
+            sizeof(int), cudaMemcpyDeviceToHost, stream));
+        resources.sync();
+
+        // Get gain
+        float gain = 0.0f;
+        CHECK_CUDA(cudaMemcpy(&gain,
+            ctx.gains.data_handle() + facet_idx * ctx.gains.extent(1) + scale_idx,
+            sizeof(float), cudaMemcpyDeviceToHost));
+
+        // Get scaled_dirty at peak for scaled subtraction
+        float sd_peak_val = 0.0f;
+        CHECK_CUDA(cudaMemcpy(&sd_peak_val,
+            scaled_dirty.data_handle() + peak_x * w + peak_y,
+            sizeof(float), cudaMemcpyDeviceToHost));
+
+        // Spectral fitting
+        float h_coeffs[MAX_SPECTRAL_ORDER] = {};
+        int n_coeffs = 0;
+        spectral_fit(ctx, dirty, ix, iy, fit_ws, h_coeffs, n_coeffs, resources);
+
+        // Save component
+        ComponentEntry& entry = components.entries[sub_iter];
+        entry.x = ix;
+        entry.y = iy;
+        entry.scale_idx = static_cast<int>(scale_idx);
+        entry.gain = gain;
+        entry.n_coeffs = n_coeffs;
+        std::memcpy(entry.coeffs, h_coeffs, sizeof(float) * n_coeffs);
+
+        // Compute aligned patch edges
+        auto [img_rect, psf_rect] = compute_aligned_patch_edges(
+            ix, iy,
+            static_cast<int>(h), static_cast<int>(w),
+            static_cast<int>(psf_h), static_cast<int>(psf_w));
+
+        if (!img_rect.empty()) {
+            auto psf_4d = extract_psf_4d(psfs_mut, facet_idx, static_cast<int>(scale_idx));
+            auto psf_2_4d = extract_psf_4d(psfs_2_mut, facet_idx, static_cast<int>(scale_idx));
+
+            auto dirty_patch = make_patch_subview(dirty.data_handle(), nch, npol, h, w, img_rect);
+            auto scaled_dirty_patch = make_patch_subview(scaled_dirty.data_handle(), nch, npol, h, w, img_rect);
+            auto psf_patch = make_patch_subview_from_4d(psf_4d, psf_rect);
+            auto psf_2_patch = make_patch_subview_from_4d(psf_2_4d, psf_rect);
+
+            // per_channel coefficients from spectral fit
+            core::device_vect_f coeffs_span(fit_ws.d_per_channel_f, nch);
+
+            // Compute logical element count (product of extents)
+            // Cannot rely on .size() for layout_stride as it may return required_span_size
+            // rect.width() = row extent, rect.height() = col extent
+            const size_t patch_elements = nch * npol *
+                static_cast<size_t>(img_rect.width()) * static_cast<size_t>(img_rect.height());
+
+            // 1. dirty -= psf * per_channel_coeffs * gain
+            subtract_dirty_patch_kernel
+                <<<CEIL_DIV(patch_elements, size_t{256}), 256, 0, stream>>>(
+                    psf_patch, dirty_patch, coeffs_span, dirty_patch, gain,
+                    static_cast<uint>(patch_elements));
+            CHECK_LAST_CUDA_ERROR();
+
+            // 2. scaled_dirty -= psf_2 * (sd_peak_val * gain) * mask
+            float gain_scaled = sd_peak_val * gain;
+            subtract_scaled_dirty_kernel
+                <<<CEIL_DIV(patch_elements, size_t{256}), 256, 0, stream>>>(
+                    psf_2_patch, scaled_dirty_patch,
+                    ctx.mask.data_handle(), gain_scaled, spatial_size,
+                    static_cast<uint>(patch_elements));
+            CHECK_LAST_CUDA_ERROR();
+        }
+
+        // Next peak
+        auto [next_peak_idx, next_peak_val] = matrix::argmax(
+            scaled_dirty.data_handle(), d_mask_4d, total_4d_size, ctx.do_abs, resources);
+
+        peak_val = next_peak_val;
+        peak_x = (next_peak_idx / w) % h;
+        peak_y = next_peak_idx % w;
+
+        sub_iter++;
     }
 
-    // Subtract psf from dirty
-    // Scale each coeff by gain
-    // Scale each psf freq by scaled coeff
-    
+    components.count = sub_iter;
 
-    n_iter++;
-  }
+    // Cleanup
+    fit_ws.free(stream);
+    CHECK_CUDA(cudaFreeAsync(d_mask_4d, stream));
 }
 
 }  // namespace fast_deconv::algorithm::wscms::detail
-// SubminorLoopResults WSCMS::run_subminor_loop(float* dirty,
-//                                              float* scaled_dirty,
-//                                              bool* mask,
-//                                              unsigned int scale_idx)
-// {
-// ===== SUMARRY =====
-// 1. Find peak x,y
-// 2. Load Facet / PSF at pos x,y
-// 3. Compute sky model component
-// 4. Compute aligned patch edges
-// 5. Clean dirty
-//   a. compute flux_scaled_dirty
-//   b. subtract flux scaled_dirty from dirty
-// 6. Clean Scaled Dirty
-//   a. scaled_dirty - conv2_PSF
-
-// SubminorLoopResults results;
-//    uint2 psf_shape{static_cast<uint>(this->_PSFs.shape(0)),
-//    static_cast<uint>(this->_PSFs.shape(1))};
-//
-//    // TODO: Add do_absolute argument
-//    size_t nof_elements = dirty.size();
-//
-//    auto max_dirty = argmax(dirty.data(), mask.data(), nof_elements, false);
-//    size_t peak_idx = max_dirty.first;
-//    float peak_value = max_dirty.second;
-//    printf("Dirty max_dirty = %f at %d/n",
-//           max_dirty.second, max_dirty.first);
-//
-//    float threshold = this->_peak_factor * peak_value;
-//    // Update the mask where scaled_dirty > threshold and mask==False
-//    // We do not follow Cyril's convention (searching for peaks where mask==False)
-//    // Here we search for peaks where mask==True
-//    //
-//    // MAYBE, we do not need to update the mask
-//
-//    uint n_iter = 0;
-//    uint max_iter = 1000; // TODO: pass it as an arguments
-//    while (peak_value > threshold && n_iter < max_iter) {
-//
-//        uint peak_x = peak_idx / dirty.shape(1);
-//        uint peak_y = peak_idx % dirty.shape(0);
-//
-//        // 2. Find facet idx
-//        uint facet_idx = 0;
-//        float min_dist = std::numeric_limits<float>::max();
-//        for (uint i; i < this->_facets.centers.size(); i++) {
-//            float l = this->_cell_size_radian.x * (peak_x - static_cast<float>(dirty.shape(0)) /
-//            2); float m = this->_cell_size_radian.y * (peak_y -
-//            static_cast<float>(dirty.shape(1)) / 2); float2 facet_center =
-//            this->_facets.centers[i]; float distance = std::sqrt((l - facet_center.x) * (l -
-//            facet_center.x) + (m - facet_center.y) * (m - facet_center.y)); if (distance <
-//            min_dist) {
-//                facet_idx = i;
-//                min_dist = distance;
-//            }
-//        }
-//
-//        float gain = this->_gains[facet_idx];
-//        float coeffs = peak_value;
-//
-//        // 3. Save sky model component
-//        results.components_center.push_back({peak_x, peak_y});
-//        results.sols.push_back(peak_value);
-//        results.scales_idx.push_back(scale_idx);
-//        results.gains.push_back(gain);
-//
-//        auto [dirty_patch, psf_patch] = compute_aligned_patch_edges(
-//            peak_x, peak_y, dirty.shape(0), dirty.shape(1), psf_shape.x, psf_shape.y);
-//
-//        // Clean dirty image
-//        uint offset = facet_idx * psf_shape.x * psf_shape.y;
-//        float *psf = this->_PSFs.data() + offset;
-//
-//        // TODO: we need to convolve the psf x kernel
-//
-//
-//        cudaStream_t stream;
-//        cudaStreamCreate(&stream);
-//        clean_dirty_async(dirty.data(), psf, dirty.shape(1), psf_shape.y, dirty_patch,
-//        psf_patch, gain, coeffs, stream);
-//
-//        // Clean Scaled image
-//
-//
-//    }
-
-//   return results;
-// }
-
-// }  // namespace fast_deconv::algorithm::detail

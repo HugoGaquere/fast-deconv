@@ -46,15 +46,11 @@ int run_wscms_example()
   fill_with_random(gains.view());
   fill_mask(mask.view());
 
-  fast_deconv::algorithm::wscms::Params params{
-    .peak_factor      = 0.2,
-    .max_iter         = 1000,
-    .cell_size_radian = {0.2, 0.2},
-  };
-
-  fast_deconv::algorithm::wscms::Facets facets{
-    .edges   = {{0.2, 0.5, 0.6}},
-    .centers = {{0.2, 0.2}},
+  fast_deconv::algorithm::wscms::MinorCycleContext ctx{
+    .psfs       = psfs.view(),
+    .jones_norm = jones_norm.view(),
+    .gains      = gains.view(),
+    .mask       = mask.view(),
   };
 
   fast_deconv::core::stream_resources resources;
@@ -64,13 +60,8 @@ int run_wscms_example()
 
   // fast_deconv::algorithm::wscms::wscms_minor_cycle(dirty.view(),
   //                                                  scaled_dirty.view(),
-  //                                                  mask.view(),
-  //                                                  psfs.view(),
-  //                                                  jones_norm.view(),
-  //                                                  gains.view(),
   //                                                  scale_idx,
-  //                                                  facets,
-  //                                                  params,
+  //                                                  ctx,
   //                                                  resources);
 
   std::printf("\n");
