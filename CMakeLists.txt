@@ -7,9 +7,7 @@ set(CMAKE_CUDA_ARCHITECTURES "native")
 
 project(fast_deconv LANGUAGES CXX CUDA)
 
-#find_package(CUDAToolkit 12 EXACT)
 find_package(CUDAToolkit REQUIRED)
-#find_package(CCCL CONFIG REQUIRED)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -45,6 +43,28 @@ find_package(fmt CONFIG REQUIRED)
 find_package(emu CONFIG REQUIRED)
 
 #-------------------------------------------------------------------#
+# MathDx configuration (optional)
+#-------------------------------------------------------------------#
+if(DEFINED ENV{MATHDX_ROOT})
+  set(MATHDX_ROOT "$ENV{MATHDX_ROOT}")
+endif()
+
+if(DEFINED MATHDX_ROOT)
+  message(STATUS "Looking for MathDx in ${MATHDX_ROOT}")
+  find_package(mathdx
+    COMPONENTS cublasdx cufftdx
+    CONFIG
+    PATHS "${MATHDX_ROOT}"
+  )
+  if(mathdx_FOUND)
+    message(STATUS "MathDx found: ${mathdx_VERSION}")
+    set(FAST_DECONV_HAS_MATHDX ON)
+  else()
+    message(WARNING "MathDx not found at ${MATHDX_ROOT}")
+  endif()
+endif()
+
+#-------------------------------------------------------------------#
 # Core library
 #-------------------------------------------------------------------#
 # Do not generate response file since lsp can't read it
@@ -64,6 +84,8 @@ target_link_libraries(fast_deconv INTERFACE
   emu::emu
   CUDA::cublas
   # CUDA::thrust
+  # $<TARGET_NAME_IF_EXISTS:mathdx::cublasdx>
+  # $<TARGET_NAME_IF_EXISTS:mathdx::cufftdx>
 )
 
 # Set the targeting architectures
@@ -80,6 +102,10 @@ target_compile_options(fast_deconv INTERFACE
   >
 )
 
+if(FAST_DECONV_HAS_MATHDX)
+  target_compile_definitions(fast_deconv INTERFACE FAST_DECONV_HAS_MATHDX)
+endif()
+
 #-------------------------------------------------------------------#
 # Python extension
 #-------------------------------------------------------------------#
@@ -95,6 +121,7 @@ if (SKBUILD)
     src/python/bindings/debug.cu
     src/python/bindings/matrix.cu
     src/python/bindings/wscms.cu
+    src/python/bindings/linalg.cu
   )
 
   target_link_libraries(_fast_deconv PRIVATE fast_deconv)
@@ -118,12 +145,6 @@ endif()
  add_executable(fast_deconv_app
    src/main.cu
    # src/examples/argmax_example.hpp
-   # src/examples/cufft_convolution_example.cu
-   # src/examples/kronecker_example.cu
-   # src/examples/kronecker_mixed_product_example.cu
-   # src/examples/kronecker_mixed_product_complex_example.cu
-   # src/examples/kronecker_tensor_example.cu
-   # src/examples/wscms_example.cu
  )
  target_link_libraries(fast_deconv_app PRIVATE fast_deconv CUDA::curand)
 
