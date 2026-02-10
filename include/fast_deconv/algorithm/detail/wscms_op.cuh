@@ -31,10 +31,10 @@ __device__ inline auto linear_to_4d(typename Mdspan::size_type lin, const Mdspan
 
 namespace fast_deconv::algo::wscms::detail {
 
-__global__ void subtract_psf_from_dirty_kernel_naive(core::device_span4d_fs psf,
-                                                     core::device_span4d_fs dirty,
-                                                     core::device_vect_f coeffs,
-                                                     core::device_span4d_fs out,
+__global__ void subtract_psf_from_dirty_kernel_naive(core::device_span4d_S<float> psf,
+                                                     core::device_span4d_S<float> dirty,
+                                                     core::device_vect<float> coeffs,
+                                                     core::device_span4d_S<float> out,
                                                      float gain)
 {
   const uint tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -45,10 +45,10 @@ __global__ void subtract_psf_from_dirty_kernel_naive(core::device_span4d_fs psf,
 }
 
 template <typename VectType, typename ScalarType, int ITEMS_PER_THREAD>
-__global__ void subtract_psf_from_dirty_kernel_vect(core::device_span4d_fs psf,
-                                                    core::device_span4d_fs dirty,
-                                                    core::device_vect_f coeffs,
-                                                    core::device_span4d_fs out,
+__global__ void subtract_psf_from_dirty_kernel_vect(core::device_span4d_S<float> psf,
+                                                    core::device_span4d_S<float> dirty,
+                                                    core::device_vect<float> coeffs,
+                                                    core::device_span4d_S<float> out,
                                                     float gain,
                                                     uint nb_rows,
                                                     uint nb_cols)
@@ -211,10 +211,10 @@ __global__ void subtract_psf_from_dirty_kernel_vect(core::device_span4d_fs psf,
 
 void subtract_psf_from_dirty_async(core::AccessPolicy access_policy,
                                    core::stream_resources& resources,
-                                   core::device_span4d_fs& psf,
-                                   core::device_span4d_fs& dirty,
-                                   core::device_vect_f& coeffs,
-                                   core::device_span4d_fs& out,
+                                   core::device_span4d_S<float>& psf,
+                                   core::device_span4d_S<float>& dirty,
+                                   core::device_vect<float>& coeffs,
+                                   core::device_span4d_S<float>& out,
                                    float gain)
 {
   constexpr int rank   = 4;

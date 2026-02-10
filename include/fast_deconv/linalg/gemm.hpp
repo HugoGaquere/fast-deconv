@@ -14,8 +14,8 @@ inline void cgemm_row_major_async(core::stream_resources& resources,
                                   const cuComplex* A,
                                   const cuComplex* B,
                                   cuComplex* C,
-                                 cublasOperation_t trans_a = CUBLAS_OP_T,
-                                 cublasOperation_t trans_b = CUBLAS_OP_T)
+                                  cublasOperation_t trans_a = CUBLAS_OP_T,
+                                  cublasOperation_t trans_b = CUBLAS_OP_T)
 {
   const cuComplex alpha = make_cuFloatComplex(1, 0);
   const cuComplex beta  = make_cuFloatComplex(0, 0);

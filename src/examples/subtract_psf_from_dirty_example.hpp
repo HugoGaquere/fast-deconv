@@ -24,9 +24,9 @@ void run_subtract_psf_from_dirty()
   constexpr size_t total  = nch * npol * height * width;
 
   // Allocate device memory
-  auto psf_data   = emu::cuda::device::make_container<float>(device_id, total);
-  auto dirty_data = emu::cuda::device::make_container<float>(device_id, total);
-  auto out_data   = emu::cuda::device::make_container<float>(device_id, total);
+  auto psf_data    = emu::cuda::device::make_container<float>(device_id, total);
+  auto dirty_data  = emu::cuda::device::make_container<float>(device_id, total);
+  auto out_data    = emu::cuda::device::make_container<float>(device_id, total);
   auto coeffs_data = emu::cuda::device::make_container<float>(device_id, nch);
 
   // Fill with random data
@@ -47,12 +47,12 @@ void run_subtract_psf_from_dirty()
   };
   mapping_t mapping(exts, strides);
 
-  core::device_span4d_fs psf(psf_data.data(), mapping);
-  core::device_span4d_fs dirty(dirty_data.data(), mapping);
-  core::device_span4d_fs out(out_data.data(), mapping);
+  core::device_span4d_S<float> psf(psf_data.data(), mapping);
+  core::device_span4d_S<float> dirty(dirty_data.data(), mapping);
+  core::device_span4d_S<float> out(out_data.data(), mapping);
 
   // 1D span for coefficients (layout_right)
-  core::device_vect_f coeffs(coeffs_data.data(), nch);
+  core::device_vect<float> coeffs(coeffs_data.data(), nch);
 
   float gain = 0.1f;
 

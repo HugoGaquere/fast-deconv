@@ -1,3 +1,5 @@
+#include "fast_deconv_bindings.hpp"
+
 #include <cuda_runtime.h>
 
 #include <emu/pybind11/cast/mdspan.hpp>
@@ -5,8 +7,6 @@
 #include <fmt/base.h>
 #include <fmt/ranges.h>
 #include <pybind11/pybind11.h>
-
-#include "fast_deconv_bindings.hpp"
 
 namespace py = pybind11;
 
@@ -58,14 +58,13 @@ void print_mdspan(const Mdspan& ms)
   cudaDeviceSynchronize();
 }
 
-namespace fast_deconv::python
-{
+namespace fast_deconv::python {
 void bind_debug(py::module_& m)
 {
-  m.def("inspect", &inspect<fd_core::device_vect_f>, R"pbdoc(Inspect)pbdoc");
-  m.def("inspect", &inspect<fd_core::device_span2d_f>, R"pbdoc(Inspect)pbdoc");
-  // m.def("print", &print_mdspan<fast_deconv::core::device_span2d_f>, R"pbdoc(Print)pbdoc");
-  // m.def("print", &print_mdspan<fd_core::device_span2d_fs>, R"pbdoc(Print)pbdoc");
-  // m.def("print", &print_mdspan<fast_deconv::core::device_span2d_f>, R"pbdoc(Print)pbdoc");
+  m.def("inspect", &inspect<fd_core::device_vect<float>>, R"pbdoc(Inspect)pbdoc");
+  m.def("inspect", &inspect<fd_core::device_span2d<float>>, R"pbdoc(Inspect)pbdoc");
+  // m.def("print", &print_mdspan<fast_deconv::core::device_span2d<float>>, R"pbdoc(Print)pbdoc");
+  // m.def("print", &print_mdspan<fd_core::device_span2d_S<float>>, R"pbdoc(Print)pbdoc");
+  // m.def("print", &print_mdspan<fast_deconv::core::device_span2d<float>>, R"pbdoc(Print)pbdoc");
 }
 }  // namespace fast_deconv::python

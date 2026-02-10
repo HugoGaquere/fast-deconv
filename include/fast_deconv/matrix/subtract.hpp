@@ -1,10 +1,9 @@
 #pragma once
 
-
 #include <emu/cuda/device/mdspan.hpp>
-#include <fast_deconv/core/dispatcher.hpp>
 #include <fast_deconv/core/access_policy.hpp>
 #include <fast_deconv/core/concepts.hpp>
+#include <fast_deconv/core/dispatcher.hpp>
 #include <fast_deconv/core/kernel_traits.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/core/stream_resources.hpp>

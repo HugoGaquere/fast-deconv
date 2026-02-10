@@ -22,7 +22,8 @@ class stream_resources {
 
   /// Construct from an external CUDA stream (e.g., from CuPy).
   /// The caller retains ownership of the stream and must ensure it outlives this object.
-  explicit stream_resources(cudaStream_t external_stream) : stream(external_stream), owns_stream_(false)
+  explicit stream_resources(cudaStream_t external_stream)
+    : stream(external_stream), owns_stream_(false)
   {
     CHECK_CUBLAS(cublasCreate(&this->cublas_handle));
     CHECK_CUBLAS(cublasSetStream(this->cublas_handle, this->stream));
@@ -47,9 +48,7 @@ class stream_resources {
       // Borrowed stream - the owner (e.g., CuPy) may have already destroyed
       // the stream/context during Python GC, so we must be defensive.
       // Don't use async operations or CHECK macros that would abort on error.
-      if (this->device_workspace != nullptr) {
-        cudaFree(this->device_workspace);
-      }
+      if (this->device_workspace != nullptr) { cudaFree(this->device_workspace); }
       cublasDestroy(this->cublas_handle);
     }
   };

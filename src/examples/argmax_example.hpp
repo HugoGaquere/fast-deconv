@@ -14,7 +14,7 @@ void run_argmax()
   const auto device_id = emu::cuda::device::current();
   fast_deconv::core::stream_resources resources;
 
-  const size_t n = 10000*10000;
+  const size_t n = 10000 * 10000;
 
   auto data = emu::cuda::device::make_container<float>(device_id, n);
   auto mask = emu::cuda::device::make_container<bool>(device_id, n);
@@ -23,7 +23,7 @@ void run_argmax()
   fill_device_bool(mask.data(), n);
 
   std::pair<int, float> res =
-    fast_deconv::matrix::argmax(data.data(), mask.data(), n, false, resources);
+    fast_deconv::matrix::argmax(data.data(), mask.data(), n, n, false, resources);
 
   fmt::println("Argmax {}", res);
 }

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <cuda_runtime.h>
-#include <curand.h>
 
+#include <curand.h>
 #include <fast_deconv/util/cuda_macros.hpp>
 
 #include <cstddef>
@@ -16,6 +16,7 @@ void fill_device_random(float* ptr, std::size_t n)
   curandDestroyGenerator(gen);
 }
 
-void fill_device_bool(bool* ptr, std::size_t n, bool value=true) {
+void fill_device_bool(bool* ptr, std::size_t n, bool value = true)
+{
   cudaMemset(ptr, static_cast<int>(value), n * sizeof(bool));
 }

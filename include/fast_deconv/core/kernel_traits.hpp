@@ -24,7 +24,7 @@ struct kernel_traits<subtract_kernel_tag> {
 // ================================================================
 //    subtract_psf_from_dirty Kernel
 // ================================================================
-struct subtract_psf_from_dirty_tag  {};
+struct subtract_psf_from_dirty_tag {};
 
 template <>
 struct kernel_traits<subtract_psf_from_dirty_tag> {

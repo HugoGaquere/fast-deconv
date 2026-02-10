@@ -133,9 +133,11 @@ __global__ void subtract_kernel_vect_load_stride_2d(
   const auto tid_md = linear_to_indices(lin, A);
 
   // Compute all pointers upfront
-  const auto* a_ptr = A.data_handle() + std::apply([&](auto... i) { return A.mapping()(i...); }, tid_md);
-  const auto* b_ptr = B.data_handle() + std::apply([&](auto... i) { return B.mapping()(i...); }, tid_md);
-  auto* c_ptr       = C.data_handle() + std::apply([&](auto... i) { return C.mapping()(i...); }, tid_md);
+  const auto* a_ptr =
+    A.data_handle() + std::apply([&](auto... i) { return A.mapping()(i...); }, tid_md);
+  const auto* b_ptr =
+    B.data_handle() + std::apply([&](auto... i) { return B.mapping()(i...); }, tid_md);
+  auto* c_ptr = C.data_handle() + std::apply([&](auto... i) { return C.mapping()(i...); }, tid_md);
 
   // Load vect
   const auto a_vect = *reinterpret_cast<const VectType*>(a_ptr);
@@ -252,7 +254,7 @@ void subtract_async(core::AccessPolicy access_policy,
   static_assert(!core::cpts::is_layout_left<Mdspan>,
                 "subtract_async: layout_left is not implemented yet.");
 
-  constexpr int rank = Mdspan::rank();
+  constexpr int rank   = Mdspan::rank();
   const size_t nb_cols = A.extent(rank - 1);
   const size_t nb_rows = A.size() / nb_cols;
 
@@ -263,15 +265,21 @@ void subtract_async(core::AccessPolicy access_policy,
     const size_t nb_vec_cols       = CEIL_DIV(nb_cols, items_per_thread);
 
     dim3 block(256, 1, 1);
-    dim3 grid(CEIL_DIV(nb_vec_cols, block.x), static_cast<unsigned int>(nb_rows < 65535 ? nb_rows : 65535), static_cast<unsigned int>(CEIL_DIV(nb_rows, nb_rows < 65535 ? nb_rows : 65535)));
-    subtract_kernel_vect_load_stride_2d<float2, float, items_per_thread> <<<grid, block, 0, resources.stream>>>(A, B, C, nb_rows, nb_cols);
+    dim3 grid(CEIL_DIV(nb_vec_cols, block.x),
+              static_cast<unsigned int>(nb_rows < 65535 ? nb_rows : 65535),
+              static_cast<unsigned int>(CEIL_DIV(nb_rows, nb_rows < 65535 ? nb_rows : 65535)));
+    subtract_kernel_vect_load_stride_2d<float2, float, items_per_thread>
+      <<<grid, block, 0, resources.stream>>>(A, B, C, nb_rows, nb_cols);
   } else if (access_policy.load_policy == core::AccessType::Vec4) {
     constexpr int items_per_thread = 4;
     const size_t nb_vec_cols       = CEIL_DIV(nb_cols, items_per_thread);
 
     dim3 block(256, 1, 1);
-    dim3 grid(CEIL_DIV(nb_vec_cols, block.x), static_cast<unsigned int>(nb_rows < 65535 ? nb_rows : 65535), static_cast<unsigned int>(CEIL_DIV(nb_rows, nb_rows < 65535 ? nb_rows : 65535)));
-    subtract_kernel_vect_load_stride_2d<float4, float, items_per_thread> <<<grid, block, 0, resources.stream>>>(A, B, C, nb_rows, nb_cols);
+    dim3 grid(CEIL_DIV(nb_vec_cols, block.x),
+              static_cast<unsigned int>(nb_rows < 65535 ? nb_rows : 65535),
+              static_cast<unsigned int>(CEIL_DIV(nb_rows, nb_rows < 65535 ? nb_rows : 65535)));
+    subtract_kernel_vect_load_stride_2d<float4, float, items_per_thread>
+      <<<grid, block, 0, resources.stream>>>(A, B, C, nb_rows, nb_cols);
   }
 
   CHECK_LAST_CUDA_ERROR();

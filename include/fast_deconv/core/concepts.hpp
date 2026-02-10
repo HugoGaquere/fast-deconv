@@ -17,6 +17,6 @@ template <typename T>
 concept is_layout_stride = std::is_same_v<layout_type<T>, emu::layout_stride>;
 
 template <typename T>
-concept mdspan = emu::cuda::device::cpts::mdspan<T>;
+concept mdspan = emu::cpts::mdspan<T>;
 
 }  // namespace fast_deconv::core::cpts

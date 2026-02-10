@@ -4,8 +4,8 @@
 
 #include <emu/cuda/device.hpp>
 #include <emu/cuda/device/mdcontainer.hpp>
-#include <emu/cuda/memory.hpp>
 #include <emu/cuda/device/mdspan.hpp>
+#include <emu/cuda/memory.hpp>
 #include <fast_deconv/core/stream_resources.hpp>
 #include <fast_deconv/matrix/subtract.hpp>
 
@@ -24,7 +24,6 @@ void run_subtract()
   emu::cuda::device::mdspan_2d<float> A(data_a.data(), rows, cols);
   emu::cuda::device::mdspan_2d<float> B(data_b.data(), rows, cols);
   emu::cuda::device::mdspan_2d<float> C(data_c.data(), rows, cols);
-
 
   // fill_device_random(A.data(), N);
   // fill_device_random(B.data(), N);
