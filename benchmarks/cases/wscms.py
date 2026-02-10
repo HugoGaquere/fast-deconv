@@ -8,256 +8,209 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import cupy as cp
+import numpy as np
 
 import fast_deconv as fd
+import nvtx
 
 from .base import BenchmarkCase
 
 
-@dataclass
-class SubtractPsfFromDirtyBenchmark(BenchmarkCase):
-    """
-    Benchmark PSF subtraction from dirty image.
+def _python_reference_minor_cycle(
+    dirty, scaled_dirty, mask, psfs, psfs_2, gains, jones_norm,
+    Xdes, sqrt_weights, map_pixels_facets,
+    scale_idx, peak_factor, n_subminor_iter, do_abs, beam_enable,
+):
+    """Pure CuPy reference implementation of wscms_minor_cycle."""
+    nch, npol, h, w = dirty.shape
 
-    Operation: out[k, 0, i, j] = dirty[k, 0, i, j] - psf[k, 0, i, j] * coeffs[k] * gain
+    if do_abs:
+        masked = cp.where(mask, cp.abs(scaled_dirty), 0)
+    else:
+        masked = cp.where(mask, scaled_dirty, -cp.inf)
+    peak_flat = int(cp.argmax(masked).item())
+    peak_coords = np.unravel_index(peak_flat, dirty.shape)
+    peak_val = abs(float(scaled_dirty[peak_coords].item())) if do_abs else float(scaled_dirty[peak_coords].item())
 
-    This is a core operation in CLEAN-based deconvolution algorithms.
-    """
+    threshold = peak_factor * peak_val
 
-    n_channels: int = 16
-    n_pol: int = 1  # Always 1 for this operation
-    height: int = 512
-    width: int = 512
-    gain: float = 0.1
-    dtype: cp.dtype = field(default_factory=lambda: cp.float32)
+    if do_abs:
+        mask = mask & (cp.abs(dirty) > threshold)
+    else:
+        mask = mask & (dirty > threshold)
 
-    name: str = field(init=False)
-    description: str = field(init=False)
+    sub_iter = 0
+    while peak_val > threshold and sub_iter < n_subminor_iter:
+        peak_ch, peak_pol, x, y = peak_coords
+        facet_idx = int(map_pixels_facets[x, y].item())
+        gain = float(gains[scale_idx, facet_idx].item())
 
-    def __post_init__(self):
-        self.name = "subtract_psf_from_dirty"
-        self.description = (
-            f"PSF subtraction ({self.n_channels}ch x {self.height}x{self.width})"
+        jn = jones_norm[:, 0, x, y]
+        apparent_flux = dirty[:, 0, x, y]
+
+        if beam_enable:
+            SAX = cp.sqrt(jn)[:, None] * Xdes
+        else:
+            SAX = Xdes.copy()
+
+        WX = (sqrt_weights[:, None] * SAX).astype(cp.float64)
+        nchan, order = WX.shape
+        if nchan >= order:
+            pinv = cp.linalg.inv(WX.T @ WX) @ WX.T
+        else:
+            pinv = WX.T @ cp.linalg.inv(WX @ WX.T)
+
+        Wy = (sqrt_weights * apparent_flux).astype(cp.float64)
+        coeffs_compact = pinv @ Wy
+        per_channel = (SAX.astype(cp.float64) @ coeffs_compact).astype(cp.float32)
+
+        psf_h, psf_w = psfs.shape[4], psfs.shape[5]
+        left = psf_w // 2; right = psf_w - left
+        top = psf_h // 2; bottom = psf_h - top
+
+        img_x0 = max(0, x - left); img_x1 = min(h, x + right)
+        img_y0 = max(0, y - top); img_y1 = min(w, y + bottom)
+        psf_x0 = img_x0 - (x - left); psf_x1 = psf_w - ((x + right) - img_x1)
+        psf_y0 = img_y0 - (y - top); psf_y1 = psf_h - ((y + bottom) - img_y1)
+
+        psf_sub = psfs[scale_idx, facet_idx, :, :, psf_x0:psf_x1, psf_y0:psf_y1]
+        mask_region = mask[:, :, img_x0:img_x1, img_y0:img_y1].astype(cp.float32)
+        dirty[:, :, img_x0:img_x1, img_y0:img_y1] -= (
+            psf_sub * per_channel[:, None, None, None] * gain * mask_region
         )
 
-    def setup(self, stream: cp.cuda.Stream) -> tuple[Callable[[], Any], Callable[[], Any]]:
-        shape = (self.n_channels, self.n_pol, self.height, self.width)
+        psf_2_sub = psfs_2[scale_idx, facet_idx, :, :, psf_x0:psf_x1, psf_y0:psf_y1]
+        sd_peak = float(scaled_dirty[0, 0, x, y].item())
+        gain_scaled = sd_peak * gain
+        scaled_dirty[:, :, img_x0:img_x1, img_y0:img_y1] -= (
+            psf_2_sub * gain_scaled * mask[:, :, img_x0:img_x1, img_y0:img_y1].astype(cp.float32)
+        )
 
-        # Create 4D arrays with an extra element in last dim to create strided views
-        # The WSCMS function requires layout_stride arrays
-        padded_shape = (self.n_channels, self.n_pol, self.height, self.width + 1)
-        psf_full = cp.random.randn(*padded_shape, dtype=self.dtype)
-        dirty_full = cp.random.randn(*padded_shape, dtype=self.dtype)
-        out_cupy_full = cp.empty_like(dirty_full)
-        out_fd_full = cp.empty_like(dirty_full)
-
-        # Create strided views (non-contiguous in last dimension)
-        slc = (slice(None), slice(None), slice(None), slice(None, -1))
-        psf = psf_full[slc]
-        dirty = dirty_full[slc]
-        out_cupy = out_cupy_full[slc]
-        out_fd = out_fd_full[slc]
-
-        coeffs = cp.random.randn(self.n_channels, dtype=self.dtype)
-
-        gain = self.gain
-        resources = fd.stream_resources.from_cupy_stream(stream)
-
-        def cupy_fn():
-            with stream:
-                # CuPy equivalent: broadcasting coeffs across spatial dims
-                # coeffs shape: (nch,) -> (nch, 1, 1, 1) for broadcasting
-                coeffs_broadcast = coeffs[:, cp.newaxis, cp.newaxis, cp.newaxis]
-                cp.subtract(
-                    dirty, psf * coeffs_broadcast * gain, out=out_cupy
-                )
-            return out_cupy
-
-        def fast_deconv_fn():
-            fd.wscms.subtract_psf_from_dirty_async(
-                psf, dirty, coeffs, out_fd, gain, resources
-            )
-            return out_fd
-
-        return cupy_fn, fast_deconv_fn
-
-    def get_metadata(self) -> dict[str, Any]:
-        return {
-            "n_channels": self.n_channels,
-            "n_pol": self.n_pol,
-            "height": self.height,
-            "width": self.width,
-            "gain": self.gain,
-            "dtype": str(self.dtype),
-            "total_elements": self.n_channels * self.n_pol * self.height * self.width,
-        }
+        if do_abs:
+            masked = cp.where(mask, cp.abs(scaled_dirty), 0)
+        else:
+            masked = cp.where(mask, scaled_dirty, -cp.inf)
+        peak_flat = int(cp.argmax(masked).item())
+        peak_coords = np.unravel_index(peak_flat, dirty.shape)
+        peak_val = abs(float(scaled_dirty[peak_coords].item())) if do_abs else float(scaled_dirty[peak_coords].item())
+        sub_iter += 1
 
 
 @dataclass
-class SubtractPsfFromDirtyStridedBenchmark(BenchmarkCase):
+class WscmsMinorCycleBenchmark(BenchmarkCase):
     """
-    Benchmark PSF subtraction with strided (non-contiguous) arrays.
+    Benchmark the full WSCMS sub-minor cycle loop.
 
-    This simulates real-world usage where PSF/dirty images are views
-    into larger memory-mapped or pre-allocated buffers.
+    Compares the C++ wscms_minor_cycle against a pure CuPy reference
+    implementation. The minor cycle iteratively finds peaks, performs
+    spectral fitting, and subtracts PSFs from dirty/scaled_dirty images.
     """
 
-    n_channels: int = 16
+    n_channels: int = 4
     n_pol: int = 1
-    height: int = 512
-    width: int = 512
-    gain: float = 0.1
-    stride_factor: int = 2
+    height: int = 64
+    width: int = 64
+    psf_height: int = 32
+    psf_width: int = 32
+    n_scales: int = 1
+    n_facets: int = 1
+    order: int = 2
+    n_subminor_iter: int = 10
+    peak_factor: float = 0.5
+    do_abs: bool = True
+    beam_enable: bool = True
     dtype: cp.dtype = field(default_factory=lambda: cp.float32)
 
     name: str = field(init=False)
     description: str = field(init=False)
 
     def __post_init__(self):
-        self.name = "subtract_psf_from_dirty_strided"
+        self.name = "wscms_minor_cycle"
         self.description = (
-            f"PSF subtraction strided ({self.n_channels}ch x {self.height}x{self.width})"
+            f"Minor cycle ({self.n_channels}ch x {self.height}x{self.width}, "
+            f"{self.n_subminor_iter} iters)"
         )
 
     def setup(self, stream: cp.cuda.Stream) -> tuple[Callable[[], Any], Callable[[], Any]]:
-        # Create larger arrays and slice to get strided views
-        full_shape = (
-            self.n_channels * self.stride_factor,
-            self.n_pol,
-            self.height * self.stride_factor,
-            self.width * self.stride_factor,
+        rng = cp.random.default_rng(42)
+
+        nch, npol, h, w = self.n_channels, self.n_pol, self.height, self.width
+        psf_h, psf_w = self.psf_height, self.psf_width
+
+        # Create initial data with enough signal for iterations
+        dirty_init = rng.standard_normal((nch, npol, h, w), dtype=self.dtype) * 10
+        scaled_dirty_init = dirty_init.copy()
+        mask_init = cp.ones((nch, npol, h, w), dtype=cp.bool_)
+        psfs = rng.standard_normal(
+            (self.n_scales, self.n_facets, nch, npol, psf_h, psf_w), dtype=self.dtype
+        )
+        psfs_2 = rng.standard_normal(
+            (self.n_scales, self.n_facets, nch, npol, psf_h, psf_w), dtype=self.dtype
+        )
+        gains = cp.ones((self.n_scales, self.n_facets), dtype=self.dtype) * 0.1
+        jones_norm = cp.ones((nch, npol, h, w), dtype=self.dtype)
+        Xdes = rng.standard_normal((nch, self.order), dtype=self.dtype)
+        sqrt_weights = cp.ones(nch, dtype=self.dtype)
+        map_pixels_facets = cp.zeros((h, w), dtype=cp.int32)
+
+        # Working copies that get reset each call
+        dirty_cupy = cp.empty_like(dirty_init)
+        scaled_dirty_cupy = cp.empty_like(dirty_init)
+        mask_cupy = cp.empty_like(mask_init)
+        dirty_fd = cp.empty_like(dirty_init)
+        scaled_dirty_fd = cp.empty_like(dirty_init)
+        mask_fd = cp.empty_like(mask_init)
+
+        resources = fd.stream_resources.from_cupy_stream(stream)
+
+        ctx = fd.wscms.make_minor_cycle_context(
+            jones_norm=jones_norm,
+            map_pixels_facets=map_pixels_facets,
+            Xdes=Xdes, sqrt_weights=sqrt_weights,
+            beam_enable=self.beam_enable,
+            peak_factor=self.peak_factor,
+            n_subminor_iter=self.n_subminor_iter,
+            do_abs=self.do_abs,
         )
 
-        psf_full = cp.random.randn(*full_shape, dtype=self.dtype)
-        dirty_full = cp.random.randn(*full_shape, dtype=self.dtype)
-        out_full_cupy = cp.empty_like(dirty_full)
-        out_full_fd = cp.empty_like(dirty_full)
-
-        # Strided views
-        sf = self.stride_factor
-        psf = psf_full[::sf, :, ::sf, ::sf]
-        dirty = dirty_full[::sf, :, ::sf, ::sf]
-        out_cupy = out_full_cupy[::sf, :, ::sf, ::sf]
-        out_fd = out_full_fd[::sf, :, ::sf, ::sf]
-
-        coeffs = cp.random.randn(self.n_channels, dtype=self.dtype)
-        gain = self.gain
-        resources = fd.stream_resources.from_cupy_stream(stream)
+        scale_idx = 0
 
         def cupy_fn():
             with stream:
-                coeffs_broadcast = coeffs[:, cp.newaxis, cp.newaxis, cp.newaxis]
-                cp.subtract(
-                    dirty, psf * coeffs_broadcast * gain, out=out_cupy
+                # Reset data
+                cp.copyto(dirty_cupy, dirty_init)
+                cp.copyto(scaled_dirty_cupy, scaled_dirty_init)
+                cp.copyto(mask_cupy, mask_init)
+
+                with nvtx.annotate("kernelsss"):
+                    _python_reference_minor_cycle(
+                        dirty_cupy, scaled_dirty_cupy, mask_cupy,
+                        psfs, psfs_2, gains, jones_norm,
+                        Xdes, sqrt_weights, map_pixels_facets,
+                        scale_idx, self.peak_factor, self.n_subminor_iter,
+                        self.do_abs, self.beam_enable,
+                    )
+            return dirty_cupy
+
+        def fast_deconv_fn():
+            # Reset data
+            cp.copyto(dirty_fd, dirty_init)
+            cp.copyto(scaled_dirty_fd, scaled_dirty_init)
+            cp.copyto(mask_fd, mask_init)
+
+
+            with nvtx.annotate("kernels"):
+                fd.wscms.wscms_minor_cycle(
+                    dirty_fd, scaled_dirty_fd, psfs, psfs_2, mask_fd, gains,
+                    scale_idx, ctx, resources,
                 )
-            return out_cupy
-
-        def fast_deconv_fn():
-            fd.wscms.subtract_psf_from_dirty_async(
-                psf, dirty, coeffs, out_fd, gain, resources
-            )
-            return out_fd
-
-        return cupy_fn, fast_deconv_fn
-
-    def get_metadata(self) -> dict[str, Any]:
-        return {
-            "n_channels": self.n_channels,
-            "n_pol": self.n_pol,
-            "height": self.height,
-            "width": self.width,
-            "gain": self.gain,
-            "stride_factor": self.stride_factor,
-            "dtype": str(self.dtype),
-            "layout": "strided",
-            "total_elements": self.n_channels * self.n_pol * self.height * self.width,
-        }
-
-
-@dataclass
-class CleanDirtiesBenchmark(BenchmarkCase):
-    """
-    Benchmark fused clean_dirties operation.
-
-    Operations:
-        dirty[i] -= psf[i] * coeffs[ch] * gain
-        scaled_dirty[i] -= psf_2[i] * gain * mask[i]
-
-    This is the core fused kernel for WSCMS deconvolution that performs
-    both dirty and scaled_dirty subtraction in a single pass.
-    """
-
-    n_channels: int = 16
-    n_pol: int = 1
-    height: int = 512
-    width: int = 512
-    gain: float = 0.1
-    mask_ratio: float = 0.5
-    dtype: cp.dtype = field(default_factory=lambda: cp.float32)
-
-    name: str = field(init=False)
-    description: str = field(init=False)
-
-    def __post_init__(self):
-        self.name = "clean_dirties"
-        self.description = (
-            f"Clean dirties fused ({self.n_channels}ch x {self.height}x{self.width})"
-        )
-
-    def setup(self, stream: cp.cuda.Stream) -> tuple[Callable[[], Any], Callable[[], Any]]:
-        shape = (self.n_channels, self.n_pol, self.height, self.width)
-
-        # Create padded arrays to get strided views (required by the kernel)
-        padded_shape = (self.n_channels, self.n_pol, self.height, self.width + 1)
-
-        psf_full = cp.random.randn(*padded_shape, dtype=self.dtype)
-        psf_2_full = cp.random.randn(*padded_shape, dtype=self.dtype)
-        dirty_cupy_full = cp.random.randn(*padded_shape, dtype=self.dtype)
-        dirty_fd_full = dirty_cupy_full.copy()
-        scaled_dirty_cupy_full = cp.random.randn(*padded_shape, dtype=self.dtype)
-        scaled_dirty_fd_full = scaled_dirty_cupy_full.copy()
-        mask_full = (cp.random.rand(*padded_shape) < self.mask_ratio).astype(self.dtype)
-
-        # Strided views
-        slc = (slice(None), slice(None), slice(None), slice(None, -1))
-        psf = psf_full[slc]
-        psf_2 = psf_2_full[slc]
-        dirty_cupy = dirty_cupy_full[slc]
-        dirty_fd = dirty_fd_full[slc]
-        scaled_dirty_cupy = scaled_dirty_cupy_full[slc]
-        scaled_dirty_fd = scaled_dirty_fd_full[slc]
-        mask = mask_full[slc]
-
-        coeffs = cp.random.randn(self.n_channels, dtype=self.dtype)
-        gain = self.gain
-        resources = fd.stream_resources.from_cupy_stream(stream)
-
-        def cupy_fn():
-            with stream:
-                # Operation 1: dirty -= psf * coeffs * gain
-                coeffs_broadcast = coeffs[:, cp.newaxis, cp.newaxis, cp.newaxis]
-                dirty_cupy[...] -= psf * coeffs_broadcast * gain
-                # Operation 2: scaled_dirty -= psf_2 * gain * mask
-                scaled_dirty_cupy[...] -= psf_2 * gain * mask
-            return (dirty_cupy, scaled_dirty_cupy)
-
-        def fast_deconv_fn():
-            fd.wscms.clean_dirties_async(
-                psf, psf_2, dirty_fd, scaled_dirty_fd,
-                coeffs, mask, gain, resources
-            )
-            return (dirty_fd, scaled_dirty_fd)
+            return dirty_fd
 
         return cupy_fn, fast_deconv_fn
 
     def _compare_results(self, cupy_result: Any, fast_deconv_result: Any) -> bool:
-        """Compare both dirty and scaled_dirty outputs."""
-        dirty_cupy, scaled_dirty_cupy = cupy_result
-        dirty_fd, scaled_dirty_fd = fast_deconv_result
-        return (
-            cp.allclose(dirty_cupy, dirty_fd, rtol=1e-5, atol=1e-5) and
-            cp.allclose(scaled_dirty_cupy, scaled_dirty_fd, rtol=1e-5, atol=1e-5)
-        )
+        """Allow looser tolerance for iterative algorithm."""
+        return cp.allclose(cupy_result, fast_deconv_result, rtol=1e-4, atol=1e-4)
 
     def get_metadata(self) -> dict[str, Any]:
         return {
@@ -265,106 +218,13 @@ class CleanDirtiesBenchmark(BenchmarkCase):
             "n_pol": self.n_pol,
             "height": self.height,
             "width": self.width,
-            "gain": self.gain,
-            "mask_ratio": self.mask_ratio,
+            "psf_height": self.psf_height,
+            "psf_width": self.psf_width,
+            "n_scales": self.n_scales,
+            "n_facets": self.n_facets,
+            "order": self.order,
+            "n_subminor_iter": self.n_subminor_iter,
+            "peak_factor": self.peak_factor,
             "dtype": str(self.dtype),
-            "total_elements": self.n_channels * self.n_pol * self.height * self.width,
-        }
-
-
-@dataclass
-class CleanDirtiesStridedBenchmark(BenchmarkCase):
-    """
-    Benchmark fused clean_dirties operation with strided arrays.
-
-    This simulates real-world usage where images are views into larger
-    pre-allocated buffers or memory-mapped files.
-    """
-
-    n_channels: int = 16
-    n_pol: int = 1
-    height: int = 512
-    width: int = 512
-    gain: float = 0.1
-    mask_ratio: float = 0.5
-    stride_factor: int = 2
-    dtype: cp.dtype = field(default_factory=lambda: cp.float32)
-
-    name: str = field(init=False)
-    description: str = field(init=False)
-
-    def __post_init__(self):
-        self.name = "clean_dirties_strided"
-        self.description = (
-            f"Clean dirties strided ({self.n_channels}ch x {self.height}x{self.width})"
-        )
-
-    def setup(self, stream: cp.cuda.Stream) -> tuple[Callable[[], Any], Callable[[], Any]]:
-        # Create larger arrays and slice to get strided views
-        sf = self.stride_factor
-        full_shape = (
-            self.n_channels * sf,
-            self.n_pol,
-            self.height * sf,
-            self.width * sf,
-        )
-
-        psf_full = cp.random.randn(*full_shape, dtype=self.dtype)
-        psf_2_full = cp.random.randn(*full_shape, dtype=self.dtype)
-        dirty_cupy_full = cp.random.randn(*full_shape, dtype=self.dtype)
-        dirty_fd_full = dirty_cupy_full.copy()
-        scaled_dirty_cupy_full = cp.random.randn(*full_shape, dtype=self.dtype)
-        scaled_dirty_fd_full = scaled_dirty_cupy_full.copy()
-        mask_full = (cp.random.rand(*full_shape) < self.mask_ratio).astype(self.dtype)
-
-        # Strided views
-        psf = psf_full[::sf, :, ::sf, ::sf]
-        psf_2 = psf_2_full[::sf, :, ::sf, ::sf]
-        dirty_cupy = dirty_cupy_full[::sf, :, ::sf, ::sf]
-        dirty_fd = dirty_fd_full[::sf, :, ::sf, ::sf]
-        scaled_dirty_cupy = scaled_dirty_cupy_full[::sf, :, ::sf, ::sf]
-        scaled_dirty_fd = scaled_dirty_fd_full[::sf, :, ::sf, ::sf]
-        mask = mask_full[::sf, :, ::sf, ::sf]
-
-        coeffs = cp.random.randn(self.n_channels, dtype=self.dtype)
-        gain = self.gain
-        resources = fd.stream_resources.from_cupy_stream(stream)
-
-        def cupy_fn():
-            with stream:
-                coeffs_broadcast = coeffs[:, cp.newaxis, cp.newaxis, cp.newaxis]
-                dirty_cupy[...] -= psf * coeffs_broadcast * gain
-                scaled_dirty_cupy[...] -= psf_2 * gain * mask
-            return (dirty_cupy, scaled_dirty_cupy)
-
-        def fast_deconv_fn():
-            fd.wscms.clean_dirties_async(
-                psf, psf_2, dirty_fd, scaled_dirty_fd,
-                coeffs, mask, gain, resources
-            )
-            return (dirty_fd, scaled_dirty_fd)
-
-        return cupy_fn, fast_deconv_fn
-
-    def _compare_results(self, cupy_result: Any, fast_deconv_result: Any) -> bool:
-        """Compare both dirty and scaled_dirty outputs."""
-        dirty_cupy, scaled_dirty_cupy = cupy_result
-        dirty_fd, scaled_dirty_fd = fast_deconv_result
-        return (
-            cp.allclose(dirty_cupy, dirty_fd, rtol=1e-5, atol=1e-5) and
-            cp.allclose(scaled_dirty_cupy, scaled_dirty_fd, rtol=1e-5, atol=1e-5)
-        )
-
-    def get_metadata(self) -> dict[str, Any]:
-        return {
-            "n_channels": self.n_channels,
-            "n_pol": self.n_pol,
-            "height": self.height,
-            "width": self.width,
-            "gain": self.gain,
-            "mask_ratio": self.mask_ratio,
-            "stride_factor": self.stride_factor,
-            "dtype": str(self.dtype),
-            "layout": "strided",
             "total_elements": self.n_channels * self.n_pol * self.height * self.width,
         }

@@ -21,23 +21,15 @@ class BenchmarkConfig:
     iterations: int = 200
     use_nvtx: bool = True
 
-    # For Nsight profiling (fewer iterations)
-    @classmethod
-    def for_profiling(cls) -> BenchmarkConfig:
-        """Config optimized for Nsight profiling."""
-        return cls(warmup=5, iterations=10, use_nvtx=True)
-
-    # For quick sanity checks
     @classmethod
     def quick(cls) -> BenchmarkConfig:
         """Config for quick sanity checks."""
         return cls(warmup=10, iterations=50, use_nvtx=False)
 
-    # For thorough benchmarking
     @classmethod
     def thorough(cls) -> BenchmarkConfig:
         """Config for thorough statistical analysis."""
-        return cls(warmup=100, iterations=500, use_nvtx=True)
+        return cls(warmup=100, iterations=1000, use_nvtx=True)
 
 
 @dataclass
