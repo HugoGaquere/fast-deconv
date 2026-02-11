@@ -3,7 +3,6 @@
 #include <vector>
 
 #include <emu/pybind11/cast/mdspan.hpp>
-#include <fast_deconv/algorithm/clean_dirties_op.hpp>
 #include <fast_deconv/algorithm/wscms.hpp>
 #include <fast_deconv/algorithm/wscms_op.hpp>
 #include <fast_deconv/algorithm/wscms_types.hpp>
@@ -97,8 +96,7 @@ void bind_wscms(py::module_& m)
        fd_core::device_span4d<bool> mask,
        fd_core::device_span2d<float> gains_dev,
        std::uint32_t scale_idx,
-       PythonMinorCycleContext& py_ctx,
-       fd_core::stream_resources& resources) -> py::list {
+       PythonMinorCycleContext& py_ctx) -> py::list {
       // Copy gains from device to host
       const auto g_rows = gains_dev.extent(0);
       const auto g_cols = gains_dev.extent(1);
@@ -108,8 +106,7 @@ void bind_wscms(py::module_& m)
       fd_core::host_span2d<float> gains(host_gains.data(), g_rows, g_cols);
 
       auto entries = fd_algo::wscms_minor_cycle(
-        dirty, scaled_dirty, psfs, psfs_2, mask, gains,
-        scale_idx, py_ctx.ctx, resources);
+        dirty, scaled_dirty, psfs, psfs_2, mask, gains, scale_idx, py_ctx.ctx);
 
       // Convert to Python list of (coords, coeffs, scale_idx, gain) tuples
       py::list result;
@@ -130,35 +127,11 @@ void bind_wscms(py::module_& m)
     py::arg("gains"),
     py::arg("scale_idx"),
     py::arg("ctx"),
-    py::arg("resources"),
     R"pbdoc(
 Run the WSCMS sub-minor loop.
 
 Returns a list of (coords, coeffs, scale_idx, gain) tuples.
 )pbdoc");
 
-  m.def("subtract_psf_from_dirty_async",
-        &fd_wscms::subtract_psf_from_dirty_async,
-        R"pbdoc(Subtract scaled PSF from dirty image)pbdoc");
-
-  m.def("clean_dirties_async",
-        &fd_wscms::clean_dirties_async,
-        R"pbdoc(
-Fused kernel for dirty and scaled_dirty subtraction.
-
-Performs:
-  dirty -= psf * coeffs * gain
-  scaled_dirty -= psf_2 * gain * mask
-
-Args:
-    psf: Convolved PSF for dirty subtraction (nch, npol, h, w)
-    psf_2: Convolved PSF for scaled_dirty subtraction (nch, npol, h, w)
-    dirty: Dirty image (in-place) (nch, npol, h, w)
-    scaled_dirty: Scaled dirty image (in-place) (nch, npol, h, w)
-    coeffs: Per-channel coefficients (nch,)
-    mask: Mask as float (0.0/1.0) (nch, npol, h, w)
-    gain: Gain for dirty subtraction
-    resources: Stream resources
-)pbdoc");
 }
 }  // namespace fast_deconv::python

@@ -19,11 +19,10 @@ std::vector<ComponentEntry> wscms_minor_cycle(core::device_span4d<float> dirty,
                        core::device_span4d<bool> mask,
                        core::host_span2d<float> gains,
                        std::uint32_t scale_idx,
-                       const MinorCycleContext& ctx,
-                       core::stream_resources& resources)
+                       const MinorCycleContext& ctx)
 {
   return detail::wscms_minor_cycle(
-    dirty, scaled_dirty, psfs, psfs_2, mask, gains, scale_idx, ctx, resources);
+    dirty, scaled_dirty, psfs, psfs_2, mask, gains, scale_idx, ctx);
 }
 
 }  // namespace fast_deconv::algorithm::wscms
