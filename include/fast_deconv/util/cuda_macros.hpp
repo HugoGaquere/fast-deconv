@@ -23,7 +23,7 @@ inline void check_last(const char* const file, const int line)
   if (err != cudaSuccess) {
     std::cerr << "CUDA Runtime Error at: " << file << ":" << line << std::endl;
     std::cerr << cudaGetErrorString(err) << std::endl;
-    // std::exit(EXIT_FAILURE);
+    std::exit(EXIT_FAILURE);
   }
 }
 
