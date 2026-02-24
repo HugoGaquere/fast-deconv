@@ -11,8 +11,6 @@
 
 #include <vector>
 
-#include <fmt/core.h>
-
 // 1. Find peak inside scaled_dirty              (stream_1)
 // 2. Copy peak_value to host                    (stream_1)
 // 3. Compute threshold                          (host)
@@ -72,8 +70,7 @@ __host__ __device__ inline roi_strided compute_roi(
   return roi_strided{a_x0, a_y0, b_x_offset, b_y_offset, w, h, a_width, b_width};
 }
 
-__host__ __device__ inline auto unravel_index_2D(uint flat_index, uint width)
-  -> std::pair<uint, uint>
+__host__ __device__ inline auto unravel_index_2D(uint flat_index, uint width) -> std::pair<uint, uint>
 {
   const uint y = flat_index / width;
   const uint x = flat_index % width;
@@ -82,9 +79,7 @@ __host__ __device__ inline auto unravel_index_2D(uint flat_index, uint width)
 
 // Extract spatial (y, x) from a 4D flat index: flat = ch*(npol*h*w) + pol*(h*w) + y*w + x
 // Since h*w divides evenly into the higher dims, flat % (h*w) gives the spatial index.
-__host__ __device__ inline auto unravel_spatial_index(uint flat_index,
-                                                      uint plane_stride,
-                                                      uint width) -> std::pair<uint, uint>
+__host__ __device__ inline auto unravel_spatial_index(uint flat_index, uint plane_stride, uint width) -> std::pair<uint, uint>
 {
   const uint spatial_idx = flat_index % plane_stride;
   return {spatial_idx / width, spatial_idx % width};
@@ -117,15 +112,14 @@ __global__ void update_mask_kernel(core::device_span4d<float> dirty,
 
 void update_mask(core::device_span4d<float>& dirty,
                  core::device_span4d<bool>& mask,
-                 bool do_abs,
-                 float threshold,
+                 bool do_abs, float threshold,
                  core::stream_resources& resources)
 {
   dim3 block(16, 16, 1);
   dim3 grid(CEIL_DIV(mask.extent(0), block.x),
             CEIL_DIV(mask.extent(1), block.y),
             mask.extent(2) * mask.extent(3));
-  // update_mask_kernel<<<grid, block, 0, resources.stream>>>(dirty, mask, do_abs, threshold);
+  update_mask_kernel<<<grid, block, 0, resources.stream>>>(dirty, mask, do_abs, threshold);
   CHECK_LAST_CUDA_ERROR();
 }
 
@@ -241,15 +235,9 @@ __global__ void masked_axpy_naive_kernel(float* __restrict__ dirty,
   if (mask[a_offset]) dirty[a_offset] -= psf[b_offset] * gain;
 }
 
-void masked_axpy_naive(float* dirty_ptr,
-                       const float* psf_slice_ptr,
-                       const bool* mask_ptr,
-                       roi_strided roi,
-                       float gain,
-                       uint n_freq_pol,
-                       uint dirty_plane_stride,
-                       uint psf_plane_stride,
-                       cudaStream_t stream)
+void masked_axpy_naive(float* dirty_ptr, const float* psf_slice_ptr, const bool* mask_ptr,
+                       roi_strided roi, float gain, uint n_freq_pol, uint dirty_plane_stride,
+                       uint psf_plane_stride, cudaStream_t stream)
 {
   dim3 block(16, 16, 1);
   dim3 grid(CEIL_DIV(roi.w, block.x), CEIL_DIV(roi.h, block.y), n_freq_pol);
@@ -258,53 +246,26 @@ void masked_axpy_naive(float* dirty_ptr,
   CHECK_LAST_CUDA_ERROR();
 }
 
-void clean_dirty(float* dirty_ptr,
-                 const float* psf_slice_ptr,
-                 const bool* mask_ptr,
-                 const float* xdes_pinv_ptr,
-                 const float* xdes_ptr,
-                 core::device_vect<float> sqrt_weights,
-                 roi_strided roi,
-                 float gain,
-                 uint n_freq,
-                 uint n_order,
-                 uint n_freq_pol,
-                 uint peak_y,
-                 uint peak_x,
-                 uint dirty_plane_stride,
-                 uint psf_plane_stride,
-                 ComponentEntry* entries,
-                 uint iter_idx,
-                 int scale_idx,
-                 cudaStream_t stream)
+void clean_dirty(float* dirty_ptr, const float* psf_slice_ptr, const bool* mask_ptr,
+                 const float* xdes_pinv_ptr, const float* xdes_ptr, core::device_vect<float> sqrt_weights,
+                 roi_strided roi, float gain, uint n_freq, uint n_order, uint n_freq_pol,
+                 uint peak_y, uint peak_x, uint dirty_plane_stride, uint psf_plane_stride,
+                 ComponentEntry* entries, uint iter_idx, int scale_idx, cudaStream_t stream)
 {
   dim3 block(16, 16, 1);
   dim3 grid(CEIL_DIV(roi.w, block.x), CEIL_DIV(roi.h, block.y), n_freq_pol);
   const uint smem_size = (2 * n_freq + n_order) * sizeof(float);
-  clean_dirty_kernel<<<grid, block, smem_size, stream>>>(dirty_ptr,
-                                                         psf_slice_ptr,
-                                                         mask_ptr,
-                                                         xdes_pinv_ptr,
-                                                         xdes_ptr,
-                                                         sqrt_weights,
-                                                         roi,
-                                                         gain,
-                                                         n_freq,
-                                                         n_order,
-                                                         peak_y,
-                                                         peak_x,
-                                                         dirty_plane_stride,
-                                                         psf_plane_stride,
-                                                         entries,
-                                                         iter_idx,
-                                                         scale_idx);
+  clean_dirty_kernel<<<grid, block, smem_size, stream>>>(dirty_ptr, psf_slice_ptr, mask_ptr, xdes_pinv_ptr,
+                                                         xdes_ptr, sqrt_weights, roi, gain, n_freq, n_order,
+                                                         peak_y, peak_x, dirty_plane_stride, psf_plane_stride, entries,
+                                                         iter_idx, scale_idx);
   CHECK_LAST_CUDA_ERROR();
 }
 
 // ================================================================== //
 //                     Minor Cycle Launcher
 // ================================================================== //
-std::vector<ComponentEntry> wscms_minor_cycle(core::device_span4d<float>& dirty,
+std::vector<ComponentEntry> minor_cycle(core::device_span4d<float>& dirty,
                                               core::device_span4d<float>& scaled_dirty,
                                               core::device_span6d<float>& psfs,
                                               core::device_span6d<float>& psfs_2,
@@ -362,9 +323,6 @@ std::vector<ComponentEntry> wscms_minor_cycle(core::device_span4d<float>& dirty,
   resources_1.sync();
   const float threshold = ctx.peak_factor * (*peak_value);
 
-  fmt::print("[wscms] image: {}x{}, psf: {}x{}, max_iter: {}, threshold: {:.6e}, initial_peak: {:.6e}\n",
-             dirty_width, dirty_height, psf_width, psf_height, ctx.n_subminor_iter, threshold, *peak_value);
-
   // mask = mask & dirty > threshold
   update_mask(dirty, mask, ctx.do_abs, threshold, resources_1);
 
@@ -377,9 +335,6 @@ std::vector<ComponentEntry> wscms_minor_cycle(core::device_span4d<float>& dirty,
     const roi_strided roi       = compute_roi(peak_y, peak_x, dirty_height, dirty_width, psf_height, psf_width);
     const int facet_idx         = ctx.map_pixels_facets(peak_y, peak_x);
     const float gain            = gains(scale_idx, facet_idx);
-
-    fmt::print("[wscms] iter: {}/{}, peak: ({}, {}), value: {:.6e}, threshold: {:.6e}, roi: {}x{}\n",
-               n_iter + 1, ctx.n_subminor_iter, peak_y, peak_x, *peak_value, threshold, roi.w, roi.h);
 
     // Pre-offset psf pointer to the (scale_idx, facet_idx) slice
     const float* psf_slice = psfs.data_handle() + scale_idx * psf_scale_stride + facet_idx * psf_facet_stride;

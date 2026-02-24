@@ -1,18 +1,14 @@
 #pragma once
 
-// #include "fast_deconv/algorithm/detail/wscms_old.hpp"
-#include <cuda/std/mdspan>
-
 #include <vector>
 
-#include <fast_deconv/algorithm/detail/wscms_minor_loop.cuh>
 #include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/span_types.hpp>
-#include <fast_deconv/core/stream_resources.hpp>
+#include <fast_deconv/algorithm/detail/wscms_minor_loop.cuh>
 
 namespace fast_deconv::algorithm::wscms {
 
-std::vector<ComponentEntry> wscms_minor_cycle(core::device_span4d<float> dirty,
+std::vector<ComponentEntry> minor_cycle(core::device_span4d<float> dirty,
                        core::device_span4d<float> scaled_dirty,
                        core::device_span6d<float> psfs,
                        core::device_span6d<float> psfs_2,
@@ -21,8 +17,7 @@ std::vector<ComponentEntry> wscms_minor_cycle(core::device_span4d<float> dirty,
                        std::uint32_t scale_idx,
                        const MinorCycleContext& ctx)
 {
-  return detail::wscms_minor_cycle(
-    dirty, scaled_dirty, psfs, psfs_2, mask, gains, scale_idx, ctx);
+  return detail::minor_cycle(dirty, scaled_dirty, psfs, psfs_2, mask, gains, scale_idx, ctx);
 }
 
 }  // namespace fast_deconv::algorithm::wscms
