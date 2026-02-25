@@ -67,11 +67,6 @@ endif()
 #-------------------------------------------------------------------#
 # Core library
 #-------------------------------------------------------------------#
-# Do not generate response file since lsp can't read it
-# To disable for release
-set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES OFF)
-set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS OFF)
-set(CMAKE_NINJA_FORCE_RESPONSE_FILE OFF)
 
 add_library(fast_deconv INTERFACE)
 
@@ -83,9 +78,10 @@ target_link_libraries(fast_deconv INTERFACE
   fmt::fmt
   emu::emu
   CUDA::cublas
+  CUDA::cufft
   # CUDA::thrust
   # $<TARGET_NAME_IF_EXISTS:mathdx::cublasdx>
-  # $<TARGET_NAME_IF_EXISTS:mathdx::cufftdx>
+  $<TARGET_NAME_IF_EXISTS:mathdx::cufftdx>
 )
 
 # Set the targeting architectures

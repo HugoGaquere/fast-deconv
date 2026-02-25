@@ -16,6 +16,8 @@ namespace fast_deconv::python {
 
 void bind_wscms(py::module_& m)
 {
+  m.def("scale_convolve", &fd_algo_wscms::scale_convolve, R"pbdoc( dirty @ scales )pbdoc");
+
   py::class_<fd_algo_wscms::MinorCycleContext>(m, "MinorCycleContext")
     .def(py::init<
       fd_core::device_span4d<float>,

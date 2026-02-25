@@ -1,62 +1,47 @@
 CompileFlags:
+  Compiler: /usr/local/cuda/bin/nvcc
   Add:
-    - -std=c++20
-    - -ferror-limit=0
-    - -fmacro-backtrace-limit=0
-    - -ftemplate-backtrace-limit=0
-    - -DBOOST_STACKTRACE_USE_ADDR2LINE
-    - -DBOOST_STACKTRACE_USE_BACKTRACE
-    - -DBOOST_STACKTRACE_USE_NOOP
-    - -DEMU_BOOST_NAMESPACE=boost
-    - -DEMU_CUDA
-    - -DFMT_USE_CONSTEXPR=1
-    - -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CUDA
-    - -DTHRUST_HOST_SYSTEM=THRUST_HOST_SYSTEM_CPP
-    - -I/home/hugo/Documents/projects/fast-deconv/include
-    - -isystem
-    - /home/hugo/.conan2/p/b/fmtbdfc4b4abe629/p/include
-    - -isystem
-    - /home/hugo/Documents/projects/emu/include/core
-    - -isystem
-    - /home/hugo/.conan2/p/ms-gs000db09c5aa93/p/include
-    - -isystem
-    - /home/hugo/.conan2/p/mdspa3e3244b3b5d53/p/include
-    - -isystem
-    - /home/hugo/.conan2/p/half36e2dd2c0b9fb/p/include
-    - -isystem
-    - /home/hugo/.conan2/p/tl-ex81ea693a1759d/p/include
-    - -isystem
-    - /home/hugo/.conan2/p/tl-op1a360da40b2ab/p/include
-    - -isystem
-    - /home/hugo/.conan2/p/dlpacc49300af55b28/p/include
-    - -isystem
-    - /home/hugo/.conan2/p/b/boostef90f44cedbe0/p/include
-    - -isystem
-    - /home/hugo/.conan2/p/b/libba299d2bc7261a7/p/include
-    - -isystem
-    - /home/hugo/Documents/projects/emu/include/python
-    - -isystem
-    - /home/hugo/Documents/projects/emu/include/cuda
-    - -isystem
-    - /usr/local/cuda/targets/x86_64-linux/include
-    - -isystem
-    - /home/hugo/.conan2/p/b/nv-cc76287e0b533d8/p/include
-
----
-
-If:
-  PathMatch: .*\.cu(h)?$
-CompileFlags:
-  Remove:
-    - -forward-unknown-to-host-compiler
-    - --extended-lambda
-    - --expt-relaxed-constexpr
-    - -arch=native
-  Add:
-    - -march=native
-    - -x
-    - cuda
     - --cuda-path=/usr/local/cuda
     - --cuda-gpu-arch=sm_89
-    - -Wno-unknown-cuda-version
-    - -Xclang=-fcuda-allow-variadic-functions
+    - -I/usr/local/cuda/include
+    - "-xcuda"
+    # report all errors
+    - "-ferror-limit=0"
+    - --cuda-gpu-arch=sm_90a
+    - --std=c++20
+    - "-D__INTELLISENSE__"
+    - "-D__CLANGD__"
+    - "-DCUDA_13_1_SM89_FEATURES_SUPPORTED"
+    - "-D_LIBCUDACXX_STD_VER=13"
+    - "-D__CUDACC_VER_MAJOR__=13"
+    - "-D__CUDACC_VER_MINOR__=1"
+    - "-D__CUDA_ARCH__=890"
+    - "-D__CUDA_ARCH_FEAT_SM89_ALL"
+    - "-Wno-invalid-constexpr"
+    # project specific
+    - -I/home/hugo/Documents/projects/fast-deconv/include/
+    - -I/home/hugo/.conan2/p/emu5509528b36c04/s/include/core
+    - -I/home/hugo/.conan2/p/emu5509528b36c04/s/include/cuda
+    - -I/home/hugo/.conan2/p/emu5509528b36c04/s/include/python
+    - -I/home/hugo/.conan2/p/fmt255f4d4faab0f/s/src/include
+  Remove:
+    # strip CUDA fatbin args
+    - "-Xfatbin*"
+    # strip CUDA arch flags
+    - "-gencode*"
+    - "--generate-code*"
+    # strip CUDA flags unknown to clang
+    - "-ccbin*"
+    - "--compiler-options*"
+    - "--expt-extended-lambda"
+    - "--expt-relaxed-constexpr"
+    - "-forward-unknown-to-host-compiler"
+    - "-Werror=cross-execution-space-call"
+Hover:
+  ShowAKA: No
+InlayHints:
+  Enabled: No
+Diagnostics:
+  Suppress:
+    - "variadic_device_fn"
+    - "attributes_not_allowed"
