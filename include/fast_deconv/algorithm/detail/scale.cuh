@@ -1,23 +1,6 @@
 #pragma once
-#include <cufft.h>
-
 #include <array>
-#include <fast_deconv/util/cuda_macros.hpp>
-
-#ifndef CUFFT_CALL
-#define CUFFT_CALL(call)                                               \
-  {                                                                    \
-    auto status = static_cast<cufftResult>(call);                      \
-    if (status != CUFFT_SUCCESS)                                       \
-      fprintf(stderr,                                                  \
-              "ERROR: CUFFT call \"%s\" in line %d of file %s failed " \
-              "with "                                                  \
-              "code (%d).\n",                                          \
-              #call, __LINE__, __FILE__, status);                      \
-  }
-#endif  // CUFFT_CALL
-
-using complex_type = cufftComplex;
+#include <fast_deconv/linalg/detail/fft.cuh>
 
 namespace fast_deconv::algorithm::wscms::detail {
 
@@ -74,21 +57,17 @@ __global__ void make_scales_kernel_half(float* sigmas, int scale_x, int scale_y_
 }
 
 void make_scales(float* sigmas, int scale_x, int scale_y_half, int scale_y_full, int n_scales,
-                 float* scales)
+                 float* scales, cudaStream_t stream)
 {
-  cudaStream_t stream = NULL;
-  CHECK_CUDA(cudaStreamCreate(&stream));
   dim3 block_dim(16, 16);
   dim3 grid_dim(CEIL_DIV(scale_y_half, block_dim.x), CEIL_DIV(scale_x, block_dim.y));
   make_scales_kernel_half<<<grid_dim, block_dim, 0, stream>>>(sigmas, scale_x, scale_y_half,
                                                               scale_y_full, n_scales, scales);
-  CHECK_CUDA(cudaStreamSynchronize(stream));
-  CHECK_CUDA(cudaStreamDestroy(stream));
 }
 
 // Multiplies freq_dirty with each scale and normalizes by 1/N
 // freq_total = dirty_x * (dirty_y / 2 + 1) (half-complex from R2C)
-__global__ void multiply_batched_kernel(complex_type* freq_dirty, complex_type* scales,
+__global__ void multiply_batched_kernel(complex_type* freq_dirty, float* scales,
                                         complex_type* scaled_dirty, int freq_total, int n_scales,
                                         float norm)
 {
@@ -99,56 +78,86 @@ __global__ void multiply_batched_kernel(complex_type* freq_dirty, complex_type* 
 
   for (int i = 0; i < n_scales; i++) {
     const int idx = tid + i * freq_total;
-    complex_type result = cuCmulf(dirty_val, scales[idx]);
-    result.x *= norm;
-    result.y *= norm;
-    scaled_dirty[idx] = result;
+    const float scale_norm = scales[idx] * norm;
+    scaled_dirty[idx] = {dirty_val.x * scale_norm, dirty_val.y * scale_norm};
   }
 }
 
-// dirty: (dirty_x, dirty_y) real
-// scales: (n_scales, scale_x, scale_y) half-complex from rfft2
-//         where scale_x = dirty_x, scale_y = dirty_y / 2 + 1
-// out_scaled_dirty: (n_scales, dirty_x, dirty_y) real
-void scale_convolve(float* dirty, complex_type* scales, float* out_scaled_dirty, int dirty_x,
-                    int dirty_y, int scale_x, int scale_y, int n_scales)
+// Convolves a dirty image with Gaussian scale kernels.
+// dirty:            (npix_x, npix_y) real, device
+// sigmas:           (n_scales,) Gaussian sigmas, device
+// out_scaled_dirty: (n_scales, npix_x, npix_y) real, device
+// Internally: pad+ifftshift → R2C → multiply with Gaussian scales → C2R → fftshift+crop
+void scale_convolve(float* dirty, float* sigmas, float* out_scaled_dirty, int npix_x, int npix_y,
+                    int n_scales, float padding)
 {
-  int freq_total = scale_x * scale_y;  // dirty_x * (dirty_y / 2 + 1)
+  const auto [npad_x, npad_y] = linalg::detail::compute_padding(npix_x, npix_y, padding);
+  const int npadded_x = npix_x + 2 * npad_x;
+  const int npadded_y = npix_y + 2 * npad_y;
+  const int freq_x = npadded_x;
+  const int freq_y = npadded_y / 2 + 1;
+  const int freq_total = freq_x * freq_y;
 
+  // Create cuFFT plans (synchronous, allocates workspace on default stream)
   cufftHandle plan_forward, plan_backward;
-  CUFFT_CALL(cufftPlan2d(&plan_forward, dirty_x, dirty_y, CUFFT_R2C));
-  std::array<int, 2> fft_size{dirty_x, dirty_y};
-  CUFFT_CALL(cufftPlanMany(&plan_backward, fft_size.size(), fft_size.data(), nullptr, 1,
-                           0,              // *inembed, istride, idist
-                           nullptr, 1, 0,  // *onembed, ostride, odist
+  CUFFT_CALL(cufftPlan2d(&plan_forward, npadded_x, npadded_y, CUFFT_R2C));
+  std::array<int, 2> fft_size{npadded_x, npadded_y};
+  CUFFT_CALL(cufftPlanMany(&plan_backward, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
                            CUFFT_C2R, n_scales));
 
+  // Allocate temporaries
   cudaStream_t stream = NULL;
   CHECK_CUDA(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
   CUFFT_CALL(cufftSetStream(plan_forward, stream));
   CUFFT_CALL(cufftSetStream(plan_backward, stream));
 
+  float* dirty_padded = nullptr;
+  float* scales = nullptr;
   complex_type* dirty_freq = nullptr;
-  cudaMallocAsync(reinterpret_cast<void**>(&dirty_freq), sizeof(complex_type) * freq_total, stream);
   complex_type* scaled_dirty_freq = nullptr;
-  cudaMallocAsync(reinterpret_cast<void**>(&scaled_dirty_freq),
-                  sizeof(complex_type) * freq_total * n_scales, stream);
+  float* scaled_dirty = nullptr;
+  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&dirty_padded),
+                             sizeof(float) * npadded_x * npadded_y, stream));
+  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&scales),
+                             sizeof(float) * freq_total * n_scales, stream));
+  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&dirty_freq),
+                             sizeof(complex_type) * freq_total, stream));
+  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&scaled_dirty_freq),
+                             sizeof(complex_type) * freq_total * n_scales, stream));
+  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&scaled_dirty),
+                             sizeof(float) * npadded_x * npadded_y * n_scales, stream));
 
-  // Forward R2C: real (dirty_x, dirty_y) → half-complex (dirty_x, dirty_y/2+1)
-  CUFFT_CALL(cufftExecR2C(plan_forward, dirty, dirty_freq));
+  // Pad + ifftshift dirty image
+  linalg::detail::pad_ifftshift(dirty, dirty_padded, npix_x, npix_y, npadded_x, npadded_y, npad_x,
+                                npad_y, stream);
 
-  // Element-wise multiply with 1/N normalization
-  float norm = 1.0f / static_cast<float>(dirty_x * dirty_y);
+  // Generate Gaussian scale kernels in half-complex frequency domain
+  make_scales(sigmas, npadded_x, freq_y, npadded_y, n_scales, scales, stream);
+
+  // Forward R2C: real (npadded_x, npadded_y) -> half-complex (npadded_x, npadded_y/2+1)
+  CUFFT_CALL(cufftExecR2C(plan_forward, dirty_padded, dirty_freq));
+
+  // Element-wise multiply with scales + 1/N normalization
+  float norm = 1.0f / static_cast<float>(npadded_x * npadded_y);
   multiply_batched_kernel<<<CEIL_DIV(freq_total, 256), 256, 0, stream>>>(
       dirty_freq, scales, scaled_dirty_freq, freq_total, n_scales, norm);
 
-  // Inverse C2R: half-complex → real (dirty_x, dirty_y) per batch
-  CUFFT_CALL(cufftExecC2R(plan_backward, scaled_dirty_freq, out_scaled_dirty));
+  // Inverse C2R: half-complex -> real per batch
+  CUFFT_CALL(cufftExecC2R(plan_backward, scaled_dirty_freq, scaled_dirty));
 
+  // Fftshift + crop back to original size
+  linalg::detail::fftshift_crop(scaled_dirty, out_scaled_dirty, npix_x, npix_y, npadded_x,
+                                npadded_y, npad_x, npad_y, n_scales, stream);
+
+  // Cleanup
+  CHECK_CUDA(cudaFreeAsync(dirty_padded, stream));
+  CHECK_CUDA(cudaFreeAsync(scales, stream));
   CHECK_CUDA(cudaFreeAsync(dirty_freq, stream));
   CHECK_CUDA(cudaFreeAsync(scaled_dirty_freq, stream));
+  CHECK_CUDA(cudaFreeAsync(scaled_dirty, stream));
   CUFFT_CALL(cufftDestroy(plan_forward));
   CUFFT_CALL(cufftDestroy(plan_backward));
+  CHECK_CUDA(cudaStreamSynchronize(stream));
   CHECK_CUDA(cudaStreamDestroy(stream));
 }
 
