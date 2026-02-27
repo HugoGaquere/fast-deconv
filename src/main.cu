@@ -12,9 +12,9 @@
 //
 // #include <fast_deconv/algorithm/wscms_types.hpp>
 // #include <fast_deconv/algorithm/wscms.hpp>
-#include <fast_deconv/algorithm/detail/wscms_minor_loop.cuh>
-
 #include <fmt/base.h>
+
+#include <fast_deconv/algorithm/detail/wscms_minor_loop.cuh>
 
 int main(int argc, char** argv)
 {

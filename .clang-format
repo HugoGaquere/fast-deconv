@@ -1,0 +1,7 @@
+﻿---
+BasedOnStyle: Google
+AlignTrailingComments: 'true'
+BreakBeforeBraces: WebKit
+ColumnLimit: '100'
+
+...
