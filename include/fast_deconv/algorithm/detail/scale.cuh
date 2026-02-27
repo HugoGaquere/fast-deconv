@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <cub/cub.cuh>
 #include <fast_deconv/linalg/detail/fft.cuh>
 
 namespace fast_deconv::algorithm::wscms::detail {
@@ -7,28 +8,28 @@ namespace fast_deconv::algorithm::wscms::detail {
 #define PI 3.141592654f
 #define PI_SQUARRED 9.869604403f
 
-__global__ void make_scales_kernel(float* sigmas, int scale_x, int scale_y, int n_scales,
-                                   float* scales)
-{
-  const int row = blockIdx.y * blockDim.y + threadIdx.y;
-  const int col = blockIdx.x * blockDim.x + threadIdx.x;
-  if (row >= scale_x || col >= scale_y) return;
-
-  const float freq_x = row < (scale_x + 1) / 2 ? static_cast<float>(row) / scale_x
-                                               : static_cast<float>(row - scale_x) / scale_x;
-  const float freq_y = col < (scale_y + 1) / 2 ? static_cast<float>(col) / scale_y
-                                               : static_cast<float>(col - scale_y) / scale_y;
-  const float rhosq = freq_x * freq_x + freq_y * freq_y;
-
-  const int scale_size = scale_x * scale_y;
-  const int tid = row * scale_y + col;
-
-  for (int i = 0; i < n_scales; i++) {
-    const uint idx = tid + i * scale_size;
-    const float sigma = sigmas[i];
-    scales[idx] = exp(-2.0f * PI_SQUARRED * rhosq * sigma * sigma);
-  }
-}
+// __global__ void make_scales_kernel(float* sigmas, int scale_x, int scale_y, int n_scales,
+//                                    float* scales)
+// {
+//   const int row = blockIdx.y * blockDim.y + threadIdx.y;
+//   const int col = blockIdx.x * blockDim.x + threadIdx.x;
+//   if (row >= scale_x || col >= scale_y) return;
+//
+//   const float freq_x = row < (scale_x + 1) / 2 ? static_cast<float>(row) / scale_x
+//                                                : static_cast<float>(row - scale_x) / scale_x;
+//   const float freq_y = col < (scale_y + 1) / 2 ? static_cast<float>(col) / scale_y
+//                                                : static_cast<float>(col - scale_y) / scale_y;
+//   const float rhosq = freq_x * freq_x + freq_y * freq_y;
+//
+//   const int scale_size = scale_x * scale_y;
+//   const int tid = row * scale_y + col;
+//
+//   for (int i = 0; i < n_scales; i++) {
+//     const uint idx = tid + i * scale_size;
+//     const float sigma = sigmas[i];
+//     scales[idx] = exp(-2.0f * PI_SQUARRED * rhosq * sigma * sigma);
+//   }
+// }
 
 __global__ void make_scales_kernel_half(float* sigmas, int scale_x, int scale_y_half,
                                         int scale_y_full, int n_scales, float* scales)
@@ -83,6 +84,105 @@ __global__ void multiply_batched_kernel(complex_type* freq_dirty, float* scales,
   }
 }
 
+// Applies mask and optional abs to scaled_dirty in-place.
+// scaled_dirty: (n_scales, npix) modified in-place
+// mask:         layout depends on mask_stride:
+//               mask_stride=0:    (npix,)           shared mask across all scales
+//               mask_stride=npix: (n_scales, npix)  per-scale masks
+// True = masked (set to -inf)
+__global__ void apply_mask_kernel(float* scaled_dirty, const bool* mask, int npix, int n_scales,
+                                  int mask_stride, bool do_abs)
+{
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid >= npix) return;
+
+  for (int s = 0; s < n_scales; s++) {
+    const int idx = s * npix + tid;
+    const bool masked = mask[s * mask_stride + tid];
+    if (masked) {
+      scaled_dirty[idx] = -INFINITY;
+    } else if (do_abs) {
+      scaled_dirty[idx] = fabsf(scaled_dirty[idx]);
+    }
+  }
+}
+
+struct ScaleSelectionResult {
+  int best_scale;
+  int best_x;
+  int best_y;
+  float best_peak;
+};
+
+// Finds the best scale and peak pixel via biased peak-finding.
+// scaled_dirty is modified in-place (mask + abs applied).
+// mask: device, True = masked. Either (npix,) shared or (n_scales, npix) per-scale.
+// bias: (n_scales,) host memory, multiplied with per-scale peaks to select best scale.
+// per_scale_mask: false = shared mask (npix,), true = per-scale masks (n_scales, npix)
+// Returns unbiased peak value and pixel coordinates.
+ScaleSelectionResult scale_selection(float* scaled_dirty, const bool* mask, const float* bias,
+                                     int n_scales, int npix_x, int npix_y, bool do_abs,
+                                     bool per_scale_mask, cudaStream_t stream)
+{
+  const int npix = npix_x * npix_y;
+  const int mask_stride = per_scale_mask ? npix : 0;
+
+  // 1. Apply mask + abs in-place
+  apply_mask_kernel<<<CEIL_DIV(npix, 256), 256, 0, stream>>>(scaled_dirty, mask, npix, n_scales,
+                                                              mask_stride, do_abs);
+
+  // 2. Build segment offsets [0, npix, 2*npix, ..., n_scales*npix]
+  int* d_offsets = nullptr;
+  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&d_offsets),
+                             sizeof(int) * (n_scales + 1), stream));
+  std::vector<int> h_offsets(n_scales + 1);
+  for (int i = 0; i <= n_scales; i++) h_offsets[i] = i * npix;
+  CHECK_CUDA(cudaMemcpyAsync(d_offsets, h_offsets.data(), sizeof(int) * (n_scales + 1),
+                             cudaMemcpyHostToDevice, stream));
+
+  // 3. CUB segmented argmax
+  using KVPair = cub::KeyValuePair<int, float>;
+  KVPair* d_peaks = nullptr;
+  CHECK_CUDA(
+      cudaMallocAsync(reinterpret_cast<void**>(&d_peaks), sizeof(KVPair) * n_scales, stream));
+
+  size_t temp_bytes = 0;
+  CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(nullptr, temp_bytes, scaled_dirty, d_peaks,
+                                                n_scales, d_offsets, d_offsets + 1, stream));
+  void* d_temp = nullptr;
+  CHECK_CUDA(cudaMallocAsync(&d_temp, temp_bytes, stream));
+  CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(d_temp, temp_bytes, scaled_dirty, d_peaks,
+                                                n_scales, d_offsets, d_offsets + 1, stream));
+
+  // 4. Copy per-scale peaks to host
+  std::vector<KVPair> h_peaks(n_scales);
+  CHECK_CUDA(cudaMemcpyAsync(h_peaks.data(), d_peaks, sizeof(KVPair) * n_scales,
+                             cudaMemcpyDeviceToHost, stream));
+  CHECK_CUDA(cudaStreamSynchronize(stream));
+
+  // 5. Biased scale selection on host
+  int best_scale = 0;
+  float best_biased = -INFINITY;
+  for (int s = 0; s < n_scales; s++) {
+    float biased = h_peaks[s].value * bias[s];
+    if (biased > best_biased) {
+      best_biased = biased;
+      best_scale = s;
+    }
+  }
+
+  int best_flat_idx = h_peaks[best_scale].key;
+  int best_x = best_flat_idx / npix_y;
+  int best_y = best_flat_idx % npix_y;
+
+  // Cleanup
+  CHECK_CUDA(cudaFreeAsync(d_offsets, stream));
+  CHECK_CUDA(cudaFreeAsync(d_peaks, stream));
+  CHECK_CUDA(cudaFreeAsync(d_temp, stream));
+
+  return {best_scale, best_x, best_y, h_peaks[best_scale].value};
+}
+
 // Convolves a dirty image with Gaussian scale kernels.
 // dirty:            (npix_x, npix_y) real, device
 // sigmas:           (n_scales,) Gaussian sigmas, device
@@ -107,7 +207,7 @@ void scale_convolve(float* dirty, float* sigmas, float* out_scaled_dirty, int np
 
   // Allocate temporaries
   cudaStream_t stream = NULL;
-  CHECK_CUDA(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+  CHECK_CUDA(cudaStreamCreate(&stream));
   CUFFT_CALL(cufftSetStream(plan_forward, stream));
   CUFFT_CALL(cufftSetStream(plan_backward, stream));
 

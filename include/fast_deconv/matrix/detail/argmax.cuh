@@ -1,16 +1,15 @@
 #pragma once
 
-#include <cub/cub.cuh>
-#include <cuda/std/cstdint>
+#include <fmt/base.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
 
+#include <cmath>
+#include <cub/cub.cuh>
+#include <cuda/std/cstdint>
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/core/stream_resources.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
-#include <fmt/base.h>
-
-#include <cmath>
 
 namespace fast_deconv::matrix::detail {
 
@@ -37,13 +36,8 @@ struct masking_op_abs {
 };
 
 template <typename MaskingOpT>
-void argmax_async(core::stream_resources& resources,
-                  const float* data,
-                  const bool* mask,
-                  size_t size,
-                  size_t mask_size,
-                  float* d_max_out,
-                  uint* d_index_out)
+void argmax_async(core::stream_resources& resources, const float* data, const bool* mask,
+                  size_t size, size_t mask_size, float* d_max_out, uint* d_index_out)
 {
   MaskingOpT op{data, mask, mask_size};
   thrust::counting_iterator<int> counting_iter{0};
@@ -52,19 +46,13 @@ void argmax_async(core::stream_resources& resources,
   auto stream = resources.stream;
 
   size_t temp_storage_bytes = 0;
-  CHECK_CUDA(cub::DeviceReduce::ArgMax(
-    nullptr, temp_storage_bytes, masked_iter, d_max_out, d_index_out, size, stream));
+  CHECK_CUDA(cub::DeviceReduce::ArgMax(nullptr, temp_storage_bytes, masked_iter, d_max_out,
+                                       d_index_out, size, stream));
 
   resources.alloc_device(temp_storage_bytes);
 
-  CHECK_CUDA(cub::DeviceReduce::ArgMax(resources.device_workspace,
-                                       temp_storage_bytes,
-                                       masked_iter,
-                                       d_max_out,
-                                       d_index_out,
-                                       size,
-                                       stream));
+  CHECK_CUDA(cub::DeviceReduce::ArgMax(resources.device_workspace, temp_storage_bytes, masked_iter,
+                                       d_max_out, d_index_out, size, stream));
 }
-
 
 }  // namespace fast_deconv::matrix::detail

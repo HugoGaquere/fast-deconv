@@ -38,4 +38,42 @@ void scale_convolve(core::device_span2d<float> dirty, core::device_vect<float> s
                          dirty_x, dirty_y, n_scales, padding);
 }
 
+// Shared mask: mask is (npix_x, npix_y), same for all scales
+detail::ScaleSelectionResult scale_selection(core::device_span3d<float> scaled_dirty,
+                                             core::device_span2d<bool> mask,
+                                             core::host_vect<float> bias, bool do_abs)
+{
+  const int n_scales = scaled_dirty.extent(0);
+  const int npix_x = scaled_dirty.extent(1);
+  const int npix_y = scaled_dirty.extent(2);
+
+  cudaStream_t stream = NULL;
+  CHECK_CUDA(cudaStreamCreate(&stream));
+  auto result = detail::scale_selection(scaled_dirty.data_handle(), mask.data_handle(),
+                                        bias.data_handle(), n_scales, npix_x, npix_y, do_abs,
+                                        false, stream);
+  CHECK_CUDA(cudaStreamSynchronize(stream));
+  CHECK_CUDA(cudaStreamDestroy(stream));
+  return result;
+}
+
+// Per-scale mask: mask is (n_scales, npix_x, npix_y), one per scale
+detail::ScaleSelectionResult scale_selection(core::device_span3d<float> scaled_dirty,
+                                             core::device_span3d<bool> mask,
+                                             core::host_vect<float> bias, bool do_abs)
+{
+  const int n_scales = scaled_dirty.extent(0);
+  const int npix_x = scaled_dirty.extent(1);
+  const int npix_y = scaled_dirty.extent(2);
+
+  cudaStream_t stream = NULL;
+  CHECK_CUDA(cudaStreamCreate(&stream));
+  auto result = detail::scale_selection(scaled_dirty.data_handle(), mask.data_handle(),
+                                        bias.data_handle(), n_scales, npix_x, npix_y, do_abs,
+                                        true, stream);
+  CHECK_CUDA(cudaStreamSynchronize(stream));
+  CHECK_CUDA(cudaStreamDestroy(stream));
+  return result;
+}
+
 }  // namespace fast_deconv::algorithm::wscms
