@@ -3,7 +3,7 @@
 // #include <fast_deconv/core/dispatcher.hpp>
 // #include <fast_deconv/core/kernel_traits.hpp>
 // #include <fast_deconv/core/span_types.hpp>
-// #include <fast_deconv/core/stream_resources.hpp>
+// #include <fast_deconv/core/resources.hpp>
 
 // #include <fast_deconv/matrix/argmax.hpp>
 // #include <fast_deconv/matrix/subtract.hpp>

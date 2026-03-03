@@ -4,7 +4,7 @@
 
 #include <cassert>
 #include <fast_deconv/core/span_types.hpp>
-#include <fast_deconv/core/stream_resources.hpp>
+#include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
 
 namespace fast_deconv::linalg {
@@ -146,7 +146,7 @@ inline void pinv(const core::device_span2d<float>& A,
   const size_t smem_bytes = static_cast<size_t>(
     rows * cols + cols * cols + cols * rows + cols * cols) * sizeof(float);
 
-  detail::pinv_kernel<<<1, block_size, smem_bytes, resources.stream>>>(
+  detail::pinv_kernel<<<1, block_size, smem_bytes, resources.cuda_stream>>>(
     A.data_handle(), A_pinv.data_handle(), rows, cols);
   CHECK_LAST_CUDA_ERROR();
 }

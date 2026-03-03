@@ -1,7 +1,7 @@
 #include "cuComplex.h"
 #include "cublas_v2.h"
 
-#include <fast_deconv/core/stream_resources.hpp>
+#include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/util/cublas_macros.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
 

@@ -2,6 +2,9 @@
 #include <array>
 #include <cub/cub.cuh>
 #include <fast_deconv/linalg/detail/fft.cuh>
+#include <vector>
+
+#include "fast_deconv/core/resources.hpp"
 
 namespace fast_deconv::algorithm::wscms::detail {
 
@@ -122,43 +125,48 @@ struct ScaleSelectionResult {
 // Returns unbiased peak value and pixel coordinates.
 ScaleSelectionResult scale_selection(float* scaled_dirty, const bool* mask, const float* bias,
                                      int n_scales, int npix_x, int npix_y, bool do_abs,
-                                     bool per_scale_mask, cudaStream_t stream)
+                                     bool per_scale_mask, core::resources& resources)
 {
+  const auto& stream_res = resources.get_stream_resources();
+  auto cuda_stream = stream_res.cuda_stream;
+
   const int npix = npix_x * npix_y;
   const int mask_stride = per_scale_mask ? npix : 0;
 
   // 1. Apply mask + abs in-place
-  apply_mask_kernel<<<CEIL_DIV(npix, 256), 256, 0, stream>>>(scaled_dirty, mask, npix, n_scales,
-                                                              mask_stride, do_abs);
+  apply_mask_kernel<<<CEIL_DIV(npix, 256), 256, 0, cuda_stream>>>(scaled_dirty, mask, npix,
+                                                                  n_scales, mask_stride, do_abs);
 
   // 2. Build segment offsets [0, npix, 2*npix, ..., n_scales*npix]
-  int* d_offsets = nullptr;
-  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&d_offsets),
-                             sizeof(int) * (n_scales + 1), stream));
+  int* d_offsets = resources.alloc_async<int>(n_scales + 1, stream_res);
   std::vector<int> h_offsets(n_scales + 1);
   for (int i = 0; i <= n_scales; i++) h_offsets[i] = i * npix;
   CHECK_CUDA(cudaMemcpyAsync(d_offsets, h_offsets.data(), sizeof(int) * (n_scales + 1),
-                             cudaMemcpyHostToDevice, stream));
+                             cudaMemcpyHostToDevice, cuda_stream));
 
   // 3. CUB segmented argmax
   using KVPair = cub::KeyValuePair<int, float>;
-  KVPair* d_peaks = nullptr;
-  CHECK_CUDA(
-      cudaMallocAsync(reinterpret_cast<void**>(&d_peaks), sizeof(KVPair) * n_scales, stream));
+  KVPair* d_peaks = resources.alloc_async<KVPair>(n_scales, stream_res);
 
   size_t temp_bytes = 0;
   CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(nullptr, temp_bytes, scaled_dirty, d_peaks,
-                                                n_scales, d_offsets, d_offsets + 1, stream));
-  void* d_temp = nullptr;
-  CHECK_CUDA(cudaMallocAsync(&d_temp, temp_bytes, stream));
-  CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(d_temp, temp_bytes, scaled_dirty, d_peaks,
-                                                n_scales, d_offsets, d_offsets + 1, stream));
+                                                n_scales, d_offsets, d_offsets + 1, cuda_stream));
+
+  void* d_temp = resources.alloc_async(temp_bytes, stream_res);
+  CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(d_temp, temp_bytes, scaled_dirty, d_peaks, n_scales,
+                                                d_offsets, d_offsets + 1, cuda_stream));
 
   // 4. Copy per-scale peaks to host
   std::vector<KVPair> h_peaks(n_scales);
   CHECK_CUDA(cudaMemcpyAsync(h_peaks.data(), d_peaks, sizeof(KVPair) * n_scales,
-                             cudaMemcpyDeviceToHost, stream));
-  CHECK_CUDA(cudaStreamSynchronize(stream));
+                             cudaMemcpyDeviceToHost, cuda_stream));
+
+  stream_res.sync();
+
+  // Async cleanup
+  resources.free_async(d_offsets, stream_res);
+  resources.free_async(d_peaks, stream_res);
+  resources.free_async(d_temp, stream_res);
 
   // 5. Biased scale selection on host
   int best_scale = 0;
@@ -175,11 +183,6 @@ ScaleSelectionResult scale_selection(float* scaled_dirty, const bool* mask, cons
   int best_x = best_flat_idx / npix_y;
   int best_y = best_flat_idx % npix_y;
 
-  // Cleanup
-  CHECK_CUDA(cudaFreeAsync(d_offsets, stream));
-  CHECK_CUDA(cudaFreeAsync(d_peaks, stream));
-  CHECK_CUDA(cudaFreeAsync(d_temp, stream));
-
   return {best_scale, best_x, best_y, h_peaks[best_scale].value};
 }
 
@@ -189,7 +192,7 @@ ScaleSelectionResult scale_selection(float* scaled_dirty, const bool* mask, cons
 // out_scaled_dirty: (n_scales, npix_x, npix_y) real, device
 // Internally: pad+ifftshift → R2C → multiply with Gaussian scales → C2R → fftshift+crop
 void scale_convolve(float* dirty, float* sigmas, float* out_scaled_dirty, int npix_x, int npix_y,
-                    int n_scales, float padding)
+                    int n_scales, float padding, core::resources& resources)
 {
   const auto [npad_x, npad_y] = linalg::detail::compute_padding(npix_x, npix_y, padding);
   const int npadded_x = npix_x + 2 * npad_x;
@@ -206,40 +209,30 @@ void scale_convolve(float* dirty, float* sigmas, float* out_scaled_dirty, int np
                            CUFFT_C2R, n_scales));
 
   // Allocate temporaries
-  cudaStream_t stream = NULL;
-  CHECK_CUDA(cudaStreamCreate(&stream));
-  CUFFT_CALL(cufftSetStream(plan_forward, stream));
-  CUFFT_CALL(cufftSetStream(plan_backward, stream));
+  const auto& stream_res = resources.get_stream_resources();
+  cudaStream_t cuda_stream = stream_res.cuda_stream;
+  CUFFT_CALL(cufftSetStream(plan_forward, cuda_stream));
+  CUFFT_CALL(cufftSetStream(plan_backward, cuda_stream));
 
-  float* dirty_padded = nullptr;
-  float* scales = nullptr;
-  complex_type* dirty_freq = nullptr;
-  complex_type* scaled_dirty_freq = nullptr;
-  float* scaled_dirty = nullptr;
-  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&dirty_padded),
-                             sizeof(float) * npadded_x * npadded_y, stream));
-  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&scales),
-                             sizeof(float) * freq_total * n_scales, stream));
-  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&dirty_freq),
-                             sizeof(complex_type) * freq_total, stream));
-  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&scaled_dirty_freq),
-                             sizeof(complex_type) * freq_total * n_scales, stream));
-  CHECK_CUDA(cudaMallocAsync(reinterpret_cast<void**>(&scaled_dirty),
-                             sizeof(float) * npadded_x * npadded_y * n_scales, stream));
+  float* dirty_padded = resources.alloc_async<float>(npadded_x * npadded_y, stream_res);
+  float* scales = resources.alloc_async<float>(freq_total * n_scales, stream_res);
+  complex_type* dirty_freq = resources.alloc_async<complex_type>(freq_total, stream_res);
+  complex_type* scaled_dirty_freq = resources.alloc_async<complex_type>(freq_total * n_scales, stream_res);
+  float* scaled_dirty = resources.alloc_async<float>(npadded_x * npadded_y * n_scales, stream_res);
+
+  // Generate Gaussian scale kernels in half-complex frequency domain
+  make_scales(sigmas, npadded_x, freq_y, npadded_y, n_scales, scales, cuda_stream);
 
   // Pad + ifftshift dirty image
   linalg::detail::pad_ifftshift(dirty, dirty_padded, npix_x, npix_y, npadded_x, npadded_y, npad_x,
-                                npad_y, stream);
-
-  // Generate Gaussian scale kernels in half-complex frequency domain
-  make_scales(sigmas, npadded_x, freq_y, npadded_y, n_scales, scales, stream);
+                                npad_y, cuda_stream);
 
   // Forward R2C: real (npadded_x, npadded_y) -> half-complex (npadded_x, npadded_y/2+1)
   CUFFT_CALL(cufftExecR2C(plan_forward, dirty_padded, dirty_freq));
 
   // Element-wise multiply with scales + 1/N normalization
   float norm = 1.0f / static_cast<float>(npadded_x * npadded_y);
-  multiply_batched_kernel<<<CEIL_DIV(freq_total, 256), 256, 0, stream>>>(
+  multiply_batched_kernel<<<CEIL_DIV(freq_total, 256), 256, 0, cuda_stream>>>(
       dirty_freq, scales, scaled_dirty_freq, freq_total, n_scales, norm);
 
   // Inverse C2R: half-complex -> real per batch
@@ -247,18 +240,18 @@ void scale_convolve(float* dirty, float* sigmas, float* out_scaled_dirty, int np
 
   // Fftshift + crop back to original size
   linalg::detail::fftshift_crop(scaled_dirty, out_scaled_dirty, npix_x, npix_y, npadded_x,
-                                npadded_y, npad_x, npad_y, n_scales, stream);
+                                npadded_y, npad_x, npad_y, n_scales, cuda_stream);
 
   // Cleanup
-  CHECK_CUDA(cudaFreeAsync(dirty_padded, stream));
-  CHECK_CUDA(cudaFreeAsync(scales, stream));
-  CHECK_CUDA(cudaFreeAsync(dirty_freq, stream));
-  CHECK_CUDA(cudaFreeAsync(scaled_dirty_freq, stream));
-  CHECK_CUDA(cudaFreeAsync(scaled_dirty, stream));
+  resources.free_async(dirty_padded, stream_res);
+  resources.free_async(scales, stream_res);
+  resources.free_async(dirty_freq, stream_res);
+  resources.free_async(scaled_dirty_freq, stream_res);
+  resources.free_async(scaled_dirty, stream_res);
+
   CUFFT_CALL(cufftDestroy(plan_forward));
   CUFFT_CALL(cufftDestroy(plan_backward));
-  CHECK_CUDA(cudaStreamSynchronize(stream));
-  CHECK_CUDA(cudaStreamDestroy(stream));
+  CHECK_CUDA(cudaStreamSynchronize(cuda_stream));
 }
 
 }  // namespace fast_deconv::algorithm::wscms::detail
