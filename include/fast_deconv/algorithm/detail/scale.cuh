@@ -14,24 +14,25 @@ namespace {
 #define PI 3.141592654f
 #define PI_SQUARRED 9.869604403f
 
-__global__ void make_scales_kernel_half(float* sigmas, int scale_x, int scale_y_half,
-                                        int scale_y_full, int n_scales, float* scales)
+__global__ void make_scales_kernel_half(float* sigmas, int scale_nrow, int scale_ncol_half,
+                                        int scale_ncol_full, int n_scales, float* scales)
 {
-  // col only ranges from 0 to ny/2 (ny/2+1 values)
+  // col only ranges from 0 to ncol/2 (ncol/2+1 values)
   // All frequencies are non-negative: no conditional branch needed
 
   const int row = blockIdx.y * blockDim.y + threadIdx.y;
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
-  if (row >= scale_x || col >= scale_y_half) return;
+  if (row >= scale_nrow || col >= scale_ncol_half) return;
 
-  const float freq_x = row < (scale_x + 1) / 2 ? static_cast<float>(row) / scale_x
-                                               : static_cast<float>(row - scale_x) / scale_x;
-  const float freq_y = static_cast<float>(col) / scale_y_full;
+  const float freq_row = row < (scale_nrow + 1) / 2
+                             ? static_cast<float>(row) / scale_nrow
+                             : static_cast<float>(row - scale_nrow) / scale_nrow;
+  const float freq_col = static_cast<float>(col) / scale_ncol_full;
 
-  const float rhosq = freq_x * freq_x + freq_y * freq_y;
+  const float rhosq = freq_row * freq_row + freq_col * freq_col;
 
-  const int scale_size = scale_x * scale_y_half;
-  const int tid = row * scale_y_half + col;
+  const int scale_size = scale_nrow * scale_ncol_half;
+  const int tid = row * scale_ncol_half + col;
 
   for (int i = 0; i < n_scales; i++) {
     const uint idx = tid + i * scale_size;
@@ -41,7 +42,7 @@ __global__ void make_scales_kernel_half(float* sigmas, int scale_x, int scale_y_
 }
 
 // Multiplies freq_dirty with each scale and normalizes by 1/N
-// freq_total = dirty_x * (dirty_y / 2 + 1) (half-complex from R2C)
+// freq_total = nrow * (ncol / 2 + 1) (half-complex from R2C)
 __global__ void multiply_batched_kernel(complex_type* freq_dirty, float* scales,
                                         complex_type* scaled_dirty, int freq_total, int n_scales,
                                         float norm)
@@ -85,14 +86,14 @@ __global__ void apply_mask_kernel(float* scaled_dirty, const bool* mask, int npi
 
 namespace fast_deconv::algorithm::wscms::detail {
 
-void make_scales(const core::resources& resources, float* sigmas, int scale_x, int scale_y_half,
-                 int scale_y_full, int n_scales, float* scales)
+void make_scales(const core::resources& resources, float* sigmas, int scale_nrow,
+                 int scale_ncol_half, int scale_ncol_full, int n_scales, float* scales)
 {
   const auto& stream_res = resources.get_stream_resources();
   dim3 block_dim(16, 16);
-  dim3 grid_dim(CEIL_DIV(scale_y_half, block_dim.x), CEIL_DIV(scale_x, block_dim.y));
+  dim3 grid_dim(CEIL_DIV(scale_ncol_half, block_dim.x), CEIL_DIV(scale_nrow, block_dim.y));
   make_scales_kernel_half<<<grid_dim, block_dim, 0, stream_res.cuda_stream>>>(
-      sigmas, scale_x, scale_y_half, scale_y_full, n_scales, scales);
+      sigmas, scale_nrow, scale_ncol_half, scale_ncol_full, n_scales, scales);
 }
 
 // Finds the best scale and peak pixel via biased peak-finding.
@@ -102,13 +103,13 @@ void make_scales(const core::resources& resources, float* sigmas, int scale_x, i
 // per_scale_mask: false = shared mask (npix,), true = per-scale masks (n_scales, npix)
 // Returns unbiased peak value and pixel coordinates.
 scale_selection_result scale_selection(const core::resources& resources, float* scaled_dirty,
-                                     const bool* mask, const float* bias, int n_scales, int npix_x,
-                                     int npix_y, bool do_abs, bool per_scale_mask)
+                                     const bool* mask, const float* bias, int n_scales, int nrow,
+                                     int ncol, bool do_abs, bool per_scale_mask)
 {
   const auto& stream_res = resources.get_stream_resources();
   auto cuda_stream = stream_res.cuda_stream;
 
-  const int npix = npix_x * npix_y;
+  const int npix = nrow * ncol;
   const int mask_stride = per_scale_mask ? npix : 0;
 
   // 1. Apply mask + abs in-place
@@ -158,30 +159,30 @@ scale_selection_result scale_selection(const core::resources& resources, float* 
   }
 
   int best_flat_idx = h_peaks[best_scale].key;
-  int best_x = best_flat_idx / npix_y;
-  int best_y = best_flat_idx % npix_y;
+  int best_row = best_flat_idx / ncol;
+  int best_col = best_flat_idx % ncol;
 
-  return {best_scale, best_x, best_y, h_peaks[best_scale].value};
+  return {best_scale, best_row, best_col, h_peaks[best_scale].value};
 }
 
-scale_convole_ctx make_scale_convole_ctx(int npix_x, int npix_y, int n_scales, float padding)
+scale_convole_ctx make_scale_convole_ctx(int nrow, int ncol, int n_scales, float padding)
 {
-  const auto [npad_x, npad_y] = linalg::detail::compute_padding(npix_x, npix_y, padding);
+  const auto [npad_row, npad_col] = linalg::detail::compute_padding(nrow, ncol, padding);
 
   scale_convole_ctx ctx;
-  ctx.img_x = npix_x;
-  ctx.img_y = npix_y;
-  ctx.padding_x = npad_x;
-  ctx.padding_y = npad_y;
-  ctx.img_padded_x = npix_x + 2 * npad_x;
-  ctx.img_padded_y = npix_y + 2 * npad_y;
-  ctx.freq_x = ctx.img_padded_x;
-  ctx.freq_y = ctx.img_padded_y / 2 + 1;
+  ctx.img_nrow = nrow;
+  ctx.img_ncol = ncol;
+  ctx.padding_nrow = npad_row;
+  ctx.padding_ncol = npad_col;
+  ctx.img_padded_nrow = nrow + 2 * npad_row;
+  ctx.img_padded_ncol = ncol + 2 * npad_col;
+  ctx.freq_nrow = ctx.img_padded_nrow;
+  ctx.freq_ncol = ctx.img_padded_ncol / 2 + 1;
   ctx.n_batches = n_scales;
 
-  CUFFT_CALL(cufftPlan2d(&ctx.plan_forward, ctx.img_padded_x, ctx.img_padded_y, CUFFT_R2C));
+  CUFFT_CALL(cufftPlan2d(&ctx.plan_forward, ctx.img_padded_nrow, ctx.img_padded_ncol, CUFFT_R2C));
 
-  std::array<int, 2> fft_size{ctx.img_padded_x, ctx.img_padded_y};
+  std::array<int, 2> fft_size{ctx.img_padded_nrow, ctx.img_padded_ncol};
   CUFFT_CALL(cufftPlanMany(&ctx.plan_backward, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
                            CUFFT_C2R, n_scales));
 
@@ -189,15 +190,15 @@ scale_convole_ctx make_scale_convole_ctx(int npix_x, int npix_y, int n_scales, f
 }
 
 // Convolves a dirty image with Gaussian scale kernels.
-// dirty:            (npix_x, npix_y) real, device
+// dirty:            (nrow, ncol) real, device
 // sigmas:           (n_scales,) Gaussian sigmas, device
-// out_scaled_dirty: (n_scales, npix_x, npix_y) real, device
+// out_scaled_dirty: (n_scales, nrow, ncol) real, device
 // Internally: pad+ifftshift → R2C → multiply with Gaussian scales → C2R → fftshift+crop
 void scale_convolve(const core::resources& resources, const scale_convole_ctx& ctx, float* dirty,
                     float* sigmas, float* out_scaled_dirty, int n_scales)
 {
-  const int img_padded_total = ctx.img_padded_x * ctx.img_padded_y;
-  const int freq_total = ctx.freq_x * ctx.freq_y;
+  const int img_padded_total = ctx.img_padded_nrow * ctx.img_padded_ncol;
+  const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
   const int freq_scales_total = freq_total * n_scales;
 
   const auto& stream_res = resources.get_stream_resources();
@@ -216,14 +217,15 @@ void scale_convolve(const core::resources& resources, const scale_convole_ctx& c
   stream_res.sync();
 
   // Generate Gaussian scale kernels in half-complex frequency domain
-  make_scales(resources, sigmas, ctx.freq_x, ctx.freq_y, ctx.img_padded_y, n_scales, scales,
-              cuda_stream);
+  make_scales(resources, sigmas, ctx.freq_nrow, ctx.freq_ncol, ctx.img_padded_ncol, n_scales,
+              scales, cuda_stream);
 
   // Pad + ifftshift dirty image
-  linalg::detail::pad_ifftshift(dirty, dirty_padded, ctx.img_x, ctx.img_y, ctx.img_padded_x,
-                                ctx.img_padded_y, ctx.padding_x, ctx.padding_y, cuda_stream);
+  linalg::detail::pad_ifftshift(dirty, dirty_padded, ctx.img_nrow, ctx.img_ncol,
+                                ctx.img_padded_nrow, ctx.img_padded_ncol, ctx.padding_nrow,
+                                ctx.padding_ncol, cuda_stream);
 
-  // Forward R2C: real (npadded_x, npadded_y) -> half-complex (npadded_x, npadded_y/2+1)
+  // Forward R2C: real (nrow, ncol) -> half-complex (nrow, ncol/2+1)
   CUFFT_CALL(cufftExecR2C(ctx.plan_forward, dirty_padded, dirty_freq));
 
   // Element-wise multiply with scales + 1/N normalization
@@ -235,9 +237,9 @@ void scale_convolve(const core::resources& resources, const scale_convole_ctx& c
   CUFFT_CALL(cufftExecC2R(ctx.plan_backward, scaled_dirty_freq, scaled_dirty));
 
   // Fftshift + crop back to original size
-  linalg::detail::fftshift_crop(scaled_dirty, out_scaled_dirty, ctx.img_x, ctx.img_y,
-                                ctx.img_padded_x, ctx.img_padded_y, ctx.padding_x, ctx.padding_y,
-                                n_scales, cuda_stream);
+  linalg::detail::fftshift_crop(scaled_dirty, out_scaled_dirty, ctx.img_nrow, ctx.img_ncol,
+                                ctx.img_padded_nrow, ctx.img_padded_ncol, ctx.padding_nrow,
+                                ctx.padding_ncol, n_scales, cuda_stream);
 
   // Cleanup
   resources.free_async(dirty_padded, stream_res);

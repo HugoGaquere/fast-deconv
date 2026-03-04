@@ -27,8 +27,8 @@ struct MinorCycleContext {
 };
 
 struct ComponentEntry {
-  int x;
-  int y;
+  int row;
+  int col;
   int scale_idx;
   float gain;
   float coeffs[MAX_SPECTRAL_ORDER];
@@ -43,16 +43,16 @@ struct ComponentBuffer {
 
 struct scale_selection_result {
   int best_scale;
-  int best_x;
-  int best_y;
+  int best_row;
+  int best_col;
   float best_peak;
 };
 
 struct scale_convole_ctx {
-  int img_x, img_y;                // image domain size
-  int padding_x, padding_y;        // image_domain padding
-  int img_padded_x, img_padded_y;  // image domain padded size
-  int freq_x, freq_y;              // frequency domain size
+  int img_nrow, img_ncol;                // image domain size
+  int padding_nrow, padding_ncol;        // image domain padding
+  int img_padded_nrow, img_padded_ncol;  // image domain padded size
+  int freq_nrow, freq_ncol;              // frequency domain size
   int n_batches;
   cufftHandle plan_forward, plan_backward;  // FFT plans
 

@@ -23,25 +23,29 @@ namespace fast_deconv::algorithm::wscms {
 // }
 
 void make_scales(core::device_vect<float> sigmas, core::device_span3d<float> out_scales,
-                 int scale_y_full)
+                 int scale_ncol_full)
 {
   const uint n_scales = sigmas.size();
-  const uint scale_x = out_scales.extent(1);
-  const uint scale_y = out_scales.extent(2);
-  detail::make_scales(sigmas.data_handle(), scale_x, scale_y, scale_y_full, n_scales,
+  const uint scale_nrow = out_scales.extent(1);
+  const uint scale_ncol = out_scales.extent(2);
+  detail::make_scales(sigmas.data_handle(), scale_nrow, scale_ncol, scale_ncol_full, n_scales,
                       out_scales.data_handle());
+}
+
+scale_convole_ctx make_scale_convole_ctx(int nrow, int ncol, int n_scales, float padding) {
+  return detail::make_scale_convole_ctx(nrow, ncol, n_scales, padding);
 }
 
 void scale_convolve(core::device_span2d<float> dirty, core::device_vect<float> sigmas,
                     core::device_span3d<float> out_scaled_dirty, float padding)
 {
   // todo: perform some checks
-  const uint dirty_y = dirty.extent(0);
-  const uint dirty_x = dirty.extent(1);
+  const uint nrow = dirty.extent(0);
+  const uint ncol = dirty.extent(1);
   const uint n_scales = sigmas.extent(0);
 
   core::resources resources(0);
-  scale_convole_ctx ctx = detail::make_scale_convole_ctx(dirty_x, dirty_y, n_scales, padding);
+  scale_convole_ctx ctx = detail::make_scale_convole_ctx(nrow, ncol, n_scales, padding);
 
   detail::scale_convolve(resources, ctx, dirty.data_handle(), sigmas.data_handle(),
                          out_scaled_dirty.data_handle(), n_scales);
@@ -55,13 +59,13 @@ detail::ScaleSelectionResult scale_selection(core::device_span3d<float> scaled_d
   constexpr bool per_scale_mask = (MaskSpan::rank() == 3);
 
   const int n_scales = scaled_dirty.extent(0);
-  const int npix_y = scaled_dirty.extent(1);
-  const int npix_x = scaled_dirty.extent(2);
+  const int nrow = scaled_dirty.extent(1);
+  const int ncol = scaled_dirty.extent(2);
 
   core::resources resources(0);
 
   return detail::scale_selection(resources, scaled_dirty.data_handle(), mask.data_handle(),
-                                 bias.data_handle(), n_scales, npix_x, npix_y, do_abs,
+                                 bias.data_handle(), n_scales, nrow, ncol, do_abs,
                                  per_scale_mask);
 }
 
