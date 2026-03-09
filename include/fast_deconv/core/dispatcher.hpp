@@ -1,5 +1,5 @@
 #pragma once
-#include "fast_deconv/core/stream_resources.hpp"
+#include "fast_deconv/core/resources.hpp"
 
 #include <emu/cuda/device/mdspan.hpp>
 #include <fast_deconv/core/access_policy.hpp>

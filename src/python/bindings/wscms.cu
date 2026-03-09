@@ -6,6 +6,7 @@
 #include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/span_types.hpp>
 
+#include "fast_deconv/core/resources.hpp"
 #include "fast_deconv_bindings.hpp"
 
 namespace py = pybind11;
@@ -18,31 +19,48 @@ void bind_wscms(py::module_& m)
 {
   auto wscms_module = m.def_submodule("wscms", "WSCMS module");
 
-
   py::class_<wscms::scale_convole_ctx>(m, "ScaleConvolveCtx");
 
-
-  m.def("scale_convolve", &fd_algo_wscms::scale_convolve, R"pbdoc( dirty @ scales )pbdoc");
+  m.def(
+      "wscms_minor_cycles",
+      [](core::device_span2d<float> residual, core::device_span4d<float> psfs_2,
+         core::device_span2d<int> map_pixels_facets, core::device_span2d<float> gains,
+         int scale_idx, float threshold, int max_iter) {
+        core::resources resources(0);
+        wscms::wscms_minor_cycles(resources, residual, psfs_2, map_pixels_facets, gains, scale_idx, threshold,
+                                  max_iter);
+      },
+      R"pbdoc( TODO )pbdoc");
 
   m.def(
-      "scale_selection",
-      [](fd_core::device_span3d<float> scaled_dirty, fd_core::device_span2d<bool> mask,
-         fd_core::host_vect<float> bias, bool do_abs) {
-        auto r = fd_algo_wscms::scale_selection(scaled_dirty, mask, bias, do_abs);
-        return py::make_tuple(r.best_scale, r.best_row, r.best_col, r.best_peak);
+      "wscms_minor_cycles_host_loop",
+      [](core::device_span2d<float> residual, core::device_span4d<float> psfs_2,
+         core::host_span2d<int> map_pixels_facets, core::host_span2d<float> gains, int scale_idx,
+         float threshold, int max_iter) {
+        core::resources resources(0);
+        wscms::wscms_minor_cycles_host_loop(resources, residual, psfs_2, map_pixels_facets, gains,
+                                             scale_idx, threshold, max_iter);
       },
-      py::arg("scaled_dirty"), py::arg("mask"), py::arg("bias"), py::arg("do_abs"));
+      R"pbdoc( Host-loop minor cycles using CUB argmax )pbdoc");
 
-  m.def(
-      "scale_selection",
-      [](fd_core::device_span3d<float> scaled_dirty, fd_core::device_span3d<bool> mask,
-         fd_core::host_vect<float> bias, bool do_abs) {
-        auto r = fd_algo_wscms::scale_selection(scaled_dirty, mask, bias, do_abs);
-        return py::make_tuple(r.best_scale, r.best_row, r.best_col, r.best_peak);
-      },
-      py::arg("scaled_dirty"), py::arg("mask"), py::arg("bias"), py::arg("do_abs"));
+  m.def("make_scale_convole_ctx", &wscms::make_scale_convole_ctx,
+        R"pbdoc( build context for scale_convolve )pbdoc");
 
-  // m.def("make_scales", &fd_algo_wscms::make_scales, R"pbdoc( make scales )pbdoc");
+  m.def("scale_convolve", &wscms::scale_convolve, R"pbdoc( dirty @ scales )pbdoc");
+
+  m.def("scale_selection",
+        [](const core::resources& resources, core::device_span3d<float> scaled_dirty,
+           core::device_span2d<bool> mask, core::host_vect<float> bias, bool do_abs) {
+          auto r = wscms::scale_selection(resources, scaled_dirty, mask, bias, do_abs);
+          return py::make_tuple(r.best_scale, r.best_row, r.best_col, r.best_peak);
+        });
+
+  m.def("scale_selection",
+        [](const core::resources& resources, core::device_span3d<float> scaled_dirty,
+           core::device_span3d<bool> mask, core::host_vect<float> bias, bool do_abs) {
+          auto r = wscms::scale_selection(resources, scaled_dirty, mask, bias, do_abs);
+          return py::make_tuple(r.best_scale, r.best_row, r.best_col, r.best_peak);
+        });
 
   // py::class_<fd_algo_wscms::MinorCycleContext>(m, "MinorCycleContext")
   //     .def(py::init<fd_core::device_span4d<float>, fd_core::host_span2d<int>,

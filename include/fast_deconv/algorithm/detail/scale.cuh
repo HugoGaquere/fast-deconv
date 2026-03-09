@@ -103,8 +103,8 @@ void make_scales(const core::resources& resources, float* sigmas, int scale_nrow
 // per_scale_mask: false = shared mask (npix,), true = per-scale masks (n_scales, npix)
 // Returns unbiased peak value and pixel coordinates.
 scale_selection_result scale_selection(const core::resources& resources, float* scaled_dirty,
-                                     const bool* mask, const float* bias, int n_scales, int nrow,
-                                     int ncol, bool do_abs, bool per_scale_mask)
+                                       const bool* mask, const float* bias, int n_scales, int nrow,
+                                       int ncol, bool do_abs, bool per_scale_mask)
 {
   const auto& stream_res = resources.get_stream_resources();
   auto cuda_stream = stream_res.cuda_stream;
@@ -195,7 +195,7 @@ scale_convole_ctx make_scale_convole_ctx(int nrow, int ncol, int n_scales, float
 // out_scaled_dirty: (n_scales, nrow, ncol) real, device
 // Internally: pad+ifftshift → R2C → multiply with Gaussian scales → C2R → fftshift+crop
 void scale_convolve(const core::resources& resources, const scale_convole_ctx& ctx, float* dirty,
-                    float* sigmas, float* out_scaled_dirty, int n_scales)
+                    float* scales, float* out_scaled_dirty, int n_scales)
 {
   const int img_padded_total = ctx.img_padded_nrow * ctx.img_padded_ncol;
   const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
@@ -208,7 +208,7 @@ void scale_convolve(const core::resources& resources, const scale_convole_ctx& c
 
   // Allocate temporaries
   float* dirty_padded = resources.alloc_async<float>(img_padded_total, stream_res);
-  float* scales = resources.alloc_async<float>(freq_scales_total, stream_res);
+  // float* scales = resources.alloc_async<float>(freq_scales_total, stream_res);
   complex_type* dirty_freq = resources.alloc_async<complex_type>(freq_total, stream_res);
   complex_type* scaled_dirty_freq =
       resources.alloc_async<complex_type>(freq_scales_total, stream_res);
@@ -217,8 +217,8 @@ void scale_convolve(const core::resources& resources, const scale_convole_ctx& c
   stream_res.sync();
 
   // Generate Gaussian scale kernels in half-complex frequency domain
-  make_scales(resources, sigmas, ctx.freq_nrow, ctx.freq_ncol, ctx.img_padded_ncol, n_scales,
-              scales, cuda_stream);
+  // make_scales(resources, sigmas, ctx.freq_nrow, ctx.freq_ncol, ctx.img_padded_ncol, n_scales,
+  //             scales);
 
   // Pad + ifftshift dirty image
   linalg::detail::pad_ifftshift(dirty, dirty_padded, ctx.img_nrow, ctx.img_ncol,
@@ -243,7 +243,7 @@ void scale_convolve(const core::resources& resources, const scale_convole_ctx& c
 
   // Cleanup
   resources.free_async(dirty_padded, stream_res);
-  resources.free_async(scales, stream_res);
+  // resources.free_async(scales, stream_res);
   resources.free_async(dirty_freq, stream_res);
   resources.free_async(scaled_dirty_freq, stream_res);
   resources.free_async(scaled_dirty, stream_res);
