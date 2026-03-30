@@ -300,7 +300,7 @@ __global__ void psf_subtract_kernel(float* __restrict__ residual, const float* _
 // xdes row-major:       [n_freq, n_order]
 // weights row-major:    [n_freq]
 // A row-major:          [n_freq, n_order]
-__global__ void compute_spectral_matrix_kernel(float* __restrict__ A,
+__global__ void compute_spectral_matrix_kernel(float* __restrict__ SAX, float* __restrict__ A,
                                                const float* __restrict__ xdes,
                                                const float* __restrict__ jones_norm,
                                                const float* __restrict__ weights, int n_freq,
@@ -312,8 +312,10 @@ __global__ void compute_spectral_matrix_kernel(float* __restrict__ A,
   const int peak_offset = peak_row * ncol + peak_col;
   for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < n; idx += blockDim.x * gridDim.x) {
     const int f = idx / n_order;
-    float jn = jones_norm[f * spatial_stride + peak_offset];
-    A[idx] = xdes[idx] * sqrtf(jn) * sqrtf(weights[f]);
+    float sqrt_jn = sqrtf(jones_norm[f * spatial_stride + peak_offset]);
+    float sax = xdes[idx] * sqrt_jn;
+    SAX[idx] = sax;
+    A[idx] = sax * sqrtf(weights[f]);
   }
 }
 
@@ -377,8 +379,9 @@ __global__ void compute_spectral_coeffs_kernel(float* __restrict__ compact_out,
                                                const float* __restrict__ dirty,
                                                const float* __restrict__ weights,
                                                const float* __restrict__ A_pinv,
-                                               const float* __restrict__ A, int n_freq, int n_order,
-                                               int nrow, int ncol, int peak_row, int peak_col)
+                                               const float* __restrict__ SAX, int n_freq,
+                                               int n_order, int nrow, int ncol, int peak_row,
+                                               int peak_col)
 {
   extern __shared__ float smem[];
   float* s_wy = smem;                // [n_freq]
@@ -407,13 +410,13 @@ __global__ void compute_spectral_coeffs_kernel(float* __restrict__ compact_out,
   }
   __syncthreads();
 
-  // Step 3: per_chan[f] = A[f, :] . compact
-  // A row-major [n_freq, n_order]: element (f, o) at [f * n_order + o]
+  // Step 3: per_chan[f] = SAX[f, :] . compact
+  // SAX = sqrt(jn) * xdes, row-major [n_freq, n_order]: element (f, o) at [f * n_order + o]
   // One thread per freq, each loops over all orders
   for (int f = tid; f < n_freq; f += SPECTRAL_BLOCK_SIZE) {
     float sum = 0.0f;
     for (int o = 0; o < n_order; o++) {
-      sum += A[f * n_order + o] * s_compact[o];
+      sum += SAX[f * n_order + o] * s_compact[o];
     }
     per_chan_out[f] = sum;
   }
@@ -422,13 +425,13 @@ __global__ void compute_spectral_coeffs_kernel(float* __restrict__ compact_out,
 void compute_spectral_coeffs(const core::resources& resources,
                              const core::stream_resources& stream_res, float* compact_out,
                              float* per_chan_out, const float* dirty, const float* weights,
-                             const float* A_pinv, const float* A, int n_freq, int n_order, int nrow,
-                             int ncol, int peak_row, int peak_col)
+                             const float* A_pinv, const float* SAX, int n_freq, int n_order,
+                             int nrow, int ncol, int peak_row, int peak_col)
 {
   size_t smem_bytes = (n_freq + n_order) * sizeof(float);
 
   compute_spectral_coeffs_kernel<<<1, SPECTRAL_BLOCK_SIZE, smem_bytes, stream_res.cuda_stream>>>(
-      compact_out, per_chan_out, dirty, weights, A_pinv, A, n_freq, n_order, nrow, ncol, peak_row,
+      compact_out, per_chan_out, dirty, weights, A_pinv, SAX, n_freq, n_order, nrow, ncol, peak_row,
       peak_col);
 }
 
@@ -458,9 +461,9 @@ __global__ void spectral_psf_subtract_kernel(float* __restrict__ dirty,
 }
 
 // Full spectral component subtraction pipeline:
-//   1. A = sqrt(jones_norm[f, peak]) * WXdes[f, o]
+//   1. SAX = sqrt(jones_norm[f, peak]) * xdes[f, o],  A = sqrt(w[f]) * SAX
 //   2. A_pinv = inv(A^T A) @ A^T
-//   3. wy = sqrt_w * dirty[f, peak]  →  compact = A_pinv @ wy  →  per_chan = A @ compact
+//   3. wy = sqrt_w * dirty[f, peak]  →  compact = A_pinv @ wy  →  per_chan = SAX @ compact
 //   4. dirty[f] -= per_chan[f] * gain * psf[f]  (within overlap region)
 void subtract_component(const core::resources& resources, const core::stream_resources& stream_res,
                         float* dirty, const float* psf, const float* xdes, const float* jones_norm,
@@ -470,22 +473,36 @@ void subtract_component(const core::resources& resources, const core::stream_res
   auto cuda_stream = stream_res.cuda_stream;
 
   // Allocate temporaries
+  float* d_SAX = resources.alloc_async<float>(n_freq * n_order, stream_res);
   float* d_A = resources.alloc_async<float>(n_freq * n_order, stream_res);
   float* d_A_pinv = resources.alloc_async<float>(n_order * n_freq, stream_res);
   float* d_compact = resources.alloc_async<float>(n_order, stream_res);
   float* d_per_chan = resources.alloc_async<float>(n_freq, stream_res);
 
-  // Step 1: build spectral matrix A
+  // Step 1: build SAX = sqrt(jn) * xdes and A = sqrt(w) * SAX
   const int n_A = n_freq * n_order;
   compute_spectral_matrix_kernel<<<1, n_A, 0, cuda_stream>>>(
-      d_A, xdes, jones_norm, weights, n_freq, n_order, nrow, ncol, peak_row, peak_col);
+      d_SAX, d_A, xdes, jones_norm, weights, n_freq, n_order, nrow, ncol, peak_row, peak_col);
 
-  // Step 2: pseudo-inverse
+  // Step 2: pseudo-inverse of A (weighted matrix)
   compute_pseudo_inverse(resources, stream_res, d_A, d_A_pinv, n_freq, n_order);
 
-  // Step 3: spectral coefficients
+  // Step 3: spectral coefficients (uses SAX for per-chan evaluation)
   compute_spectral_coeffs(resources, stream_res, d_compact, d_per_chan, dirty, weights, d_A_pinv,
-                          d_A, n_freq, n_order, nrow, ncol, peak_row, peak_col);
+                          d_SAX, n_freq, n_order, nrow, ncol, peak_row, peak_col);
+
+  // Log compact coefficients and per-channel values
+  {
+    std::vector<float> h_compact(n_order);
+    std::vector<float> h_per_chan(n_freq);
+    CHECK_CUDA(cudaMemcpyAsync(h_compact.data(), d_compact, n_order * sizeof(float),
+                               cudaMemcpyDeviceToHost, cuda_stream));
+    CHECK_CUDA(cudaMemcpyAsync(h_per_chan.data(), d_per_chan, n_freq * sizeof(float),
+                               cudaMemcpyDeviceToHost, cuda_stream));
+    stream_res.sync();
+    FD_LOG_DEBUG("subtract_component: coeffs=[{}] per_chan=[{}]",
+                 fmt::join(h_compact, ", "), fmt::join(h_per_chan, ", "));
+  }
 
   // Step 4: subtract PSF from dirty
   overlap_region ovr = compute_overlap_region(peak_row, peak_col, nrow, ncol, psf_nrow, psf_ncol);
@@ -498,6 +515,7 @@ void subtract_component(const core::resources& resources, const core::stream_res
   resources.free_async(d_compact, stream_res);
   resources.free_async(d_A_pinv, stream_res);
   resources.free_async(d_A, stream_res);
+  resources.free_async(d_SAX, stream_res);
 }
 
 void wscms_minor_cycles_host_loop(const core::resources& resources,
@@ -573,6 +591,18 @@ void wscms_minor_cycles_host_loop(const core::resources& resources,
         mean_residual_ptr, psf_2_ptr, ovr, factor);
 
     // Stream 2: subtract component from dirty
+    {
+      // Log apparent flux at peak pixel across frequencies
+      std::vector<float> h_flux(n_freq);
+      const int peak_offset = peak_row * ncol + peak_col;
+      for (int f = 0; f < n_freq; f++) {
+        CHECK_CUDA(cudaMemcpyAsync(&h_flux[f], residual_ptr + f * nrow * ncol + peak_offset,
+                                   sizeof(float), cudaMemcpyDeviceToHost,
+                                   stream_res_2.cuda_stream));
+      }
+      stream_res_2.sync();
+      FD_LOG_DEBUG("minor_loop: apparent_flux=[{}]", fmt::join(h_flux, ", "));
+    }
     const float* psf_ptr = psfs.data_handle() + psfs.mapping()(scale_idx, facet_idx, 0, 0, 0, 0);
     subtract_component(resources, stream_res_2, residual_ptr, psf_ptr, xdes_ptr, jones_norm_ptr,
                        weights_ptr, gain, n_freq, n_order, nrow, ncol, psf_nrow, psf_ncol, peak_row,
