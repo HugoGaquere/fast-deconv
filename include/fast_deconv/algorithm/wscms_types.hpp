@@ -8,22 +8,42 @@
 
 namespace fast_deconv::algorithm::wscms {
 
-static constexpr int MAX_SPECTRAL_ORDER = 8;
+static constexpr int MAX_SPECTRAL_ORDER = 4;
 
-struct MinorCycleContext {
-  // Image metadata
-  core::device_span4d<float> jones_norm;     // (nch, npol, h, w)
-  core::host_span2d<int> map_pixels_facets;  // pixel -> facet_id
+struct WSCMS_ctx {
+  core::device_span4d<float> jones_norm;
+  core::device_span2d<float> xdes;
+  core::device_vect<float> weights_freq;
+  core::device_span2d<bool> scale_masks;
+  core::device_vect<float> scale_sigmas;
+  core::host_vect<float> scale_bias;
+  core::host_span2d<int> map_pixel_facet;
+  core::host_span2d<float> gains;
+};
 
-  // Spectral fitting data
-  core::device_span2d<float> Xdes;        // design matrix (nch, order)
-  core::device_vect<float> sqrt_weights;  // sqrt(weights_chan_images) (nch,)
+struct WSCMS_params {
   bool beam_enable;
-
-  // Algorithm parameters
-  float peak_factor;
-  uint n_subminor_iter;
   bool do_abs;
+  bool per_scale_mask;
+  float peak_factor;
+  int max_subminor_iter;
+  int n_scales;
+  float padding;
+};
+
+struct scale_convole_ctx {
+  int img_nrow, img_ncol;                // image domain size
+  int padding_nrow, padding_ncol;        // image domain padding
+  int img_padded_nrow, img_padded_ncol;  // image domain padded size
+  int freq_nrow, freq_ncol;              // frequency domain size
+  int n_batches;
+  cufftHandle plan_forward, plan_backward;  // FFT plans
+
+  ~scale_convole_ctx()
+  {
+    CUFFT_CALL(cufftDestroy(plan_forward));
+    CUFFT_CALL(cufftDestroy(plan_backward));
+  }
 };
 
 struct ComponentEntry {
@@ -46,21 +66,6 @@ struct scale_selection_result {
   int best_row;
   int best_col;
   float best_peak;
-};
-
-struct scale_convole_ctx {
-  int img_nrow, img_ncol;                // image domain size
-  int padding_nrow, padding_ncol;        // image domain padding
-  int img_padded_nrow, img_padded_ncol;  // image domain padded size
-  int freq_nrow, freq_ncol;              // frequency domain size
-  int n_batches;
-  cufftHandle plan_forward, plan_backward;  // FFT plans
-
-  ~scale_convole_ctx()
-  {
-    CUFFT_CALL(cufftDestroy(plan_forward));
-    CUFFT_CALL(cufftDestroy(plan_backward));
-  }
 };
 
 }  // namespace fast_deconv::algorithm::wscms

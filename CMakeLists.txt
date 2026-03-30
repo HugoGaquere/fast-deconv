@@ -11,6 +11,7 @@ find_package(CUDAToolkit REQUIRED)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+
 set(
   CONNAN_ARGS
   "" CACHE STRING
@@ -24,12 +25,13 @@ endif()
 
 # Set build type to release if nothing was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    message(STATUS "Setting build type to 'Debug' as none was specified.")
+  message(STATUS "Setting build type to 'Release' as none was specified.")
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 else()
     message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 endif()
+# set(CMAKE_BUILD_TYPE "Debug")
 
 #-------------------------------------------------------------------#
 # Cuda configuration
@@ -40,6 +42,7 @@ set(CMAKE_CUDA_FLAGS "-Wall")
 # Dependencies
 #-------------------------------------------------------------------#
 find_package(fmt CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 find_package(emu CONFIG REQUIRED)
 
 #-------------------------------------------------------------------#
@@ -76,18 +79,21 @@ target_include_directories(fast_deconv INTERFACE
 
 target_link_libraries(fast_deconv INTERFACE
   fmt::fmt
+  spdlog::spdlog
   emu::emu
   CUDA::cublas
   CUDA::cufft
   # CUDA::thrust
   # $<TARGET_NAME_IF_EXISTS:mathdx::cublasdx>
-  $<TARGET_NAME_IF_EXISTS:mathdx::cufftdx>
+  # $<TARGET_NAME_IF_EXISTS:mathdx::cufftdx>
 )
 
 # Set the targeting architectures
 set_target_properties(fast_deconv PROPERTIES
                 CUDA_ARCHITECTURES native
 )
+
+target_compile_definitions(fast_deconv INTERFACE SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG)
 
 target_compile_features(fast_deconv INTERFACE cxx_std_20)
 
@@ -140,9 +146,39 @@ endif()
 #-------------------------------------------------------------------#
  add_executable(fast_deconv_app
    src/main.cu
-   # src/examples/argmax_example.hpp
  )
- target_link_libraries(fast_deconv_app PRIVATE fast_deconv CUDA::curand)
+ target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
+
+ add_executable(example_wscms src/example_wscms.cu)
+ target_link_libraries(example_wscms PRIVATE fast_deconv)
+
+#-------------------------------------------------------------------#
+# Tests
+#-------------------------------------------------------------------#
+option(BUILD_TESTS "Build unit tests" ON)
+
+if(BUILD_TESTS)
+  enable_testing()
+  find_package(GTest CONFIG REQUIRED)
+
+  add_executable(fast_deconv_tests
+    tests/cpp/test_main.cpp
+    tests/cpp/test_scale_selection.cu
+  )
+
+  target_link_libraries(fast_deconv_tests PRIVATE
+    fast_deconv
+    GTest::gtest
+    GTest::gtest_main
+  )
+
+  target_include_directories(fast_deconv_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp
+  )
+
+  include(GoogleTest)
+  gtest_discover_tests(fast_deconv_tests)
+endif()
 
 #-------------------------------------------------------------------#
 # Installation

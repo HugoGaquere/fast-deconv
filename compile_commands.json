@@ -1,1 +1,8 @@
-build/Release/compile_commands.json
+[
+{
+  "directory": "/home/hugo/Documents/projects/fast-deconv/build/Release",
+  "command": "/usr/local/cuda/bin/nvcc -forward-unknown-to-host-compiler -DBOOST_STACKTRACE_ADDR2LINE_LOCATION=\\\"/usr/bin/addr2line\\\" -DBOOST_STACKTRACE_USE_ADDR2LINE -DBOOST_STACKTRACE_USE_BACKTRACE -DBOOST_STACKTRACE_USE_NOOP -DEMU_BOOST_NAMESPACE=boost -DEMU_CUDA -DFMT_USE_CONSTEXPR=1 -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CUDA -DTHRUST_HOST_SYSTEM=THRUST_HOST_SYSTEM_CPP --options-file CMakeFiles/fast_deconv_app.dir/includes_CUDA.rsp -Wall -O3 -DNDEBUG -std=c++20 -arch=native --extended-lambda --expt-relaxed-constexpr -x cu -c /home/hugo/Documents/projects/fast-deconv/src/main.cu -o CMakeFiles/fast_deconv_app.dir/src/main.cu.o",
+  "file": "/home/hugo/Documents/projects/fast-deconv/src/main.cu",
+  "output": "CMakeFiles/fast_deconv_app.dir/src/main.cu.o"
+}
+]

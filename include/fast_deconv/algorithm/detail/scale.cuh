@@ -86,14 +86,15 @@ __global__ void apply_mask_kernel(float* scaled_dirty, const bool* mask, int npi
 
 namespace fast_deconv::algorithm::wscms::detail {
 
-void make_scales(const core::resources& resources, float* sigmas, int scale_nrow,
-                 int scale_ncol_half, int scale_ncol_full, int n_scales, float* scales)
+void make_scales(const core::resources& resources, const core::stream_resources& stream_res,
+                 float* sigmas, int scale_nrow, int scale_ncol_half, int scale_ncol_full,
+                 int n_scales, float* scales)
 {
-  const auto& stream_res = resources.get_stream_resources();
   dim3 block_dim(16, 16);
   dim3 grid_dim(CEIL_DIV(scale_ncol_half, block_dim.x), CEIL_DIV(scale_nrow, block_dim.y));
   make_scales_kernel_half<<<grid_dim, block_dim, 0, stream_res.cuda_stream>>>(
       sigmas, scale_nrow, scale_ncol_half, scale_ncol_full, n_scales, scales);
+  stream_res.sync();
 }
 
 // Finds the best scale and peak pixel via biased peak-finding.
@@ -102,12 +103,13 @@ void make_scales(const core::resources& resources, float* sigmas, int scale_nrow
 // bias: (n_scales,) host memory, multiplied with per-scale peaks to select best scale.
 // per_scale_mask: false = shared mask (npix,), true = per-scale masks (n_scales, npix)
 // Returns unbiased peak value and pixel coordinates.
-scale_selection_result scale_selection(const core::resources& resources, float* scaled_dirty,
-                                       const bool* mask, const float* bias, int n_scales, int nrow,
-                                       int ncol, bool do_abs, bool per_scale_mask)
+scale_selection_result scale_selection(const core::resources& resources,
+                                       const core::stream_resources& stream_res,
+                                       float* scaled_dirty, const bool* mask, const float* bias,
+                                       int n_scales, int nrow, int ncol, bool do_abs,
+                                       bool per_scale_mask)
 {
-  const auto& stream_res = resources.get_stream_resources();
-  auto cuda_stream = stream_res.cuda_stream;
+  const auto cuda_stream = stream_res.cuda_stream;
 
   const int npix = nrow * ncol;
   const int mask_stride = per_scale_mask ? npix : 0;
@@ -165,7 +167,7 @@ scale_selection_result scale_selection(const core::resources& resources, float* 
   return {best_scale, best_row, best_col, h_peaks[best_scale].value};
 }
 
-scale_convole_ctx make_scale_convole_ctx(int nrow, int ncol, int n_scales, float padding)
+scale_convole_ctx make_scale_convolve_ctx(int nrow, int ncol, int n_scales, float padding)
 {
   const auto [npad_row, npad_col] = linalg::detail::compute_padding(nrow, ncol, padding);
 
@@ -194,31 +196,26 @@ scale_convole_ctx make_scale_convole_ctx(int nrow, int ncol, int n_scales, float
 // sigmas:           (n_scales,) Gaussian sigmas, device
 // out_scaled_dirty: (n_scales, nrow, ncol) real, device
 // Internally: pad+ifftshift → R2C → multiply with Gaussian scales → C2R → fftshift+crop
-void scale_convolve(const core::resources& resources, const scale_convole_ctx& ctx, float* dirty,
-                    float* scales, float* out_scaled_dirty, int n_scales)
+void scale_convolve(const core::resources& resources, const core::stream_resources& stream_res,
+                    const scale_convole_ctx& ctx, float* dirty, float* scales,
+                    float* out_scaled_dirty, int n_scales)
 {
   const int img_padded_total = ctx.img_padded_nrow * ctx.img_padded_ncol;
   const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
   const int freq_scales_total = freq_total * n_scales;
 
-  const auto& stream_res = resources.get_stream_resources();
   cudaStream_t cuda_stream = stream_res.cuda_stream;
   CUFFT_CALL(cufftSetStream(ctx.plan_forward, cuda_stream));
   CUFFT_CALL(cufftSetStream(ctx.plan_backward, cuda_stream));
 
   // Allocate temporaries
   float* dirty_padded = resources.alloc_async<float>(img_padded_total, stream_res);
-  // float* scales = resources.alloc_async<float>(freq_scales_total, stream_res);
   complex_type* dirty_freq = resources.alloc_async<complex_type>(freq_total, stream_res);
   complex_type* scaled_dirty_freq =
       resources.alloc_async<complex_type>(freq_scales_total, stream_res);
   float* scaled_dirty = resources.alloc_async<float>(img_padded_total * n_scales, stream_res);
 
   stream_res.sync();
-
-  // Generate Gaussian scale kernels in half-complex frequency domain
-  // make_scales(resources, sigmas, ctx.freq_nrow, ctx.freq_ncol, ctx.img_padded_ncol, n_scales,
-  //             scales);
 
   // Pad + ifftshift dirty image
   linalg::detail::pad_ifftshift(dirty, dirty_padded, ctx.img_nrow, ctx.img_ncol,
@@ -241,14 +238,36 @@ void scale_convolve(const core::resources& resources, const scale_convole_ctx& c
                                 ctx.img_padded_nrow, ctx.img_padded_ncol, ctx.padding_nrow,
                                 ctx.padding_ncol, n_scales, cuda_stream);
 
+  // we want untouched mean dirty at scale 0
+  cudaMemcpyAsync(out_scaled_dirty, dirty, ctx.img_nrow * ctx.img_ncol * sizeof(float),
+                  cudaMemcpyDeviceToDevice, stream_res.cuda_stream);
+
   // Cleanup
   resources.free_async(dirty_padded, stream_res);
-  // resources.free_async(scales, stream_res);
   resources.free_async(dirty_freq, stream_res);
   resources.free_async(scaled_dirty_freq, stream_res);
   resources.free_async(scaled_dirty, stream_res);
 
   stream_res.sync();
+}
+
+/**
+ * @brief Copies the selected scale slice from a batched buffer to a flat output.
+ *
+ * Extracts the slice at index @p best_scale from @p scaled_dirty laid out as
+ * (n_scales, npix) and copies it into @p out (npix).
+ *
+ * @param stream_res    CUDA stream resources for the async copy.
+ * @param scaled_dirty  Device pointer to the batched buffer, shape (n_scales, npix).
+ * @param out           Device pointer to the output buffer, size npix.
+ * @param best_scale    Index of the scale slice to extract.
+ * @param npix          Number of pixels per scale (nrow * ncol).
+ */
+void copy_scale_slice(const core::stream_resources& stream_res, const float* scaled_dirty,
+                      float* out, int best_scale, int npix)
+{
+  const float* src = scaled_dirty + best_scale * npix;
+  cudaMemcpyAsync(out, src, npix * sizeof(float), cudaMemcpyDeviceToDevice, stream_res.cuda_stream);
 }
 
 }  // namespace fast_deconv::algorithm::wscms::detail

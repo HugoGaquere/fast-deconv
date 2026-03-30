@@ -52,8 +52,8 @@ __global__ void fftshift_crop_kernel(const float* input, float* output, int nx, 
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
   if (row >= nx || col >= ny) return;
 
-  const int src_row = (row + npad_x + px / 2) % px;
-  const int src_col = (col + npad_y + py / 2) % py;
+  const int src_row = (row + npad_x + (px + 1) / 2) % px;
+  const int src_col = (col + npad_y + (py + 1) / 2) % py;
 
   const int out_stride = nx * ny;
   const int in_stride = px * py;

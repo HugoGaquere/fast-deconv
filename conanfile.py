@@ -1,6 +1,7 @@
 from conan import ConanFile
 from conan.tools.cmake import cmake_layout, CMake, CMakeToolchain
 
+
 class Recipe(ConanFile):
     name = "fast-deconv"
     version = "0.0.1"
@@ -9,7 +10,7 @@ class Recipe(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
 
     # List of files to export to the conan cache when creating package.
-    exports_sources = 'CMakeLists.txt', 'include/*', 'src/*', 'test/*'
+    exports_sources = "CMakeLists.txt", "include/*", "src/*", "test/*"
 
     options = {"python_module": [True, False]}
     default_options = {"python_module": False}
@@ -20,9 +21,12 @@ class Recipe(ConanFile):
 
     def requirements(self):
         self.requires("fmt/11.2.0")
-        self.requires('emu/0.1.0-rc.3',
-                      options={"python": self.options.python_module, "cuda": True}
-                      )
+        self.requires("spdlog/1.15.3")
+        self.requires(
+            "emu/0.1.0-rc.3",
+            options={"python": self.options.python_module, "cuda": True},
+        )
+        self.requires("gtest/1.15.0")
 
     def layout(self):
         if self.options.python_module:
@@ -54,4 +58,4 @@ class Recipe(ConanFile):
         cmake.install()
 
     def package_info(self):
-        self.cpp_info.libs = ['fast-deconv']
+        self.cpp_info.libs = ["fast-deconv"]
