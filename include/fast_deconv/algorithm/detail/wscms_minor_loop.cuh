@@ -16,9 +16,12 @@
 
 namespace fast_deconv::algorithm::wscms::detail {
 
-void run_wscms(const core::resources& resources, core::device_span4d<float>& dirty,
-               core::device_span2d<float>& mean_residual, const core::device_span6d<float>& psfs,
-               const core::device_span4d<float>& psfs_2, WSCMS_ctx wscms_ctx, WSCMS_params params)
+std::vector<sky_component> run_wscms(const core::resources& resources,
+                                     core::device_span4d<float>& dirty,
+                                     core::device_span2d<float>& mean_residual,
+                                     const core::device_span6d<float>& psfs,
+                                     const core::device_span4d<float>& psfs_2, WSCMS_ctx wscms_ctx,
+                                     WSCMS_params params)
 {
   log::set_level(spdlog::level::debug);
 
@@ -68,8 +71,10 @@ void run_wscms(const core::resources& resources, core::device_span4d<float>& dir
   FD_LOG_INFO("selected scale_idx={} peak={:.6f} at ({},{})", sel.best_scale, sel.best_peak,
               sel.best_row, sel.best_col);
 
-  wscms_minor_cycles_host_loop(resources, dirty, scaled_mean_dirty, psfs, psfs_2, sel.best_scale,
-                               wscms_ctx, params);
+  const std::vector<sky_component> components = wscms_minor_cycles_host_loop(
+      resources, dirty, scaled_mean_dirty, psfs, psfs_2, sel.best_scale, wscms_ctx, params);
+
+  return components;
 }
 
 }  // namespace fast_deconv::algorithm::wscms::detail

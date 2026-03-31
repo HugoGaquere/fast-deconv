@@ -1,7 +1,7 @@
 #pragma once
 
-#include <fast_deconv/algorithm/detail/wscms_minor_loop.cuh>
 #include <fast_deconv/algorithm/detail/scale.cuh>
+#include <fast_deconv/algorithm/detail/wscms_minor_loop.cuh>
 #include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/logger.hpp>
 #include <fast_deconv/core/resources.hpp>
@@ -9,19 +9,23 @@
 
 namespace fast_deconv::algorithm::wscms {
 
-void run_wscms(core::device_span4d<float>& dirty, core::device_span2d<float>& mean_residual,
-               const core::device_span6d<float>& psfs, const core::device_span4d<float>& psfs_2,
-               WSCMS_ctx& wscms_ctx, WSCMS_params params)
+std::vector<sky_component> run_wscms(core::device_span4d<float>& dirty,
+                                     core::device_span2d<float>& mean_residual,
+                                     const core::device_span6d<float>& psfs,
+                                     const core::device_span4d<float>& psfs_2, WSCMS_ctx& wscms_ctx,
+                                     WSCMS_params params)
 {
-  FD_LOG_INFO("run_wscms: dirty={} psfs={} n_scales={} max_subminor_iter={} peak_factor={}",
-              dirty, psfs, params.n_scales, params.max_subminor_iter, params.peak_factor);
+  FD_LOG_INFO("run_wscms: dirty={} psfs={} n_scales={} max_subminor_iter={} peak_factor={}", dirty,
+              psfs, params.n_scales, params.max_subminor_iter, params.peak_factor);
   FD_LOG_DEBUG("run_wscms: beam_enable={} do_abs={} per_scale_mask={} padding={}",
                params.beam_enable, params.do_abs, params.per_scale_mask, params.padding);
 
   core::resources resources(0);
-  detail::run_wscms(resources, dirty, mean_residual, psfs, psfs_2, wscms_ctx, params);
+  std::vector<sky_component> components =
+      detail::run_wscms(resources, dirty, mean_residual, psfs, psfs_2, wscms_ctx, params);
 
   FD_LOG_INFO("run_wscms: completed");
+  return components;
 }
 
 // std::vector<ComponentEntry> minor_cycle(const core::resources&, const MinorCycleContext& ctx,
@@ -41,20 +45,20 @@ void run_wscms(core::device_span4d<float>& dirty, core::device_span2d<float>& me
 //                         core::device_span2d<float>& gains, int scale_idx, float threshold,
 //                         int max_iter)
 // {
-  // if (residual.extent(0) != map_pixels_facets.extent(0) || residual.extent(1) !=
-  // map_pixels_facets.extent(1))
-  //   throw std::invalid_argument(
-  //       "wscms_minor_cycles: residual and map_pixels_facets spatial "
-  //       "dimensions must match");
-  // if (scale_idx < 0 || scale_idx >= static_cast<int>(psfs_2.extent(0)))
-  //   throw std::invalid_argument("wscms_minor_cycles: scale_idx out of range");
-  // if (psfs_2.extent(1) != gains.extent(1))
-  //   throw std::invalid_argument("wscms_minor_cycles: psfs_2 n_facet != gains n_facet");
-  // if (threshold <= 0) throw std::invalid_argument("wscms_minor_cycles: threshold must be > 0");
-  // if (max_iter <= 0) throw std::invalid_argument("wscms_minor_cycles: max_iter must be > 0");
-  //
-  // detail::wscms_minor_cycles(resources, residual, psfs_2, map_pixels_facets, gains, scale_idx,
-  //                            threshold, max_iter);
+// if (residual.extent(0) != map_pixels_facets.extent(0) || residual.extent(1) !=
+// map_pixels_facets.extent(1))
+//   throw std::invalid_argument(
+//       "wscms_minor_cycles: residual and map_pixels_facets spatial "
+//       "dimensions must match");
+// if (scale_idx < 0 || scale_idx >= static_cast<int>(psfs_2.extent(0)))
+//   throw std::invalid_argument("wscms_minor_cycles: scale_idx out of range");
+// if (psfs_2.extent(1) != gains.extent(1))
+//   throw std::invalid_argument("wscms_minor_cycles: psfs_2 n_facet != gains n_facet");
+// if (threshold <= 0) throw std::invalid_argument("wscms_minor_cycles: threshold must be > 0");
+// if (max_iter <= 0) throw std::invalid_argument("wscms_minor_cycles: max_iter must be > 0");
+//
+// detail::wscms_minor_cycles(resources, residual, psfs_2, map_pixels_facets, gains, scale_idx,
+//                            threshold, max_iter);
 // }
 
 // void wscms_minor_cycles_host_loop(
@@ -79,7 +83,8 @@ void run_wscms(core::device_span4d<float>& dirty, core::device_span2d<float>& me
 //   if (max_iter <= 0)
 //     throw std::invalid_argument("wscms_minor_cycles_host_loop: max_iter must be > 0");
 //
-//   detail::wscms_minor_cycles_host_loop(resources, residual, mean_residual, psfs, psfs_2, jones_norm,
+//   detail::wscms_minor_cycles_host_loop(resources, residual, mean_residual, psfs, psfs_2,
+//   jones_norm,
 //                                        xdes, weights, map_pixels_facets, gains, scale_idx,
 //                                        threshold, max_iter);
 // }
@@ -89,8 +94,8 @@ void run_wscms(core::device_span4d<float>& dirty, core::device_span2d<float>& me
 // {
 //   if (sigmas.size() != out_scales.extent(0))
 //     throw std::invalid_argument("make_scales: sigmas.size() != out_scales n_scales");
-//   if (scale_ncol_full <= 0) throw std::invalid_argument("make_scales: scale_ncol_full must be > 0");
-//   if (out_scales.extent(2) != static_cast<std::size_t>(scale_ncol_full / 2 + 1))
+//   if (scale_ncol_full <= 0) throw std::invalid_argument("make_scales: scale_ncol_full must be >
+//   0"); if (out_scales.extent(2) != static_cast<std::size_t>(scale_ncol_full / 2 + 1))
 //     throw std::invalid_argument("make_scales: out_scales ncol must be scale_ncol_full / 2 + 1");
 //
 //   const uint n_scales = sigmas.size();
@@ -158,7 +163,8 @@ void run_wscms(core::device_span4d<float>& dirty, core::device_span2d<float>& me
 //   }
 //
 //   return detail::scale_selection(resources, scaled_dirty.data_handle(), mask.data_handle(),
-//                                  bias.data_handle(), n_scales, nrow, ncol, do_abs, per_scale_mask);
+//                                  bias.data_handle(), n_scales, nrow, ncol, do_abs,
+//                                  per_scale_mask);
 // }
 
 }  // namespace fast_deconv::algorithm::wscms

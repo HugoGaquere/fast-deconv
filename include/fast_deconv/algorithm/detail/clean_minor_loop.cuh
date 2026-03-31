@@ -374,14 +374,11 @@ void compute_pseudo_inverse(const core::resources& resources,
 // A_pinv: col-major [n_order, n_freq]  (from compute_pseudo_inverse)
 // A:      row-major [n_freq, n_order]  (from compute_spectral_matrix_kernel)
 constexpr int SPECTRAL_BLOCK_SIZE = 128;
-__global__ void compute_spectral_coeffs_kernel(float* __restrict__ compact_out,
-                                               float* __restrict__ per_chan_out,
-                                               const float* __restrict__ dirty,
-                                               const float* __restrict__ weights,
-                                               const float* __restrict__ A_pinv,
-                                               const float* __restrict__ SAX, int n_freq,
-                                               int n_order, int nrow, int ncol, int peak_row,
-                                               int peak_col)
+__global__ void compute_spectral_coeffs_kernel(
+    float* __restrict__ compact_out, float* __restrict__ per_chan_out,
+    const float* __restrict__ dirty, const float* __restrict__ weights,
+    const float* __restrict__ A_pinv, const float* __restrict__ SAX, int n_freq, int n_order,
+    int nrow, int ncol, int peak_row, int peak_col)
 {
   extern __shared__ float smem[];
   float* s_wy = smem;                // [n_freq]
@@ -466,9 +463,10 @@ __global__ void spectral_psf_subtract_kernel(float* __restrict__ dirty,
 //   3. wy = sqrt_w * dirty[f, peak]  →  compact = A_pinv @ wy  →  per_chan = SAX @ compact
 //   4. dirty[f] -= per_chan[f] * gain * psf[f]  (within overlap region)
 void subtract_component(const core::resources& resources, const core::stream_resources& stream_res,
-                        float* dirty, const float* psf, const float* xdes, const float* jones_norm,
-                        const float* weights, float gain, int n_freq, int n_order, int nrow,
-                        int ncol, int psf_nrow, int psf_ncol, int peak_row, int peak_col)
+                        float* dirty, float* compact_coeffs, const float* psf, const float* xdes,
+                        const float* jones_norm, const float* weights, float gain, int n_freq,
+                        int n_order, int nrow, int ncol, int psf_nrow, int psf_ncol, int peak_row,
+                        int peak_col)
 {
   auto cuda_stream = stream_res.cuda_stream;
 
@@ -476,7 +474,7 @@ void subtract_component(const core::resources& resources, const core::stream_res
   float* d_SAX = resources.alloc_async<float>(n_freq * n_order, stream_res);
   float* d_A = resources.alloc_async<float>(n_freq * n_order, stream_res);
   float* d_A_pinv = resources.alloc_async<float>(n_order * n_freq, stream_res);
-  float* d_compact = resources.alloc_async<float>(n_order, stream_res);
+  // float* d_compact = resources.alloc_async<float>(n_order, stream_res);
   float* d_per_chan = resources.alloc_async<float>(n_freq, stream_res);
 
   // Step 1: build SAX = sqrt(jn) * xdes and A = sqrt(w) * SAX
@@ -488,20 +486,20 @@ void subtract_component(const core::resources& resources, const core::stream_res
   compute_pseudo_inverse(resources, stream_res, d_A, d_A_pinv, n_freq, n_order);
 
   // Step 3: spectral coefficients (uses SAX for per-chan evaluation)
-  compute_spectral_coeffs(resources, stream_res, d_compact, d_per_chan, dirty, weights, d_A_pinv,
-                          d_SAX, n_freq, n_order, nrow, ncol, peak_row, peak_col);
+  compute_spectral_coeffs(resources, stream_res, compact_coeffs, d_per_chan, dirty, weights,
+                          d_A_pinv, d_SAX, n_freq, n_order, nrow, ncol, peak_row, peak_col);
 
   // Log compact coefficients and per-channel values
   {
     std::vector<float> h_compact(n_order);
     std::vector<float> h_per_chan(n_freq);
-    CHECK_CUDA(cudaMemcpyAsync(h_compact.data(), d_compact, n_order * sizeof(float),
+    CHECK_CUDA(cudaMemcpyAsync(h_compact.data(), compact_coeffs, n_order * sizeof(float),
                                cudaMemcpyDeviceToHost, cuda_stream));
     CHECK_CUDA(cudaMemcpyAsync(h_per_chan.data(), d_per_chan, n_freq * sizeof(float),
                                cudaMemcpyDeviceToHost, cuda_stream));
     stream_res.sync();
-    FD_LOG_DEBUG("subtract_component: coeffs=[{}] per_chan=[{}]",
-                 fmt::join(h_compact, ", "), fmt::join(h_per_chan, ", "));
+    FD_LOG_DEBUG("subtract_component: coeffs=[{}] per_chan=[{}]", fmt::join(h_compact, ", "),
+                 fmt::join(h_per_chan, ", "));
   }
 
   // Step 4: subtract PSF from dirty
@@ -512,21 +510,40 @@ void subtract_component(const core::resources& resources, const core::stream_res
 
   // Free temporaries
   resources.free_async(d_per_chan, stream_res);
-  resources.free_async(d_compact, stream_res);
+  // resources.free_async(d_compact, stream_res);
   resources.free_async(d_A_pinv, stream_res);
   resources.free_async(d_A, stream_res);
   resources.free_async(d_SAX, stream_res);
 }
 
-void wscms_minor_cycles_host_loop(const core::resources& resources,
-                                  core::device_span4d<float>& residual, float* mean_residual,
-                                  const core::device_span6d<float>& psfs,
-                                  const core::device_span4d<float>& psfs_2, int scale_idx,
-                                  WSCMS_ctx ctx, WSCMS_params params)
+sky_component build_sky_component(const core::stream_resources& stream_res, int peak_row,
+                                  int peak_col, int scale_idx, float gain, float* d_compact_coeffs,
+                                  int n_order)
+{
+  sky_component component{
+      .row = peak_row,
+      .col = peak_col,
+      .scale_idx = scale_idx,
+      .gain = gain,
+      .coeffs = std::vector<float>(n_order),
+  };
+  CHECK_CUDA(cudaMemcpyAsync(component.coeffs.data(), d_compact_coeffs, n_order * sizeof(float),
+                             cudaMemcpyDeviceToHost, stream_res.cuda_stream));
+  stream_res.sync();
+  return component;
+}
+
+std::vector<sky_component> wscms_minor_cycles_host_loop(
+    const core::resources& resources, core::device_span4d<float>& residual, float* mean_residual,
+    const core::device_span6d<float>& psfs, const core::device_span4d<float>& psfs_2, int scale_idx,
+    WSCMS_ctx ctx, WSCMS_params params)
 {
   const auto& stream_res = resources.get_stream_resources();
   const auto& stream_res_2 = resources.get_stream_resources();
   auto cuda_stream = stream_res.cuda_stream;
+
+  std::vector<sky_component> sky_components;
+  sky_components.reserve(params.max_subminor_iter);
 
   const int nrow = residual.extent(2);
   const int ncol = residual.extent(3);
@@ -542,6 +559,10 @@ void wscms_minor_cycles_host_loop(const core::resources& resources,
   float* xdes_ptr = ctx.xdes.data_handle();
   float* jones_norm_ptr = ctx.jones_norm.data_handle();
   float* weights_ptr = ctx.weights_freq.data_handle();
+
+  // Allocate device memory for compact coefficients that will later be copied to
+  // the computed sky components
+  float* d_compact_coeffs = resources.alloc_async<float>(n_order, stream_res);
 
   // Allocate output for DeviceReduce::ArgMax
   using KVPair = cub::KeyValuePair<int, float>;
@@ -581,8 +602,8 @@ void wscms_minor_cycles_host_loop(const core::resources& resources,
     float gain = ctx.gains(scale_idx, facet_idx);
     float factor = gain * h_peak.value;
 
-    FD_LOG_DEBUG("minor_loop: iter={} peak={:.8f} at ({},{}) facet={} gain={:.4f} factor={}", n_iter,
-                 h_peak.value, peak_row, peak_col, facet_idx, gain, factor);
+    FD_LOG_DEBUG("minor_loop: iter={} peak={:.8f} at ({},{}) facet={} gain={:.4f} factor={}",
+                 n_iter, h_peak.value, peak_row, peak_col, facet_idx, gain, factor);
 
     // Stream 1: PSF subtraction from mean dirty
     const float* psf_2_ptr = psfs_2.data_handle() + psfs_2.mapping()(scale_idx, facet_idx, 0, 0);
@@ -604,9 +625,13 @@ void wscms_minor_cycles_host_loop(const core::resources& resources,
       FD_LOG_DEBUG("minor_loop: apparent_flux=[{}]", fmt::join(h_flux, ", "));
     }
     const float* psf_ptr = psfs.data_handle() + psfs.mapping()(scale_idx, facet_idx, 0, 0, 0, 0);
-    subtract_component(resources, stream_res_2, residual_ptr, psf_ptr, xdes_ptr, jones_norm_ptr,
-                       weights_ptr, gain, n_freq, n_order, nrow, ncol, psf_nrow, psf_ncol, peak_row,
-                       peak_col);
+    subtract_component(resources, stream_res_2, residual_ptr, d_compact_coeffs, psf_ptr, xdes_ptr,
+                       jones_norm_ptr, weights_ptr, gain, n_freq, n_order, nrow, ncol, psf_nrow,
+                       psf_ncol, peak_row, peak_col);
+
+    auto component = build_sky_component(stream_res_2, peak_row, peak_col, scale_idx, gain,
+                                         d_compact_coeffs, n_order);
+    sky_components.push_back(component);
 
     // Stream 1: Find peak
     cub::DeviceReduce::ArgMax(d_temp, temp_storage_bytes, mean_residual_ptr, d_argmax_out, n,
@@ -626,6 +651,7 @@ void wscms_minor_cycles_host_loop(const core::resources& resources,
   resources.free_async(d_temp, stream_res);
   resources.free_async(d_argmax_out, stream_res);
   stream_res.sync();
+  return sky_components;
 }
 
 // namespace peak_finding_policy {

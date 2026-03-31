@@ -3,6 +3,7 @@
 #include <cufft.h>
 
 #include <fast_deconv/core/span_types.hpp>
+#include <vector>
 
 #include "fast_deconv/linalg/detail/fft.cuh"
 
@@ -46,20 +47,19 @@ struct scale_convole_ctx {
   }
 };
 
-struct ComponentEntry {
+struct sky_component {
   int row;
   int col;
   int scale_idx;
   float gain;
-  float coeffs[MAX_SPECTRAL_ORDER];
-  int n_coeffs;
+  std::vector<float> coeffs;
 };
 
-struct ComponentBuffer {
-  ComponentEntry* entries;  // host-side pre-allocated array
-  int count;                // filled by minor_cycle
-  int capacity;             // = n_subminor_iter
-};
+// struct ComponentBuffer {
+//   ComponentEntry* entries;  // host-side pre-allocated array
+//   int count;                // filled by minor_cycle
+//   int capacity;             // = n_subminor_iter
+// };
 
 struct scale_selection_result {
   int best_scale;
