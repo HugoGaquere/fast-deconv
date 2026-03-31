@@ -654,33 +654,4 @@ std::vector<sky_component> wscms_minor_cycles_host_loop(
   return sky_components;
 }
 
-// namespace peak_finding_policy {
-// struct naive {
-//   static void run() {}
-// };
-// struct tiled {
-//   static void run() {}
-// };
-// }  // namespace peak_finding_policy
-//
-// namespace minor_loop_policy {
-// template <typename peak_policy>
-// struct host_loop {
-//   static void run() { peak_policy::run(); }
-// };
-// struct kernel_loop {
-//   static void run() {}
-// };
-// }  // namespace minor_loop_policy
-//
-// template <typename minorloop_policy>
-// void run_wscms()
-// {
-//   // find best kernel
-//
-//   minorloop_policy::run();
-// }
-//
-// void bar() { run_wscms<minor_loop_policy::host_loop<peak_finding_policy::naive>>(); }
-
 }  // namespace fast_deconv::algorithm::wscms::detail

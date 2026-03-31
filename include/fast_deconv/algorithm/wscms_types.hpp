@@ -55,12 +55,6 @@ struct sky_component {
   std::vector<float> coeffs;
 };
 
-// struct ComponentBuffer {
-//   ComponentEntry* entries;  // host-side pre-allocated array
-//   int count;                // filled by minor_cycle
-//   int capacity;             // = n_subminor_iter
-// };
-
 struct scale_selection_result {
   int best_scale;
   int best_row;
