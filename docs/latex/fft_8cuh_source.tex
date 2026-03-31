@@ -1,0 +1,99 @@
+\doxysection{fft.\+cuh}
+\hypertarget{fft_8cuh_source}{}\label{fft_8cuh_source}\index{include/fast\_deconv/linalg/detail/fft.cuh@{include/fast\_deconv/linalg/detail/fft.cuh}}
+\mbox{\hyperlink{fft_8cuh}{Go to the documentation of this file.}}
+\begin{DoxyCode}{0}
+\DoxyCodeLine{00001\ \textcolor{preprocessor}{\#pragma\ once}}
+\DoxyCodeLine{00002\ \textcolor{preprocessor}{\#include\ <cufft.h>}}
+\DoxyCodeLine{00003\ }
+\DoxyCodeLine{00004\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{cuda__macros_8hpp}{fast\_deconv/util/cuda\_macros.hpp}}>}}
+\DoxyCodeLine{00005\ }
+\DoxyCodeLine{00006\ \textcolor{preprocessor}{\#ifndef\ CUFFT\_CALL}}
+\DoxyCodeLine{00007\ \textcolor{preprocessor}{\#define\ CUFFT\_CALL(call)\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \(\backslash\)}}
+\DoxyCodeLine{00008\ \textcolor{preprocessor}{\ \ \{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \(\backslash\)}}
+\DoxyCodeLine{00009\ \textcolor{preprocessor}{\ \ \ \ auto\ status\ =\ static\_cast<cufftResult>(call);\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \(\backslash\)}}
+\DoxyCodeLine{00010\ \textcolor{preprocessor}{\ \ \ \ if\ (status\ !=\ CUFFT\_SUCCESS)\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \(\backslash\)}}
+\DoxyCodeLine{00011\ \textcolor{preprocessor}{\ \ \ \ \ \ fprintf(stderr,\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \(\backslash\)}}
+\DoxyCodeLine{00012\ \textcolor{preprocessor}{\ \ \ \ \ \ \ \ \ \ \ \ \ \ "{}ERROR:\ CUFFT\ call\ \(\backslash\)"{}\%s\(\backslash\)"{}\ in\ line\ \%d\ of\ file\ \%s\ failed\ "{}\ \(\backslash\)}}
+\DoxyCodeLine{00013\ \textcolor{preprocessor}{\ \ \ \ \ \ \ \ \ \ \ \ \ \ "{}with\ "{}\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \(\backslash\)}}
+\DoxyCodeLine{00014\ \textcolor{preprocessor}{\ \ \ \ \ \ \ \ \ \ \ \ \ \ "{}code\ (\%d).\(\backslash\)n"{},\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \(\backslash\)}}
+\DoxyCodeLine{00015\ \textcolor{preprocessor}{\ \ \ \ \ \ \ \ \ \ \ \ \ \ \#call,\ \_\_LINE\_\_,\ \_\_FILE\_\_,\ status);\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \(\backslash\)}}
+\DoxyCodeLine{00016\ \textcolor{preprocessor}{\ \ \}}}
+\DoxyCodeLine{00017\ \textcolor{preprocessor}{\#endif\ \ }\textcolor{comment}{//\ CUFFT\_CALL}}
+\DoxyCodeLine{00018\ }
+\DoxyCodeLine{00019\ \textcolor{keyword}{using\ }\mbox{\hyperlink{fft_8cuh_a5c98ad6c80d9bf53ecdcfe39c28ae343}{complex\_type}}\ =\ cufftComplex;}
+\DoxyCodeLine{00020\ }
+\DoxyCodeLine{00021\ \textcolor{keyword}{namespace\ }\mbox{\hyperlink{namespacefast__deconv_1_1linalg_1_1detail}{fast\_deconv::linalg::detail}}\ \{}
+\DoxyCodeLine{00022\ }
+\DoxyCodeLine{00023\ \textcolor{comment}{//\ Pads\ and\ ifftshifts\ a\ 2D\ image\ in\ one\ pass.}}
+\DoxyCodeLine{00024\ \textcolor{comment}{//\ Input:\ \ (nx,\ ny)\ real,\ origin\ at\ center}}
+\DoxyCodeLine{00025\ \textcolor{comment}{//\ Output:\ (px,\ py)\ real,\ origin\ at\ (0,0),\ zero-\/padded}}
+\DoxyCodeLine{00026\ \textcolor{comment}{//\ Output\ must\ be\ zeroed\ before\ launch.}}
+\DoxyCodeLine{00027\ \_\_global\_\_\ \textcolor{keywordtype}{void}\ \mbox{\hyperlink{namespacefast__deconv_1_1linalg_1_1detail_a6291d3260a3f265e89547851b565e6fa}{pad\_ifftshift\_kernel}}(\textcolor{keyword}{const}\ \textcolor{keywordtype}{float}*\ input,\ \textcolor{keywordtype}{float}*\ output,\ \textcolor{keywordtype}{int}\ nx,\ \textcolor{keywordtype}{int}\ ny,\ \textcolor{keywordtype}{int}\ px,}
+\DoxyCodeLine{00028\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keywordtype}{int}\ py,\ \textcolor{keywordtype}{int}\ npad\_x,\ \textcolor{keywordtype}{int}\ npad\_y)}
+\DoxyCodeLine{00029\ \{}
+\DoxyCodeLine{00030\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ row\ =\ blockIdx.y\ *\ blockDim.y\ +\ threadIdx.y;}
+\DoxyCodeLine{00031\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ col\ =\ blockIdx.x\ *\ blockDim.x\ +\ threadIdx.x;}
+\DoxyCodeLine{00032\ \ \ \textcolor{keywordflow}{if}\ (row\ >=\ nx\ ||\ col\ >=\ ny)\ \textcolor{keywordflow}{return};}
+\DoxyCodeLine{00033\ }
+\DoxyCodeLine{00034\ \ \ \textcolor{comment}{//\ Position\ in\ padded\ array\ (input\ centered)}}
+\DoxyCodeLine{00035\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ pad\_row\ =\ row\ +\ npad\_x;}
+\DoxyCodeLine{00036\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ pad\_col\ =\ col\ +\ npad\_y;}
+\DoxyCodeLine{00037\ }
+\DoxyCodeLine{00038\ \ \ \textcolor{comment}{//\ ifftshift:\ shift\ by\ ceil(N/2)\ =\ (N+1)/2}}
+\DoxyCodeLine{00039\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ out\_row\ =\ (pad\_row\ +\ (px\ +\ 1)\ /\ 2)\ \%\ px;}
+\DoxyCodeLine{00040\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ out\_col\ =\ (pad\_col\ +\ (py\ +\ 1)\ /\ 2)\ \%\ py;}
+\DoxyCodeLine{00041\ }
+\DoxyCodeLine{00042\ \ \ output[out\_row\ *\ py\ +\ out\_col]\ =\ input[row\ *\ ny\ +\ col];}
+\DoxyCodeLine{00043\ \}}
+\DoxyCodeLine{00044\ }
+\DoxyCodeLine{00045\ \textcolor{comment}{//\ Fftshifts\ and\ crops\ a\ batched\ 2D\ image\ in\ one\ pass.}}
+\DoxyCodeLine{00046\ \textcolor{comment}{//\ Input:\ \ (n\_batch,\ px,\ py)\ real,\ origin\ at\ (0,0)\ (FFT\ output)}}
+\DoxyCodeLine{00047\ \textcolor{comment}{//\ Output:\ (n\_batch,\ nx,\ ny)\ real,\ origin\ at\ center,\ cropped}}
+\DoxyCodeLine{00048\ \_\_global\_\_\ \textcolor{keywordtype}{void}\ \mbox{\hyperlink{namespacefast__deconv_1_1linalg_1_1detail_a080202e801af47a2e7b0c0656cc10145}{fftshift\_crop\_kernel}}(\textcolor{keyword}{const}\ \textcolor{keywordtype}{float}*\ input,\ \textcolor{keywordtype}{float}*\ output,\ \textcolor{keywordtype}{int}\ nx,\ \textcolor{keywordtype}{int}\ ny,\ \textcolor{keywordtype}{int}\ px,}
+\DoxyCodeLine{00049\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keywordtype}{int}\ py,\ \textcolor{keywordtype}{int}\ npad\_x,\ \textcolor{keywordtype}{int}\ npad\_y,\ \textcolor{keywordtype}{int}\ n\_batch)}
+\DoxyCodeLine{00050\ \{}
+\DoxyCodeLine{00051\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ row\ =\ blockIdx.y\ *\ blockDim.y\ +\ threadIdx.y;}
+\DoxyCodeLine{00052\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ col\ =\ blockIdx.x\ *\ blockDim.x\ +\ threadIdx.x;}
+\DoxyCodeLine{00053\ \ \ \textcolor{keywordflow}{if}\ (row\ >=\ nx\ ||\ col\ >=\ ny)\ \textcolor{keywordflow}{return};}
+\DoxyCodeLine{00054\ }
+\DoxyCodeLine{00055\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ src\_row\ =\ (row\ +\ npad\_x\ +\ (px\ +\ 1)\ /\ 2)\ \%\ px;}
+\DoxyCodeLine{00056\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ src\_col\ =\ (col\ +\ npad\_y\ +\ (py\ +\ 1)\ /\ 2)\ \%\ py;}
+\DoxyCodeLine{00057\ }
+\DoxyCodeLine{00058\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ out\_stride\ =\ nx\ *\ ny;}
+\DoxyCodeLine{00059\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ in\_stride\ =\ px\ *\ py;}
+\DoxyCodeLine{00060\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ out\_idx\ =\ row\ *\ ny\ +\ col;}
+\DoxyCodeLine{00061\ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{int}\ in\_idx\ =\ src\_row\ *\ py\ +\ src\_col;}
+\DoxyCodeLine{00062\ }
+\DoxyCodeLine{00063\ \ \ \textcolor{keywordflow}{for}\ (\textcolor{keywordtype}{int}\ b\ =\ 0;\ b\ <\ n\_batch;\ b++)\ \{}
+\DoxyCodeLine{00064\ \ \ \ \ output[b\ *\ out\_stride\ +\ out\_idx]\ =\ input[b\ *\ in\_stride\ +\ in\_idx];}
+\DoxyCodeLine{00065\ \ \ \}}
+\DoxyCodeLine{00066\ \}}
+\DoxyCodeLine{00067\ }
+\DoxyCodeLine{00068\ \textcolor{keywordtype}{void}\ \mbox{\hyperlink{namespacefast__deconv_1_1linalg_1_1detail_a13cbb0beff8964ae56176fdaa151f21b}{pad\_ifftshift}}(\textcolor{keywordtype}{float}*\ input,\ \textcolor{keywordtype}{float}*\ output,\ \textcolor{keywordtype}{int}\ nx,\ \textcolor{keywordtype}{int}\ ny,\ \textcolor{keywordtype}{int}\ px,\ \textcolor{keywordtype}{int}\ py,\ \textcolor{keywordtype}{int}\ npad\_x,}
+\DoxyCodeLine{00069\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keywordtype}{int}\ npad\_y,\ cudaStream\_t\ stream)}
+\DoxyCodeLine{00070\ \{}
+\DoxyCodeLine{00071\ \ \ cudaMemsetAsync(output,\ 0,\ \textcolor{keyword}{sizeof}(\textcolor{keywordtype}{float})\ *\ px\ *\ py,\ stream);}
+\DoxyCodeLine{00072\ \ \ dim3\ block\_dim(16,\ 16);}
+\DoxyCodeLine{00073\ \ \ dim3\ grid\_dim(\mbox{\hyperlink{cuda__macros_8hpp_a607a5d2d042f76dc931ff7973b1fc7e1}{CEIL\_DIV}}(ny,\ block\_dim.x),\ \mbox{\hyperlink{cuda__macros_8hpp_a607a5d2d042f76dc931ff7973b1fc7e1}{CEIL\_DIV}}(nx,\ block\_dim.y));}
+\DoxyCodeLine{00074\ \ \ pad\_ifftshift\_kernel<<<grid\_dim,\ block\_dim,\ 0,\ stream>>>(input,\ output,\ nx,\ ny,\ px,\ py,\ npad\_x,}
+\DoxyCodeLine{00075\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ npad\_y);}
+\DoxyCodeLine{00076\ \}}
+\DoxyCodeLine{00077\ }
+\DoxyCodeLine{00078\ \textcolor{keywordtype}{void}\ \mbox{\hyperlink{namespacefast__deconv_1_1linalg_1_1detail_aeee788c61068cc472d4d6869921815a3}{fftshift\_crop}}(\textcolor{keywordtype}{float}*\ input,\ \textcolor{keywordtype}{float}*\ output,\ \textcolor{keywordtype}{int}\ nx,\ \textcolor{keywordtype}{int}\ ny,\ \textcolor{keywordtype}{int}\ px,\ \textcolor{keywordtype}{int}\ py,\ \textcolor{keywordtype}{int}\ npad\_x,}
+\DoxyCodeLine{00079\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keywordtype}{int}\ npad\_y,\ \textcolor{keywordtype}{int}\ n\_batch,\ cudaStream\_t\ stream)}
+\DoxyCodeLine{00080\ \{}
+\DoxyCodeLine{00081\ \ \ dim3\ block\_dim(16,\ 16);}
+\DoxyCodeLine{00082\ \ \ dim3\ grid\_dim(\mbox{\hyperlink{cuda__macros_8hpp_a607a5d2d042f76dc931ff7973b1fc7e1}{CEIL\_DIV}}(ny,\ block\_dim.x),\ \mbox{\hyperlink{cuda__macros_8hpp_a607a5d2d042f76dc931ff7973b1fc7e1}{CEIL\_DIV}}(nx,\ block\_dim.y));}
+\DoxyCodeLine{00083\ \ \ fftshift\_crop\_kernel<<<grid\_dim,\ block\_dim,\ 0,\ stream>>>(input,\ output,\ nx,\ ny,\ px,\ py,\ npad\_x,}
+\DoxyCodeLine{00084\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ npad\_y,\ n\_batch);}
+\DoxyCodeLine{00085\ \}}
+\DoxyCodeLine{00086\ }
+\DoxyCodeLine{00087\ \textcolor{keyword}{inline}\ std::pair<int,\ int>\ \mbox{\hyperlink{namespacefast__deconv_1_1linalg_1_1detail_a3a83fc2da445174ad66a91ba6fe03eae}{compute\_padding}}(\textcolor{keywordtype}{int}\ npix\_x,\ \textcolor{keywordtype}{int}\ npix\_y,\ \textcolor{keywordtype}{float}\ padding)}
+\DoxyCodeLine{00088\ \{}
+\DoxyCodeLine{00089\ \ \ \textcolor{keywordflow}{return}\ \{\textcolor{keyword}{static\_cast<}\textcolor{keywordtype}{int}\textcolor{keyword}{>}(ceilf((padding\ -\/\ 1.0f)\ *\ npix\_x\ /\ 2.0f)),}
+\DoxyCodeLine{00090\ \ \ \ \ \ \ \ \ \ \ \textcolor{keyword}{static\_cast<}\textcolor{keywordtype}{int}\textcolor{keyword}{>}(ceilf((padding\ -\/\ 1.0f)\ *\ npix\_y\ /\ 2.0f))\};}
+\DoxyCodeLine{00091\ \}}
+\DoxyCodeLine{00092\ }
+\DoxyCodeLine{00093\ \}\ \ \textcolor{comment}{//\ namespace\ fast\_deconv::linalg::detail}}
+
+\end{DoxyCode}

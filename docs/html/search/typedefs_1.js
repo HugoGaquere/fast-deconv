@@ -1,0 +1,22 @@
+var searchData=
+[
+  ['device_5fspan2d_0',['device_span2d',['../namespacefast__deconv_1_1core.html#aa4fab0763b2e7a0139d039b5c9614e83',1,'fast_deconv::core']]],
+  ['device_5fspan2d_5ff_1',['device_span2d_F',['../namespacefast__deconv_1_1core.html#a6e6c60eb2147234d024d127b37d92f16',1,'fast_deconv::core']]],
+  ['device_5fspan2d_5fs_2',['device_span2d_S',['../namespacefast__deconv_1_1core.html#a4f0792f3b0b3f8edea879819ffa00f01',1,'fast_deconv::core']]],
+  ['device_5fspan3d_3',['device_span3d',['../namespacefast__deconv_1_1core.html#abaaac23e472c706c7e76489a8b69c593',1,'fast_deconv::core']]],
+  ['device_5fspan3d_5ff_4',['device_span3d_F',['../namespacefast__deconv_1_1core.html#ae28c122ab3b55009436abcdd83b026e3',1,'fast_deconv::core']]],
+  ['device_5fspan3d_5fs_5',['device_span3d_S',['../namespacefast__deconv_1_1core.html#a4463d0febe7b09fb1c3f34b9829b4cd6',1,'fast_deconv::core']]],
+  ['device_5fspan4d_6',['device_span4d',['../namespacefast__deconv_1_1core.html#a237cf3893cee8e814715ad25e4072a21',1,'fast_deconv::core']]],
+  ['device_5fspan4d_5ff_7',['device_span4d_F',['../namespacefast__deconv_1_1core.html#a2501475aff143e2957633820e2c4975d',1,'fast_deconv::core']]],
+  ['device_5fspan4d_5fs_8',['device_span4d_S',['../namespacefast__deconv_1_1core.html#ac6be09e9dda645409cfcda7d83d0bd7e',1,'fast_deconv::core']]],
+  ['device_5fspan5d_9',['device_span5d',['../namespacefast__deconv_1_1core.html#aa05bfd5e79dd23f3d4994f247d3e71e5',1,'fast_deconv::core']]],
+  ['device_5fspan5d_5ff_10',['device_span5d_F',['../namespacefast__deconv_1_1core.html#a928b6d0387de9a968b6810d441ff9a67',1,'fast_deconv::core']]],
+  ['device_5fspan5d_5fs_11',['device_span5d_S',['../namespacefast__deconv_1_1core.html#a27be7a87bb3525fd1bf625fd35a56769',1,'fast_deconv::core']]],
+  ['device_5fspan6d_12',['device_span6d',['../namespacefast__deconv_1_1core.html#a94161b943de66aa5c0c9caa9bd1e81d7',1,'fast_deconv::core']]],
+  ['device_5fspan6d_5ff_13',['device_span6d_F',['../namespacefast__deconv_1_1core.html#add6fd371ddbbcd684ff72fe90ced43ff',1,'fast_deconv::core']]],
+  ['device_5fspan6d_5fs_14',['device_span6d_S',['../namespacefast__deconv_1_1core.html#a3db84a1d094493974d2605e470b93ae1',1,'fast_deconv::core']]],
+  ['device_5fvect_15',['device_vect',['../namespacefast__deconv_1_1core.html#a846b8910045d3347234df2e270142e0b',1,'fast_deconv::core']]],
+  ['device_5fvect_5ff_16',['device_vect_F',['../namespacefast__deconv_1_1core.html#aab169cd04c8e3f9f503b9d2fb9478eed',1,'fast_deconv::core']]],
+  ['device_5fvect_5fs_17',['device_vect_S',['../namespacefast__deconv_1_1core.html#ad4c67d9cddbe32d80756da8290c57599',1,'fast_deconv::core']]],
+  ['dims_18',['dims',['../namespacefast__deconv_1_1core.html#a8155a4da53fa38ac34041fa5282a9fdd',1,'fast_deconv::core']]]
+];

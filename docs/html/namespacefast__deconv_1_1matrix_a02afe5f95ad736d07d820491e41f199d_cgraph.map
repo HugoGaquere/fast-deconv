@@ -1,0 +1,9 @@
+<map id="fast_deconv::matrix::argmax" name="fast_deconv::matrix::argmax">
+<area shape="rect" id="Node000001" title=" " alt="" coords="5,37,156,77"/>
+<area shape="rect" id="Node000002" href="$namespacefast__deconv_1_1matrix.html#ab213e792a4a84d99ab1d55317de81a28" title=" " alt="" coords="204,37,355,77"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="156,55,190,55,190,60,156,60"/>
+<area shape="rect" id="Node000003" href="$namespacefast__deconv_1_1matrix.html#a516e5ac2a08c67b7d8feb854f8c1478e" title=" " alt="" coords="415,5,566,45"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="354,43,401,36,402,41,355,49"/>
+<area shape="rect" id="Node000004" href="$classfast__deconv_1_1core_1_1stream__resources.html#a6c87139caca11b3687a2bc3293f811ba" title=" " alt="" coords="403,69,579,109"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="355,66,390,71,389,77,354,71"/>
+</map>

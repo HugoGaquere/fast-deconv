@@ -1,0 +1,30 @@
+\doxysection{include/fast\+\_\+deconv/algorithm/detail/wscms\+\_\+minor\+\_\+loop.cuh File Reference}
+\hypertarget{wscms__minor__loop_8cuh}{}\label{wscms__minor__loop_8cuh}\index{include/fast\_deconv/algorithm/detail/wscms\_minor\_loop.cuh@{include/fast\_deconv/algorithm/detail/wscms\_minor\_loop.cuh}}
+{\ttfamily \#include $<$cooperative\+\_\+groups.\+h$>$}\newline
+{\ttfamily \#include $<$cuda\+\_\+runtime.\+h$>$}\newline
+{\ttfamily \#include $<$cfloat$>$}\newline
+{\ttfamily \#include $<$cub/cub.\+cuh$>$}\newline
+{\ttfamily \#include $<$fast\+\_\+deconv/algorithm/wscms\+\_\+types.\+hpp$>$}\newline
+{\ttfamily \#include $<$fast\+\_\+deconv/core/logger.\+hpp$>$}\newline
+{\ttfamily \#include $<$fast\+\_\+deconv/core/resources.\+hpp$>$}\newline
+{\ttfamily \#include $<$fast\+\_\+deconv/core/span\+\_\+types.\+hpp$>$}\newline
+{\ttfamily \#include $<$fast\+\_\+deconv/util/cuda\+\_\+macros.\+hpp$>$}\newline
+{\ttfamily \#include $<$fast\+\_\+deconv/util/mdspan\+\_\+utils.\+hpp$>$}\newline
+{\ttfamily \#include "{}clean\+\_\+minor\+\_\+loop.\+cuh"{}}\newline
+{\ttfamily \#include "{}scale.\+cuh"{}}\newline
+\doxysubsubsection*{Namespaces}
+\begin{DoxyCompactItemize}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv}{fast\+\_\+deconv}}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv_1_1algorithm}{fast\+\_\+deconv\+::algorithm}}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms}{fast\+\_\+deconv\+::algorithm\+::wscms}}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail}{fast\+\_\+deconv\+::algorithm\+::wscms\+::detail}}
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Functions}
+\begin{DoxyCompactItemize}
+\item 
+\mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{void}} \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a6b35df488906a3c89f0659e830848cf4}{fast\+\_\+deconv\+::algorithm\+::wscms\+::detail\+::run\+\_\+wscms}} (\mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{const}} \mbox{\hyperlink{classfast__deconv_1_1core_1_1resources}{core\+::resources}} \&resources, \mbox{\hyperlink{namespacefast__deconv_1_1core_a237cf3893cee8e814715ad25e4072a21}{core\+::device\+\_\+span4d}}$<$ \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{float}} $>$ \&\mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{dirty}}, \mbox{\hyperlink{namespacefast__deconv_1_1core_aa4fab0763b2e7a0139d039b5c9614e83}{core\+::device\+\_\+span2d}}$<$ \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{float}} $>$ \&\mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{mean\+\_\+residual}}, \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{const}} \mbox{\hyperlink{namespacefast__deconv_1_1core_a94161b943de66aa5c0c9caa9bd1e81d7}{core\+::device\+\_\+span6d}}$<$ \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{float}} $>$ \&\mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{psfs}}, \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{const}} \mbox{\hyperlink{namespacefast__deconv_1_1core_a237cf3893cee8e814715ad25e4072a21}{core\+::device\+\_\+span4d}}$<$ \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{float}} $>$ \&\mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{psfs\+\_\+2}}, \mbox{\hyperlink{structfast__deconv_1_1algorithm_1_1wscms_1_1WSCMS__ctx}{WSCMS\+\_\+ctx}} \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{wscms\+\_\+ctx}}, \mbox{\hyperlink{structfast__deconv_1_1algorithm_1_1wscms_1_1WSCMS__params}{WSCMS\+\_\+params}} \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a7fdfde51c07b187558ebffa885072741}{params}})
+\end{DoxyCompactItemize}

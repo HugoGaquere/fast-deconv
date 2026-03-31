@@ -1,0 +1,35 @@
+\doxysection{fast\+\_\+deconv\+::matrix\+::detail Namespace Reference}
+\hypertarget{namespacefast__deconv_1_1matrix_1_1detail}{}\label{namespacefast__deconv_1_1matrix_1_1detail}\index{fast\_deconv::matrix::detail@{fast\_deconv::matrix::detail}}
+\doxysubsubsection*{Classes}
+\begin{DoxyCompactItemize}
+\item 
+struct \mbox{\hyperlink{structfast__deconv_1_1matrix_1_1detail_1_1masking__op}{masking\+\_\+op}}
+\item 
+struct \mbox{\hyperlink{structfast__deconv_1_1matrix_1_1detail_1_1masking__op__abs}{masking\+\_\+op\+\_\+abs}}
+\item 
+class \mbox{\hyperlink{classfast__deconv_1_1matrix_1_1detail_1_1naive}{naive}}
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Functions}
+\begin{DoxyCompactItemize}
+\item 
+{\footnotesize template$<$typename Masking\+OpT $>$ }\\void \mbox{\hyperlink{namespacefast__deconv_1_1matrix_1_1detail_aa9e04af61a8bdcb0217dea2678913d89}{argmax\+\_\+async}} (\mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{core\+::stream\+\_\+resources}} \&resources, const float \texorpdfstring{$\ast$}{*}data, const bool \texorpdfstring{$\ast$}{*}mask, size\+\_\+t size, size\+\_\+t mask\+\_\+size, float \texorpdfstring{$\ast$}{*}d\+\_\+max\+\_\+out, uint \texorpdfstring{$\ast$}{*}d\+\_\+index\+\_\+out)
+\item 
+{\footnotesize template$<$core\+::cpts\+::mdspan Mdspan$>$ }\\void \mbox{\hyperlink{namespacefast__deconv_1_1matrix_1_1detail_a0c4ff58de5a5fd476ed4c6409b7d0998}{subtract\+\_\+async}} (\mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy}{core\+::\+Access\+Policy}} access\+\_\+policy, \mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{core\+::stream\+\_\+resources}} \&resources, const Mdspan \&A, const Mdspan \&B, Mdspan \&C)
+\end{DoxyCompactItemize}
+
+
+\doxysubsection{Function Documentation}
+\Hypertarget{namespacefast__deconv_1_1matrix_1_1detail_aa9e04af61a8bdcb0217dea2678913d89}\label{namespacefast__deconv_1_1matrix_1_1detail_aa9e04af61a8bdcb0217dea2678913d89} 
+\index{fast\_deconv::matrix::detail@{fast\_deconv::matrix::detail}!argmax\_async@{argmax\_async}}
+\index{argmax\_async@{argmax\_async}!fast\_deconv::matrix::detail@{fast\_deconv::matrix::detail}}
+\doxysubsubsection{\texorpdfstring{argmax\_async()}{argmax\_async()}}
+{\footnotesize\ttfamily template$<$typename Masking\+OpT $>$ \\
+void fast\+\_\+deconv\+::matrix\+::detail\+::argmax\+\_\+async (\begin{DoxyParamCaption}\item[{\mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{core\+::stream\+\_\+resources}} \&}]{resources,  }\item[{const float \texorpdfstring{$\ast$}{*}}]{data,  }\item[{const bool \texorpdfstring{$\ast$}{*}}]{mask,  }\item[{size\+\_\+t}]{size,  }\item[{size\+\_\+t}]{mask\+\_\+size,  }\item[{float \texorpdfstring{$\ast$}{*}}]{d\+\_\+max\+\_\+out,  }\item[{uint \texorpdfstring{$\ast$}{*}}]{d\+\_\+index\+\_\+out }\end{DoxyParamCaption})}
+
+\Hypertarget{namespacefast__deconv_1_1matrix_1_1detail_a0c4ff58de5a5fd476ed4c6409b7d0998}\label{namespacefast__deconv_1_1matrix_1_1detail_a0c4ff58de5a5fd476ed4c6409b7d0998} 
+\index{fast\_deconv::matrix::detail@{fast\_deconv::matrix::detail}!subtract\_async@{subtract\_async}}
+\index{subtract\_async@{subtract\_async}!fast\_deconv::matrix::detail@{fast\_deconv::matrix::detail}}
+\doxysubsubsection{\texorpdfstring{subtract\_async()}{subtract\_async()}}
+{\footnotesize\ttfamily template$<$core\+::cpts\+::mdspan Mdspan$>$ \\
+void fast\+\_\+deconv\+::matrix\+::detail\+::subtract\+\_\+async (\begin{DoxyParamCaption}\item[{\mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy}{core\+::\+Access\+Policy}}}]{access\+\_\+policy,  }\item[{\mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{core\+::stream\+\_\+resources}} \&}]{resources,  }\item[{const Mdspan \&}]{A,  }\item[{const Mdspan \&}]{B,  }\item[{Mdspan \&}]{C }\end{DoxyParamCaption})}
+

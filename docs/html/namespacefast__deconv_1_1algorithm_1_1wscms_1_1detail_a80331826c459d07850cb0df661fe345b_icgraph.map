@@ -1,0 +1,14 @@
+<map id="fast_deconv::algorithm::wscms::detail::compute_overlap_region" name="fast_deconv::algorithm::wscms::detail::compute_overlap_region">
+<area shape="rect" id="Node000001" title="Compute aligned bounding boxes." alt="" coords="936,84,1121,139"/>
+<area shape="rect" id="Node000002" href="$namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail.html#af7631d1991082e2ef55c42efb38b5569" title=" " alt="" coords="712,5,883,60"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="934,82,877,63,879,58,935,77"/>
+<area shape="rect" id="Node000003" href="$namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail.html#a3e8842c553cea6ed2ea845d3d7471009" title=" " alt="" coords="707,84,888,139"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="922,114,888,114,888,109,922,109"/>
+<area shape="rect" id="Node000004" href="$namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail.html#ad7dcf90b2bd1b62264b6f72dbc6cfde9" title=" " alt="" coords="473,117,659,172"/>
+<area shape="poly" id="edge6_Node000001_Node000004" title=" " alt="" coords="930,145,888,153,829,158,769,160,659,156,659,151,769,155,829,153,888,147,929,139"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="693,129,659,134,658,129,693,124"/>
+<area shape="rect" id="Node000005" href="$namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail.html#a6b35df488906a3c89f0659e830848cf4" title=" " alt="" coords="224,125,425,165"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="459,147,426,147,426,142,459,142"/>
+<area shape="rect" id="Node000006" href="$namespacefast__deconv_1_1algorithm_1_1wscms.html#a57c1cb57a2b6dd12e23296e3bcae4cbf" title=" " alt="" coords="5,125,176,165"/>
+<area shape="poly" id="edge5_Node000005_Node000006" title=" " alt="" coords="210,147,176,147,176,142,210,142"/>
+</map>

@@ -1,0 +1,13 @@
+<map id="fast_deconv::algorithm::wscms::detail::scale_selection" name="fast_deconv::algorithm::wscms::detail::scale_selection">
+<area shape="rect" id="Node000001" title=" " alt="" coords="5,98,176,153"/>
+<area shape="rect" id="Node000002" href="$classfast__deconv_1_1core_1_1resources.html#a72aeb081d1ac501c4f89836cc2f082fe" title=" " alt="" coords="225,5,394,45"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="141,95,223,55,239,48,241,53,225,60,143,100"/>
+<area shape="rect" id="Node000003" href="$classfast__deconv_1_1core_1_1resources.html#a1f9b5c1431b1532e64cf84d6752cd19a" title=" " alt="" coords="227,69,391,109"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="176,109,213,102,214,108,177,114"/>
+<area shape="rect" id="Node000004" href="$classfast__deconv_1_1core_1_1resources.html#a00db9a7d7b72e25744fb80c16f8c153a" title=" " alt="" coords="226,134,393,189"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="177,137,213,143,212,148,176,142"/>
+<area shape="rect" id="Node000006" href="$namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail.html#a7fdfde51c07b187558ebffa885072741" title=" " alt="" coords="224,213,395,267"/>
+<area shape="poly" id="edge5_Node000001_Node000006" title=" " alt="" coords="140,150,225,198,238,204,236,209,223,202,137,155"/>
+<area shape="rect" id="Node000005" href="$classfast__deconv_1_1core_1_1stream__resources__pool.html#a56bcd9256b166fcd7d9dafe055111724" title=" " alt="" coords="443,134,616,189"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="393,159,429,159,429,164,393,164"/>
+</map>
