@@ -120,10 +120,7 @@ if (SKBUILD)
   pybind11_add_module(_fast_deconv
     src/python/fast_deconv_module.cu
     src/python/bindings/core.cu
-    src/python/bindings/debug.cu
-    src/python/bindings/matrix.cu
     src/python/bindings/wscms.cu
-    src/python/bindings/linalg.cu
   )
 
   target_link_libraries(_fast_deconv PRIVATE fast_deconv)
