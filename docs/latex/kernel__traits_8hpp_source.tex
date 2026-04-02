@@ -1,0 +1,42 @@
+\doxysection{kernel\+\_\+traits.\+hpp}
+\hypertarget{kernel__traits_8hpp_source}{}\label{kernel__traits_8hpp_source}\index{include/fast\_deconv/core/kernel\_traits.hpp@{include/fast\_deconv/core/kernel\_traits.hpp}}
+\mbox{\hyperlink{kernel__traits_8hpp}{Go to the documentation of this file.}}
+\begin{DoxyCode}{0}
+\DoxyCodeLine{00001\ \textcolor{preprocessor}{\#pragma\ once}}
+\DoxyCodeLine{00002\ }
+\DoxyCodeLine{00003\ \textcolor{preprocessor}{\#include\ <cstdint>}}
+\DoxyCodeLine{00004\ }
+\DoxyCodeLine{00005\ \textcolor{keyword}{namespace\ }\mbox{\hyperlink{namespacefast__deconv_1_1core}{fast\_deconv::core}}\ \{}
+\DoxyCodeLine{00006\ }
+\DoxyCodeLine{00007\ \textcolor{keyword}{template}\ <\textcolor{keyword}{typename}\ KernelTag>}
+\DoxyCodeLine{00008\ \textcolor{keyword}{struct\ }\mbox{\hyperlink{structfast__deconv_1_1core_1_1kernel__traits}{kernel\_traits}};}
+\DoxyCodeLine{00009\ }
+\DoxyCodeLine{00010\ \textcolor{keyword}{enum\ class}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_aac45f14d3ee73e75dd851022aa3a1a17}{BoundType}}\ \{\ \mbox{\hyperlink{namespacefast__deconv_1_1core_aac45f14d3ee73e75dd851022aa3a1a17a4789f23283b3a61f858b641a1bef19a3}{Memory}},\ \mbox{\hyperlink{namespacefast__deconv_1_1core_aac45f14d3ee73e75dd851022aa3a1a17aa623a8d0366bf079411aa30be45b2d10}{Compute}},\ \mbox{\hyperlink{namespacefast__deconv_1_1core_aac45f14d3ee73e75dd851022aa3a1a17ac6589f5236c0c434d0c63dc5f9a856f2}{Balanced}}\ \};}
+\DoxyCodeLine{00011\ }
+\DoxyCodeLine{00012\ \textcolor{comment}{//\ ================================================================}}
+\DoxyCodeLine{00013\ \textcolor{comment}{//\ \ \ \ Subtract\ Kernel}}
+\DoxyCodeLine{00014\ \textcolor{comment}{//\ ================================================================}}
+\DoxyCodeLine{00015\ \textcolor{keyword}{struct\ }\mbox{\hyperlink{structfast__deconv_1_1core_1_1subtract__kernel__tag}{subtract\_kernel\_tag}}\ \{\};}
+\DoxyCodeLine{00016\ }
+\DoxyCodeLine{00017\ \textcolor{keyword}{template}\ <>}
+\DoxyCodeLine{00018\ \textcolor{keyword}{struct\ }\mbox{\hyperlink{structfast__deconv_1_1core_1_1kernel__traits}{kernel\_traits}}<\mbox{\hyperlink{structfast__deconv_1_1core_1_1subtract__kernel__tag}{subtract\_kernel\_tag}}>\ \{}
+\DoxyCodeLine{00019\ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_aac45f14d3ee73e75dd851022aa3a1a17}{BoundType}}\ bound\_type\ \ \ \ \ \ \ \ \ \ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_aac45f14d3ee73e75dd851022aa3a1a17a4789f23283b3a61f858b641a1bef19a3}{BoundType::Memory}};}
+\DoxyCodeLine{00020\ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{bool}\ supports\_vectorization\ \ \ =\ \textcolor{keyword}{true};}
+\DoxyCodeLine{00021\ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ uint32\_t\ preferred\_block\_size\ =\ 256;}
+\DoxyCodeLine{00022\ \};}
+\DoxyCodeLine{00023\ }
+\DoxyCodeLine{00024\ \textcolor{comment}{//\ ================================================================}}
+\DoxyCodeLine{00025\ \textcolor{comment}{//\ \ \ \ subtract\_psf\_from\_dirty\ Kernel}}
+\DoxyCodeLine{00026\ \textcolor{comment}{//\ ================================================================}}
+\DoxyCodeLine{00027\ \textcolor{keyword}{struct\ }\mbox{\hyperlink{structfast__deconv_1_1core_1_1subtract__psf__from__dirty__tag}{subtract\_psf\_from\_dirty\_tag}}\ \{\};}
+\DoxyCodeLine{00028\ }
+\DoxyCodeLine{00029\ \textcolor{keyword}{template}\ <>}
+\DoxyCodeLine{00030\ \textcolor{keyword}{struct\ }\mbox{\hyperlink{structfast__deconv_1_1core_1_1kernel__traits}{kernel\_traits}}<\mbox{\hyperlink{structfast__deconv_1_1core_1_1subtract__psf__from__dirty__tag}{subtract\_psf\_from\_dirty\_tag}}>\ \{}
+\DoxyCodeLine{00031\ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_aac45f14d3ee73e75dd851022aa3a1a17}{BoundType}}\ bound\_type\ \ \ \ \ \ \ \ \ \ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_aac45f14d3ee73e75dd851022aa3a1a17ac6589f5236c0c434d0c63dc5f9a856f2}{BoundType::Balanced}};}
+\DoxyCodeLine{00032\ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{bool}\ supports\_vectorization\ \ \ =\ \textcolor{keyword}{true};}
+\DoxyCodeLine{00033\ \ \ \textcolor{keyword}{static}\ \textcolor{keyword}{constexpr}\ uint32\_t\ preferred\_block\_size\ =\ 256;}
+\DoxyCodeLine{00034\ \};}
+\DoxyCodeLine{00035\ }
+\DoxyCodeLine{00036\ \}\ \ \textcolor{comment}{//\ namespace\ fast\_deconv::core}}
+
+\end{DoxyCode}

@@ -1,16 +1,25 @@
-#include <cstdio>
-#include <cstddef>
+// #include <fast_deconv/core/access_policy.hpp>
+// #include <fast_deconv/core/concepts.hpp>
+// #include <fast_deconv/core/dispatcher.hpp>
+// #include <fast_deconv/core/kernel_traits.hpp>
+#include <fast_deconv/core/resources.hpp>
+#include <fast_deconv/core/logger.hpp>
+#include <fast_deconv/core/span_types.hpp>
 
-#include "kronecker_example.cuh"
-#include "wscms_example.cuh"
+// #include <fast_deconv/matrix/argmax.hpp>
+// #include <fast_deconv/matrix/subtract.hpp>
 
+// #include <fast_deconv/linalg/pinv.cuh>
+#include <fmt/base.h>
+
+#include <fast_deconv/algorithm/wscms.hpp>
+#include <fast_deconv/algorithm/wscms_types.hpp>
+
+// #include <fast_deconv/algorithm/detail/wscms_minor_loop.cuh>
 
 int main(int argc, char** argv)
 {
-  std::printf("Hello gpu world\n");
-
-  run_kronecker_example();
-
+  fmt::println("Hello GPU world");
 
   return 0;
 }

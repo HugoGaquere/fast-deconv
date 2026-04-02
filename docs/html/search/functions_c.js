@@ -1,0 +1,14 @@
+var searchData=
+[
+  ['scale_5fconvolve_0',['scale_convolve',['../namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail.html#a0df6d4492127ce48bd4bd3b1f040fe49',1,'fast_deconv::algorithm::wscms::detail']]],
+  ['scale_5fselection_1',['scale_selection',['../namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail.html#a144699371a837249d1ad96058159a523',1,'fast_deconv::algorithm::wscms::detail']]],
+  ['set_5flevel_2',['set_level',['../namespacefast__deconv_1_1log.html#a583d852009ccd5d611b0490fb19b9bff',1,'fast_deconv::log']]],
+  ['size_3',['size',['../classfast__deconv_1_1core_1_1stream__resources__pool.html#ae1ae319a9a3ecd644659caab701a705d',1,'fast_deconv::core::stream_resources_pool']]],
+  ['spectral_5fpsf_5fsubtract_5fkernel_4',['spectral_psf_subtract_kernel',['../namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail.html#a09cbd0b433232111766c82f174ea58f3',1,'fast_deconv::algorithm::wscms::detail']]],
+  ['store_5fwidth_5',['store_width',['../structfast__deconv_1_1core_1_1AccessPolicy.html#a257eab4df1a0925cecc97439cfe01cd5',1,'fast_deconv::core::AccessPolicy']]],
+  ['stream_5fresources_6',['stream_resources',['../classfast__deconv_1_1core_1_1stream__resources.html#abf19c7866b90b80a2b3b9e74c92ede99',1,'fast_deconv::core::stream_resources::stream_resources(uint flag)'],['../classfast__deconv_1_1core_1_1stream__resources.html#a4ae85244fc203762b2d3bd82f6526f67',1,'fast_deconv::core::stream_resources::stream_resources(stream_resources &amp;&amp;)=delete'],['../classfast__deconv_1_1core_1_1stream__resources.html#ac64f777f4fa58964aa797bdcf8de0ea7',1,'fast_deconv::core::stream_resources::stream_resources(const stream_resources &amp;)=delete']]],
+  ['stream_5fresources_5fpool_7',['stream_resources_pool',['../classfast__deconv_1_1core_1_1stream__resources__pool.html#ad4cbdad58bee1a6225f6f6a813d403de',1,'fast_deconv::core::stream_resources_pool::stream_resources_pool(std::size_t pool_size=default_size, uint flag=default_flag)'],['../classfast__deconv_1_1core_1_1stream__resources__pool.html#a156c69156813d1e18a5f5a7d7cb38b07',1,'fast_deconv::core::stream_resources_pool::stream_resources_pool(const stream_resources_pool &amp;)=delete'],['../classfast__deconv_1_1core_1_1stream__resources__pool.html#a5bf90e4684fd2da82a92919761498519',1,'fast_deconv::core::stream_resources_pool::stream_resources_pool(stream_resources_pool &amp;&amp;)=delete']]],
+  ['subtract_5fasync_8',['subtract_async',['../namespacefast__deconv_1_1matrix_1_1detail.html#a0c4ff58de5a5fd476ed4c6409b7d0998',1,'fast_deconv::matrix::detail']]],
+  ['subtract_5fcomponent_9',['subtract_component',['../namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail.html#a3e8842c553cea6ed2ea845d3d7471009',1,'fast_deconv::algorithm::wscms::detail']]],
+  ['sync_10',['sync',['../classfast__deconv_1_1core_1_1stream__resources.html#a6c87139caca11b3687a2bc3293f811ba',1,'fast_deconv::core::stream_resources']]]
+];

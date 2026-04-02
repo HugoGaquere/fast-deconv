@@ -1,0 +1,57 @@
+\doxysection{dispatcher.\+hpp}
+\hypertarget{dispatcher_8hpp_source}{}\label{dispatcher_8hpp_source}\index{include/fast\_deconv/core/dispatcher.hpp@{include/fast\_deconv/core/dispatcher.hpp}}
+\mbox{\hyperlink{dispatcher_8hpp}{Go to the documentation of this file.}}
+\begin{DoxyCode}{0}
+\DoxyCodeLine{00001\ \textcolor{preprocessor}{\#pragma\ once}}
+\DoxyCodeLine{00002\ \textcolor{preprocessor}{\#include\ "{}\mbox{\hyperlink{resources_8hpp}{fast\_deconv/core/resources.hpp}}"{}}}
+\DoxyCodeLine{00003\ }
+\DoxyCodeLine{00004\ \textcolor{preprocessor}{\#include\ <emu/cuda/device/mdspan.hpp>}}
+\DoxyCodeLine{00005\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{access__policy_8hpp}{fast\_deconv/core/access\_policy.hpp}}>}}
+\DoxyCodeLine{00006\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{concepts_8hpp}{fast\_deconv/core/concepts.hpp}}>}}
+\DoxyCodeLine{00007\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{kernel__traits_8hpp}{fast\_deconv/core/kernel\_traits.hpp}}>}}
+\DoxyCodeLine{00008\ }
+\DoxyCodeLine{00009\ \textcolor{preprocessor}{\#include\ <tuple>}}
+\DoxyCodeLine{00010\ \textcolor{preprocessor}{\#include\ <type\_traits>}}
+\DoxyCodeLine{00011\ }
+\DoxyCodeLine{00012\ \textcolor{keyword}{namespace\ }\mbox{\hyperlink{namespacefast__deconv_1_1core}{fast\_deconv::core}}\ \{}
+\DoxyCodeLine{00013\ }
+\DoxyCodeLine{00014\ \textcolor{keyword}{namespace\ }detail\ \{}
+\DoxyCodeLine{00015\ }
+\DoxyCodeLine{00016\ \textcolor{keyword}{template}\ <\textcolor{keyword}{typename}\ KernelTag,\ \textcolor{keyword}{typename}...\ Args>}
+\DoxyCodeLine{00017\ \mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy}{AccessPolicy}}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_1_1detail_a79036e5bde49e1755afe27bcb4d81474}{determine\_policy\_from\_args}}([[maybe\_unused]]\ \textcolor{keyword}{const}\ Args\&...\ args)}
+\DoxyCodeLine{00018\ \{}
+\DoxyCodeLine{00019\ \ \ \textcolor{comment}{//\ Filter\ only\ mdspan\ arguments\ for\ policy\ determination}}
+\DoxyCodeLine{00020\ \ \ \textcolor{keywordflow}{if}\ \textcolor{keyword}{constexpr}\ ((\mbox{\hyperlink{conceptfast__deconv_1_1core_1_1cpts_1_1mdspan}{cpts::mdspan<std::remove\_cvref\_t<Args>}}>\ ||\ ...))\ \{}
+\DoxyCodeLine{00021\ \ \ \ \ \textcolor{keyword}{auto}\ collect\ =\ [](\textcolor{keyword}{const}\ \textcolor{keyword}{auto}\&...\ mdspans)\ \{\ \textcolor{keywordflow}{return}\ determine\_policy<KernelTag>(mdspans...);\ \};}
+\DoxyCodeLine{00022\ \ \ \ \ \textcolor{comment}{//\ Apply\ collect\ only\ to\ mdspan\ args}}
+\DoxyCodeLine{00023\ \ \ \ \ \textcolor{keyword}{auto}\ filter\ =\ [\&](\textcolor{keyword}{const}\ \textcolor{keyword}{auto}\&...\ all\_args)\ \{}
+\DoxyCodeLine{00024\ \ \ \ \ \ \ \textcolor{keywordflow}{return}\ std::apply(collect,\ std::tuple\_cat([](\textcolor{keyword}{const}\ \textcolor{keyword}{auto}\&\ arg)\ \{}
+\DoxyCodeLine{00025\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keywordflow}{if}\ \textcolor{keyword}{constexpr}\ (\mbox{\hyperlink{conceptfast__deconv_1_1core_1_1cpts_1_1mdspan}{cpts::mdspan}}<std::remove\_cvref\_t<\textcolor{keyword}{decltype}(arg)>>)}
+\DoxyCodeLine{00026\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keywordflow}{return}\ std::tie(arg);}
+\DoxyCodeLine{00027\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keywordflow}{else}}
+\DoxyCodeLine{00028\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keywordflow}{return}\ std::tuple<>();}
+\DoxyCodeLine{00029\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \}(all\_args)...));}
+\DoxyCodeLine{00030\ \ \ \ \ \};}
+\DoxyCodeLine{00031\ \ \ \ \ \textcolor{keywordflow}{return}\ filter(args...);}
+\DoxyCodeLine{00032\ \ \ \}\ \textcolor{keywordflow}{else}\ \{}
+\DoxyCodeLine{00033\ \ \ \ \ \textcolor{keywordflow}{return}\ \{.load\_policy\ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf60357a8d17e45793298323f1b372a74}{AccessType::Scalar}},\ .store\_policy\ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf60357a8d17e45793298323f1b372a74}{AccessType::Scalar}}\};}
+\DoxyCodeLine{00034\ \ \ \}}
+\DoxyCodeLine{00035\ \}}
+\DoxyCodeLine{00036\ }
+\DoxyCodeLine{00037\ \}\ \ \textcolor{comment}{//\ namespace\ detail}}
+\DoxyCodeLine{00038\ }
+\DoxyCodeLine{00039\ \textcolor{keyword}{template}\ <\textcolor{keyword}{typename}\ KernelTag,\ \textcolor{keyword}{typename}\ F,\ \textcolor{keyword}{typename}...\ Args>}
+\DoxyCodeLine{00040\ \textcolor{keywordtype}{void}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a47c2d27a8ab5ca971b8c006f4761a8be}{dispatch}}(\mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{stream\_resources}}\&\ \mbox{\hyperlink{classfast__deconv_1_1core_1_1resources}{resources}},\ F\&\&\ function,\ Args\&\&...\ args)}
+\DoxyCodeLine{00041\ \{}
+\DoxyCodeLine{00042\ \ \ \textcolor{comment}{//\ TODO:\ Assert\ kernel\ trait\ validity}}
+\DoxyCodeLine{00043\ \ \ \textcolor{keyword}{using\ }Traits\ =\ \mbox{\hyperlink{structfast__deconv_1_1core_1_1kernel__traits}{kernel\_traits<KernelTag>}};}
+\DoxyCodeLine{00044\ }
+\DoxyCodeLine{00045\ \ \ \textcolor{comment}{//\ Load\ /\ Store\ policy\ (determined\ from\ mdspan\ arguments\ only)}}
+\DoxyCodeLine{00046\ \ \ \mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy}{AccessPolicy}}\ access\_policy\ =\ detail::determine\_policy\_from\_args<KernelTag>(args...);}
+\DoxyCodeLine{00047\ }
+\DoxyCodeLine{00048\ \ \ function(access\_policy,\ \mbox{\hyperlink{classfast__deconv_1_1core_1_1resources}{resources}},\ std::forward<Args>(args)...);}
+\DoxyCodeLine{00049\ \}}
+\DoxyCodeLine{00050\ }
+\DoxyCodeLine{00051\ \}\ \ \textcolor{comment}{//\ namespace\ fast\_deconv::core}}
+
+\end{DoxyCode}

@@ -1,0 +1,59 @@
+\doxysection{include/fast\+\_\+deconv/core/access\+\_\+policy.hpp File Reference}
+\hypertarget{access__policy_8hpp}{}\label{access__policy_8hpp}\index{include/fast\_deconv/core/access\_policy.hpp@{include/fast\_deconv/core/access\_policy.hpp}}
+{\ttfamily \#include $<$emu/cuda/device/mdspan.\+hpp$>$}\newline
+{\ttfamily \#include $<$fast\+\_\+deconv/core/concepts.\+hpp$>$}\newline
+{\ttfamily \#include $<$fast\+\_\+deconv/core/kernel\+\_\+traits.\+hpp$>$}\newline
+Include dependency graph for access\+\_\+policy.\+hpp\+:\nopagebreak
+\begin{figure}[H]
+\begin{center}
+\leavevmode
+\includegraphics[width=350pt]{access__policy_8hpp__incl}
+\end{center}
+\end{figure}
+This graph shows which files directly or indirectly include this file\+:\nopagebreak
+\begin{figure}[H]
+\begin{center}
+\leavevmode
+\includegraphics[width=350pt]{access__policy_8hpp__dep__incl}
+\end{center}
+\end{figure}
+\doxysubsubsection*{Classes}
+\begin{DoxyCompactItemize}
+\item 
+struct \mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy}{fast\+\_\+deconv\+::core\+::\+Access\+Policy}}
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Namespaces}
+\begin{DoxyCompactItemize}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv}{fast\+\_\+deconv}}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv_1_1core}{fast\+\_\+deconv\+::core}}
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Enumerations}
+\begin{DoxyCompactItemize}
+\item 
+enum class \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55ab}{fast\+\_\+deconv\+::core\+::\+Access\+Type}} \+: int \{ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf60357a8d17e45793298323f1b372a74}{fast\+\_\+deconv\+::core\+::\+Scalar}} = 1
+, \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abafe98032d4f1c52a2f0b617f9205d5f80}{fast\+\_\+deconv\+::core\+::\+Vec2}} = 2
+, \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf67402842935c0240e8109e7312def66}{fast\+\_\+deconv\+::core\+::\+Vec4}} = 4
+ \}
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Functions}
+\begin{DoxyCompactItemize}
+\item 
+{\footnotesize template$<$core\+::cpts\+::mdspan Mdspan$>$ }\\constexpr bool \mbox{\hyperlink{namespacefast__deconv_1_1core_ab07b287aaa690115d2f985045bcef08d}{fast\+\_\+deconv\+::core\+::inner\+\_\+unit\+\_\+stride}} (const Mdspan \&m)
+\item 
+{\footnotesize template$<$core\+::cpts\+::mdspan Mdspan$>$ }\\bool \mbox{\hyperlink{namespacefast__deconv_1_1core_a29d0946a9864d617b83a3c7d747ca22b}{fast\+\_\+deconv\+::core\+::rows\+\_\+aligned\+\_\+for\+\_\+vec}} (const Mdspan \&m, std\+::size\+\_\+t vec\+\_\+bytes)
+\item 
+{\footnotesize template$<$cpts\+::mdspan... Mdspans$>$ }\\constexpr bool \mbox{\hyperlink{namespacefast__deconv_1_1core_a9410a521e098d564dc8021b5b39d7f2f}{fast\+\_\+deconv\+::core\+::all\+\_\+inner\+\_\+unit\+\_\+stride}} (const Mdspans \&... mdspans)
+\item 
+{\footnotesize template$<$typename Ptr $>$ \newline
+requires std\+::is\+\_\+pointer\+\_\+v$<$Ptr$>$}\\constexpr bool \mbox{\hyperlink{namespacefast__deconv_1_1core_aa06769097e3a38f0218663d9cecbe815}{fast\+\_\+deconv\+::core\+::is\+\_\+aligned\+\_\+for\+\_\+vec}} (std\+::size\+\_\+t vec\+\_\+bytes, Ptr p) noexcept
+\item 
+{\footnotesize template$<$core\+::cpts\+::mdspan Mdspan$>$ }\\bool \mbox{\hyperlink{namespacefast__deconv_1_1core_a53cc6b2a0a485b34b21cf4201301ca6b}{fast\+\_\+deconv\+::core\+::is\+\_\+aligned\+\_\+for\+\_\+vec}} (std\+::size\+\_\+t vec\+\_\+bytes, const Mdspan \&m) noexcept
+\item 
+{\footnotesize template$<$cpts\+::mdspan... Mdspans$>$ }\\constexpr bool \mbox{\hyperlink{namespacefast__deconv_1_1core_a7e9d6a03a2442d028d9c6cf7ab598363}{fast\+\_\+deconv\+::core\+::all\+\_\+aligned\+\_\+for\+\_\+vec}} (std\+::size\+\_\+t vec\+\_\+bytes, const Mdspans \&... mdspans)
+\item 
+{\footnotesize template$<$cpts\+::mdspan Mdspan$>$ }\\constexpr \mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy}{Access\+Policy}} \mbox{\hyperlink{namespacefast__deconv_1_1core_a22f6471b4dedbe58b0a6d0edf0fb272b}{fast\+\_\+deconv\+::core\+::determine\+\_\+policy\+\_\+mdspan}} (const Mdspan \&\mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}})
+\item 
+{\footnotesize template$<$typename Kernel\+Tag , cpts\+::mdspan... Mdspans$>$ }\\\mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy}{Access\+Policy}} \mbox{\hyperlink{namespacefast__deconv_1_1core_a813c30d11c5caf5611e0689a514b9a33}{fast\+\_\+deconv\+::core\+::determine\+\_\+policy}} (const Mdspans \&... mdspans)
+\end{DoxyCompactItemize}

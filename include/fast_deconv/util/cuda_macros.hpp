@@ -3,8 +3,11 @@
 
 #include <iostream>
 
-#define CHECK_CUDA(val) check((val), #val, __FILE__, __LINE__)
-inline void check(cudaError_t err, const char* const func, const char* const file, const int line)
+#define CHECK_CUDA(val) check_cuda((val), #val, __FILE__, __LINE__)
+inline void check_cuda(cudaError_t err,
+                       const char* const func,
+                       const char* const file,
+                       const int line)
 {
   if (err != cudaSuccess) {
     std::cerr << "CUDA Runtime Error at: " << file << ":" << line << std::endl;

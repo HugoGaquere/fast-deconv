@@ -1,65 +1,60 @@
-# https://clangd.llvm.org/config
-
-# Apply a config conditionally to all C files
-If:
-  PathMatch: .*\.(c|h)$
-
----
-
-# Apply a config conditionally to all C++ files
-If:
-  PathMatch: .*\.(c|h)pp
-
----
-
-# Apply a config conditionally to all CUDA files
-If:
-  PathMatch: .*\.cuh?
 CompileFlags:
+  Compiler: /usr/local/cuda/bin/nvcc
   Add:
-    - "-x"
-    - "cuda"
-    # No error on unknown CUDA versions
-    - "-Wno-unknown-cuda-version"
-    # Allow variadic CUDA functions
-    - "-Xclang=-fcuda-allow-variadic-functions"
+    - --cuda-path=/usr/local/cuda
+    - --cuda-gpu-arch=sm_89
+    - -I/usr/local/cuda/include
+    - -I/usr/local/cuda/targets/x86_64-linux/include
+    - -I/usr/local/cuda/targets/x86_64-linux/include/cccl
+    - "-xcuda"
+    # report all errors
+    - "-ferror-limit=0"
+    - --std=c++20
+    - "-D__INTELLISENSE__"
+    - "-D__CLANGD__"
+    - "-DCUDA_13_1_SM89_FEATURES_SUPPORTED"
+    - "-D_LIBCUDACXX_STD_VER=13"
+    - "-D__CUDACC_VER_MAJOR__=13"
+    - "-D__CUDACC_VER_MINOR__=1"
+    - "-D__CUDA_ARCH__=890"
+    - "-D__CUDA_ARCH_FEAT_SM89_ALL"
+    - "-Wno-invalid-constexpr"
+    # project specific
+    - -I/home/hugo/Documents/projects/fast-deconv/include/
+    - -I/home/hugo/.conan2/p/b/emu3872caa965fd7/p/include
+    - -I/home/hugo/.conan2/p/b/fmt38c3c49e56d28/p/include
+    - -I/home/hugo/.conan2/p/b/spdloed69124a5c2f7/p/include
+    # conan dependencies
+    - -I/home/hugo/.conan2/p/mdspa3e3244b3b5d53/p/include
+    - -I/home/hugo/.conan2/p/ms-gs000db09c5aa93/p/include
+    - -I/home/hugo/.conan2/p/half36e2dd2c0b9fb/p/include
+    - -I/home/hugo/.conan2/p/b/boost3421a6a3d7e04/p/include
+    - -I/home/hugo/.conan2/p/b/nv-cc42d7b075317da/p/include
+    - -I/home/hugo/.conan2/p/dlpacc49300af55b28/p/include
+    - -I/home/hugo/.conan2/p/tl-ex81ea693a1759d/p/include
+    - -I/home/hugo/.conan2/p/tl-op1a360da40b2ab/p/include
+    - -I/home/hugo/.conan2/p/b/libba2018dc2e908c2/p/include
+  Remove:
+    # strip CUDA fatbin args
+    - "-Xfatbin*"
+    # strip CUDA arch flags
+    - "-gencode*"
+    - "--generate-code*"
+    # strip CUDA flags unknown to clang
+    - "-ccbin*"
+    - "--compiler-options*"
+    - "--expt-extended-lambda"
+    - "--extended-lambda"
+    - "--expt-relaxed-constexpr"
+    - "-forward-unknown-to-host-compiler"
+    - "-Werror=cross-execution-space-call"
+    - "--options-file*"
+    - "-arch*"
+Hover:
+  ShowAKA: No
+InlayHints:
+  Enabled: No
 Diagnostics:
   Suppress:
     - "variadic_device_fn"
     - "attributes_not_allowed"
-
----
-
-# Tweak the clangd parse settings for all files
-CompileFlags:
-  Add:
-    # report all errors
-    - "-ferror-limit=0"
-    - "-fmacro-backtrace-limit=0"
-    - "-ftemplate-backtrace-limit=0"
-    # Skip the CUDA version check
-    - "--no-cuda-version-check"
-  Remove:
-    # remove gcc's -fcoroutines
-    - -fcoroutines
-    # remove nvc++ flags unknown to clang
-    - "-gpu=*"
-    - "-stdpar*"
-    # remove nvcc flags unknown to clang
-    - "-arch*"
-    - "-gencode*"
-    - "--generate-code*"
-    - "-ccbin*"
-    - "-t=*"
-    - "--threads*"
-    - "-Xptxas*"
-    - "-Xcudafe*"
-    - "-Xfatbin*"
-    - "-Xcompiler*"
-    - "--diag-suppress*"
-    - "--diag_suppress*"
-    - "--compiler-options*"
-    - "--expt-extended-lambda"
-    - "--expt-relaxed-constexpr"
-    - "-forward-unknown-to-host-compiler"
-    - "-Werror=cross-execution-space-call"

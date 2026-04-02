@@ -1,0 +1,92 @@
+\doxysection{include/fast\+\_\+deconv/core/logger.hpp File Reference}
+\hypertarget{logger_8hpp}{}\label{logger_8hpp}\index{include/fast\_deconv/core/logger.hpp@{include/fast\_deconv/core/logger.hpp}}
+{\ttfamily \#include $<$fmt/format.\+h$>$}\newline
+{\ttfamily \#include $<$spdlog/spdlog.\+h$>$}\newline
+{\ttfamily \#include $<$fast\+\_\+deconv/core/concepts.\+hpp$>$}\newline
+Include dependency graph for logger.\+hpp\+:
+\nopagebreak
+\begin{figure}[H]
+\begin{center}
+\leavevmode
+\includegraphics[width=350pt]{logger_8hpp__incl}
+\end{center}
+\end{figure}
+This graph shows which files directly or indirectly include this file\+:
+\nopagebreak
+\begin{figure}[H]
+\begin{center}
+\leavevmode
+\includegraphics[width=293pt]{logger_8hpp__dep__incl}
+\end{center}
+\end{figure}
+\doxysubsubsection*{Classes}
+\begin{DoxyCompactItemize}
+\item 
+struct \mbox{\hyperlink{structfmt_1_1formatter_3_01M_01_4}{fmt\+::formatter$<$ M $>$}}
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Namespaces}
+\begin{DoxyCompactItemize}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv}{fast\+\_\+deconv}}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv_1_1log}{fast\+\_\+deconv\+::log}}
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Macros}
+\begin{DoxyCompactItemize}
+\item 
+\#define \mbox{\hyperlink{logger_8hpp_ad5a1daaaaa0103a38722c9bedfb264f7}{FD\+\_\+\+LOG\+\_\+\+TRACE}}(...)~SPDLOG\+\_\+\+TRACE(\+\_\+\+\_\+\+VA\+\_\+\+ARGS\+\_\+\+\_\+)
+\item 
+\#define \mbox{\hyperlink{logger_8hpp_a61cdcb1690d4daa6b98299c94649260b}{FD\+\_\+\+LOG\+\_\+\+DEBUG}}(...)~SPDLOG\+\_\+\+DEBUG(\+\_\+\+\_\+\+VA\+\_\+\+ARGS\+\_\+\+\_\+)
+\item 
+\#define \mbox{\hyperlink{logger_8hpp_adfafdcd76875619a3bdae8ae35961070}{FD\+\_\+\+LOG\+\_\+\+INFO}}(...)~SPDLOG\+\_\+\+INFO(\+\_\+\+\_\+\+VA\+\_\+\+ARGS\+\_\+\+\_\+)
+\item 
+\#define \mbox{\hyperlink{logger_8hpp_a0f8984119806b5d97af544ebfb7d1dcc}{FD\+\_\+\+LOG\+\_\+\+WARN}}(...)~SPDLOG\+\_\+\+WARN(\+\_\+\+\_\+\+VA\+\_\+\+ARGS\+\_\+\+\_\+)
+\item 
+\#define \mbox{\hyperlink{logger_8hpp_ae5acdf0fe5446760cb6f659c149f9b12}{FD\+\_\+\+LOG\+\_\+\+ERROR}}(...)~SPDLOG\+\_\+\+ERROR(\+\_\+\+\_\+\+VA\+\_\+\+ARGS\+\_\+\+\_\+)
+\item 
+\#define \mbox{\hyperlink{logger_8hpp_aa33d7dd65d743e8648b2e6bc53c39c64}{FD\+\_\+\+LOG\+\_\+\+CRITICAL}}(...)~SPDLOG\+\_\+\+CRITICAL(\+\_\+\+\_\+\+VA\+\_\+\+ARGS\+\_\+\+\_\+)
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Functions}
+\begin{DoxyCompactItemize}
+\item 
+void \mbox{\hyperlink{namespacefast__deconv_1_1log_a583d852009ccd5d611b0490fb19b9bff}{fast\+\_\+deconv\+::log\+::set\+\_\+level}} (spdlog\+::level\+::level\+\_\+enum level)
+\end{DoxyCompactItemize}
+
+
+\doxysubsection{Macro Definition Documentation}
+\Hypertarget{logger_8hpp_aa33d7dd65d743e8648b2e6bc53c39c64}\label{logger_8hpp_aa33d7dd65d743e8648b2e6bc53c39c64} 
+\index{logger.hpp@{logger.hpp}!FD\_LOG\_CRITICAL@{FD\_LOG\_CRITICAL}}
+\index{FD\_LOG\_CRITICAL@{FD\_LOG\_CRITICAL}!logger.hpp@{logger.hpp}}
+\doxysubsubsection{\texorpdfstring{FD\_LOG\_CRITICAL}{FD\_LOG\_CRITICAL}}
+{\footnotesize\ttfamily \#define FD\+\_\+\+LOG\+\_\+\+CRITICAL(\begin{DoxyParamCaption}\item[{}]{... }\end{DoxyParamCaption})~SPDLOG\+\_\+\+CRITICAL(\+\_\+\+\_\+\+VA\+\_\+\+ARGS\+\_\+\+\_\+)}
+
+\Hypertarget{logger_8hpp_a61cdcb1690d4daa6b98299c94649260b}\label{logger_8hpp_a61cdcb1690d4daa6b98299c94649260b} 
+\index{logger.hpp@{logger.hpp}!FD\_LOG\_DEBUG@{FD\_LOG\_DEBUG}}
+\index{FD\_LOG\_DEBUG@{FD\_LOG\_DEBUG}!logger.hpp@{logger.hpp}}
+\doxysubsubsection{\texorpdfstring{FD\_LOG\_DEBUG}{FD\_LOG\_DEBUG}}
+{\footnotesize\ttfamily \#define FD\+\_\+\+LOG\+\_\+\+DEBUG(\begin{DoxyParamCaption}\item[{}]{... }\end{DoxyParamCaption})~SPDLOG\+\_\+\+DEBUG(\+\_\+\+\_\+\+VA\+\_\+\+ARGS\+\_\+\+\_\+)}
+
+\Hypertarget{logger_8hpp_ae5acdf0fe5446760cb6f659c149f9b12}\label{logger_8hpp_ae5acdf0fe5446760cb6f659c149f9b12} 
+\index{logger.hpp@{logger.hpp}!FD\_LOG\_ERROR@{FD\_LOG\_ERROR}}
+\index{FD\_LOG\_ERROR@{FD\_LOG\_ERROR}!logger.hpp@{logger.hpp}}
+\doxysubsubsection{\texorpdfstring{FD\_LOG\_ERROR}{FD\_LOG\_ERROR}}
+{\footnotesize\ttfamily \#define FD\+\_\+\+LOG\+\_\+\+ERROR(\begin{DoxyParamCaption}\item[{}]{... }\end{DoxyParamCaption})~SPDLOG\+\_\+\+ERROR(\+\_\+\+\_\+\+VA\+\_\+\+ARGS\+\_\+\+\_\+)}
+
+\Hypertarget{logger_8hpp_adfafdcd76875619a3bdae8ae35961070}\label{logger_8hpp_adfafdcd76875619a3bdae8ae35961070} 
+\index{logger.hpp@{logger.hpp}!FD\_LOG\_INFO@{FD\_LOG\_INFO}}
+\index{FD\_LOG\_INFO@{FD\_LOG\_INFO}!logger.hpp@{logger.hpp}}
+\doxysubsubsection{\texorpdfstring{FD\_LOG\_INFO}{FD\_LOG\_INFO}}
+{\footnotesize\ttfamily \#define FD\+\_\+\+LOG\+\_\+\+INFO(\begin{DoxyParamCaption}\item[{}]{... }\end{DoxyParamCaption})~SPDLOG\+\_\+\+INFO(\+\_\+\+\_\+\+VA\+\_\+\+ARGS\+\_\+\+\_\+)}
+
+\Hypertarget{logger_8hpp_ad5a1daaaaa0103a38722c9bedfb264f7}\label{logger_8hpp_ad5a1daaaaa0103a38722c9bedfb264f7} 
+\index{logger.hpp@{logger.hpp}!FD\_LOG\_TRACE@{FD\_LOG\_TRACE}}
+\index{FD\_LOG\_TRACE@{FD\_LOG\_TRACE}!logger.hpp@{logger.hpp}}
+\doxysubsubsection{\texorpdfstring{FD\_LOG\_TRACE}{FD\_LOG\_TRACE}}
+{\footnotesize\ttfamily \#define FD\+\_\+\+LOG\+\_\+\+TRACE(\begin{DoxyParamCaption}\item[{}]{... }\end{DoxyParamCaption})~SPDLOG\+\_\+\+TRACE(\+\_\+\+\_\+\+VA\+\_\+\+ARGS\+\_\+\+\_\+)}
+
+\Hypertarget{logger_8hpp_a0f8984119806b5d97af544ebfb7d1dcc}\label{logger_8hpp_a0f8984119806b5d97af544ebfb7d1dcc} 
+\index{logger.hpp@{logger.hpp}!FD\_LOG\_WARN@{FD\_LOG\_WARN}}
+\index{FD\_LOG\_WARN@{FD\_LOG\_WARN}!logger.hpp@{logger.hpp}}
+\doxysubsubsection{\texorpdfstring{FD\_LOG\_WARN}{FD\_LOG\_WARN}}
+{\footnotesize\ttfamily \#define FD\+\_\+\+LOG\+\_\+\+WARN(\begin{DoxyParamCaption}\item[{}]{... }\end{DoxyParamCaption})~SPDLOG\+\_\+\+WARN(\+\_\+\+\_\+\+VA\+\_\+\+ARGS\+\_\+\+\_\+)}
+

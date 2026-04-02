@@ -1,0 +1,114 @@
+\doxysection{include/fast\+\_\+deconv/core/span\+\_\+types.hpp File Reference}
+\hypertarget{span__types_8hpp}{}\label{span__types_8hpp}\index{include/fast\_deconv/core/span\_types.hpp@{include/fast\_deconv/core/span\_types.hpp}}
+{\ttfamily \#include $<$emu/mdspan.\+hpp$>$}\newline
+{\ttfamily \#include $<$emu/cuda/device/mdspan.\+hpp$>$}\newline
+Include dependency graph for span\+\_\+types.\+hpp\+:\nopagebreak
+\begin{figure}[H]
+\begin{center}
+\leavevmode
+\includegraphics[width=350pt]{span__types_8hpp__incl}
+\end{center}
+\end{figure}
+This graph shows which files directly or indirectly include this file\+:\nopagebreak
+\begin{figure}[H]
+\begin{center}
+\leavevmode
+\includegraphics[width=350pt]{span__types_8hpp__dep__incl}
+\end{center}
+\end{figure}
+\doxysubsubsection*{Namespaces}
+\begin{DoxyCompactItemize}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv}{fast\+\_\+deconv}}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv_1_1core}{fast\+\_\+deconv\+::core}}
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Typedefs}
+\begin{DoxyCompactItemize}
+\item 
+{\footnotesize template$<$std\+::size\+\_\+t N$>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a8155a4da53fa38ac34041fa5282a9fdd}{fast\+\_\+deconv\+::core\+::dims}} = emu\+::dextents$<$ std\+::size\+\_\+t, N $>$
+\item 
+{\footnotesize template$<$typename T , std\+::size\+\_\+t N$>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{fast\+\_\+deconv\+::core\+::mdspan}} = emu\+::cuda\+::device\+::mdspan$<$ T, \mbox{\hyperlink{namespacefast__deconv_1_1core_a8155a4da53fa38ac34041fa5282a9fdd}{dims}}$<$ N $>$, emu\+::layout\+\_\+right $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a846b8910045d3347234df2e270142e0b}{fast\+\_\+deconv\+::core\+::device\+\_\+vect}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}}$<$ T, 1 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_aa4fab0763b2e7a0139d039b5c9614e83}{fast\+\_\+deconv\+::core\+::device\+\_\+span2d}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}}$<$ T, 2 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_abaaac23e472c706c7e76489a8b69c593}{fast\+\_\+deconv\+::core\+::device\+\_\+span3d}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}}$<$ T, 3 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a237cf3893cee8e814715ad25e4072a21}{fast\+\_\+deconv\+::core\+::device\+\_\+span4d}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}}$<$ T, 4 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_aa05bfd5e79dd23f3d4994f247d3e71e5}{fast\+\_\+deconv\+::core\+::device\+\_\+span5d}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}}$<$ T, 5 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a94161b943de66aa5c0c9caa9bd1e81d7}{fast\+\_\+deconv\+::core\+::device\+\_\+span6d}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}}$<$ T, 6 $>$
+\item 
+{\footnotesize template$<$typename T , std\+::size\+\_\+t N$>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_ab34df329ee3a264770cecbd3b30bf7b7}{fast\+\_\+deconv\+::core\+::mdspan\+\_\+F}} = emu\+::cuda\+::device\+::mdspan$<$ T, \mbox{\hyperlink{namespacefast__deconv_1_1core_a8155a4da53fa38ac34041fa5282a9fdd}{dims}}$<$ N $>$, emu\+::layout\+\_\+left $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_aab169cd04c8e3f9f503b9d2fb9478eed}{fast\+\_\+deconv\+::core\+::device\+\_\+vect\+\_\+F}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ab34df329ee3a264770cecbd3b30bf7b7}{mdspan\+\_\+F}}$<$ T, 1 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a6e6c60eb2147234d024d127b37d92f16}{fast\+\_\+deconv\+::core\+::device\+\_\+span2d\+\_\+F}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ab34df329ee3a264770cecbd3b30bf7b7}{mdspan\+\_\+F}}$<$ T, 2 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_ae28c122ab3b55009436abcdd83b026e3}{fast\+\_\+deconv\+::core\+::device\+\_\+span3d\+\_\+F}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ab34df329ee3a264770cecbd3b30bf7b7}{mdspan\+\_\+F}}$<$ T, 3 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a2501475aff143e2957633820e2c4975d}{fast\+\_\+deconv\+::core\+::device\+\_\+span4d\+\_\+F}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ab34df329ee3a264770cecbd3b30bf7b7}{mdspan\+\_\+F}}$<$ T, 4 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a928b6d0387de9a968b6810d441ff9a67}{fast\+\_\+deconv\+::core\+::device\+\_\+span5d\+\_\+F}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ab34df329ee3a264770cecbd3b30bf7b7}{mdspan\+\_\+F}}$<$ T, 5 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_add6fd371ddbbcd684ff72fe90ced43ff}{fast\+\_\+deconv\+::core\+::device\+\_\+span6d\+\_\+F}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ab34df329ee3a264770cecbd3b30bf7b7}{mdspan\+\_\+F}}$<$ T, 6 $>$
+\item 
+{\footnotesize template$<$typename T , std\+::size\+\_\+t N$>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_ada854256ef1db0a63cc5b91db7dc625f}{fast\+\_\+deconv\+::core\+::mdspan\+\_\+S}} = emu\+::cuda\+::device\+::mdspan$<$ T, \mbox{\hyperlink{namespacefast__deconv_1_1core_a8155a4da53fa38ac34041fa5282a9fdd}{dims}}$<$ N $>$, emu\+::layout\+\_\+stride $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_ad4c67d9cddbe32d80756da8290c57599}{fast\+\_\+deconv\+::core\+::device\+\_\+vect\+\_\+S}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ada854256ef1db0a63cc5b91db7dc625f}{mdspan\+\_\+S}}$<$ T, 1 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a4f0792f3b0b3f8edea879819ffa00f01}{fast\+\_\+deconv\+::core\+::device\+\_\+span2d\+\_\+S}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ada854256ef1db0a63cc5b91db7dc625f}{mdspan\+\_\+S}}$<$ T, 2 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a4463d0febe7b09fb1c3f34b9829b4cd6}{fast\+\_\+deconv\+::core\+::device\+\_\+span3d\+\_\+S}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ada854256ef1db0a63cc5b91db7dc625f}{mdspan\+\_\+S}}$<$ T, 3 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_ac6be09e9dda645409cfcda7d83d0bd7e}{fast\+\_\+deconv\+::core\+::device\+\_\+span4d\+\_\+S}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ada854256ef1db0a63cc5b91db7dc625f}{mdspan\+\_\+S}}$<$ T, 4 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a27be7a87bb3525fd1bf625fd35a56769}{fast\+\_\+deconv\+::core\+::device\+\_\+span5d\+\_\+S}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ada854256ef1db0a63cc5b91db7dc625f}{mdspan\+\_\+S}}$<$ T, 5 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a3db84a1d094493974d2605e470b93ae1}{fast\+\_\+deconv\+::core\+::device\+\_\+span6d\+\_\+S}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ada854256ef1db0a63cc5b91db7dc625f}{mdspan\+\_\+S}}$<$ T, 6 $>$
+\item 
+{\footnotesize template$<$typename T , std\+::size\+\_\+t N$>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a7cfdbc443b8cf7a8f12f5b1bf8f7c973}{fast\+\_\+deconv\+::core\+::h\+\_\+mdspan}} = emu\+::mdspan$<$ T, \mbox{\hyperlink{namespacefast__deconv_1_1core_a8155a4da53fa38ac34041fa5282a9fdd}{dims}}$<$ N $>$, emu\+::layout\+\_\+right $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a797dbf0c1a10c9cd975b644c3da48ed9}{fast\+\_\+deconv\+::core\+::host\+\_\+vect}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a7cfdbc443b8cf7a8f12f5b1bf8f7c973}{h\+\_\+mdspan}}$<$ T, 1 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a3ede59d748e9ca6f1fd60f982ce1a993}{fast\+\_\+deconv\+::core\+::host\+\_\+span2d}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a7cfdbc443b8cf7a8f12f5b1bf8f7c973}{h\+\_\+mdspan}}$<$ T, 2 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_ab1c617446073f220f18f1beec6c428d4}{fast\+\_\+deconv\+::core\+::host\+\_\+span3d}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a7cfdbc443b8cf7a8f12f5b1bf8f7c973}{h\+\_\+mdspan}}$<$ T, 3 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a95860c2f0691de23cc9d69dec9c1af56}{fast\+\_\+deconv\+::core\+::host\+\_\+span4d}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a7cfdbc443b8cf7a8f12f5b1bf8f7c973}{h\+\_\+mdspan}}$<$ T, 4 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a48568889c050e936933ba4b8f7a74ebd}{fast\+\_\+deconv\+::core\+::host\+\_\+span5d}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a7cfdbc443b8cf7a8f12f5b1bf8f7c973}{h\+\_\+mdspan}}$<$ T, 5 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a45a199042070e7c780422b3e2a750c21}{fast\+\_\+deconv\+::core\+::host\+\_\+span6d}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a7cfdbc443b8cf7a8f12f5b1bf8f7c973}{h\+\_\+mdspan}}$<$ T, 6 $>$
+\item 
+{\footnotesize template$<$typename T , std\+::size\+\_\+t N$>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_ab362827ac17ca168beab04ee48ac18e0}{fast\+\_\+deconv\+::core\+::h\+\_\+mdspan\+\_\+F}} = emu\+::mdspan$<$ T, \mbox{\hyperlink{namespacefast__deconv_1_1core_a8155a4da53fa38ac34041fa5282a9fdd}{dims}}$<$ N $>$, emu\+::layout\+\_\+left $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a398ea3a942ef4963a369318328f7b585}{fast\+\_\+deconv\+::core\+::host\+\_\+vect\+\_\+F}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ab362827ac17ca168beab04ee48ac18e0}{h\+\_\+mdspan\+\_\+F}}$<$ T, 1 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a5bcaeb3837a524ca210ffbc337eeff7c}{fast\+\_\+deconv\+::core\+::host\+\_\+span2d\+\_\+F}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ab362827ac17ca168beab04ee48ac18e0}{h\+\_\+mdspan\+\_\+F}}$<$ T, 2 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a453d8dcef9f8454becd9379f86b275f1}{fast\+\_\+deconv\+::core\+::host\+\_\+span3d\+\_\+F}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ab362827ac17ca168beab04ee48ac18e0}{h\+\_\+mdspan\+\_\+F}}$<$ T, 3 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a5df2d2b6ed3484aba98d81f672ba5e8e}{fast\+\_\+deconv\+::core\+::host\+\_\+span4d\+\_\+F}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ab362827ac17ca168beab04ee48ac18e0}{h\+\_\+mdspan\+\_\+F}}$<$ T, 4 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_ac3cefa82ab9c1dc886b6ecf354f66aec}{fast\+\_\+deconv\+::core\+::host\+\_\+span5d\+\_\+F}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ab362827ac17ca168beab04ee48ac18e0}{h\+\_\+mdspan\+\_\+F}}$<$ T, 5 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a653c959d19d3fbe9b097d81dab2f5d36}{fast\+\_\+deconv\+::core\+::host\+\_\+span6d\+\_\+F}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_ab362827ac17ca168beab04ee48ac18e0}{h\+\_\+mdspan\+\_\+F}}$<$ T, 6 $>$
+\item 
+{\footnotesize template$<$typename T , std\+::size\+\_\+t N$>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a2264384b380d215b3372fda03f7527b8}{fast\+\_\+deconv\+::core\+::h\+\_\+mdspan\+\_\+S}} = emu\+::mdspan$<$ T, \mbox{\hyperlink{namespacefast__deconv_1_1core_a8155a4da53fa38ac34041fa5282a9fdd}{dims}}$<$ N $>$, emu\+::layout\+\_\+stride $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_ac92ca08fee26a8c9c2f06d2ee48896c3}{fast\+\_\+deconv\+::core\+::host\+\_\+vect\+\_\+S}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a2264384b380d215b3372fda03f7527b8}{h\+\_\+mdspan\+\_\+S}}$<$ T, 1 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a78b44be56b447fe25ffa5b568d4994c0}{fast\+\_\+deconv\+::core\+::host\+\_\+span2d\+\_\+S}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a2264384b380d215b3372fda03f7527b8}{h\+\_\+mdspan\+\_\+S}}$<$ T, 2 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a30e18dc81fb6c94f658520844620037e}{fast\+\_\+deconv\+::core\+::host\+\_\+span3d\+\_\+S}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a2264384b380d215b3372fda03f7527b8}{h\+\_\+mdspan\+\_\+S}}$<$ T, 3 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_ad2b66df14b6f8a5fa7c5a1af72409f16}{fast\+\_\+deconv\+::core\+::host\+\_\+span4d\+\_\+S}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a2264384b380d215b3372fda03f7527b8}{h\+\_\+mdspan\+\_\+S}}$<$ T, 4 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a4b111f7701a88f7aa58e453e4cc1405f}{fast\+\_\+deconv\+::core\+::host\+\_\+span5d\+\_\+S}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a2264384b380d215b3372fda03f7527b8}{h\+\_\+mdspan\+\_\+S}}$<$ T, 5 $>$
+\item 
+{\footnotesize template$<$typename T $>$ }\\using \mbox{\hyperlink{namespacefast__deconv_1_1core_a42ae03319eefd4c610a2eae8b2b250a7}{fast\+\_\+deconv\+::core\+::host\+\_\+span6d\+\_\+S}} = \mbox{\hyperlink{namespacefast__deconv_1_1core_a2264384b380d215b3372fda03f7527b8}{h\+\_\+mdspan\+\_\+S}}$<$ T, 6 $>$
+\end{DoxyCompactItemize}

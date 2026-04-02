@@ -1,0 +1,28 @@
+\doxysection{include/fast\+\_\+deconv/linalg/gemm.hpp File Reference}
+\hypertarget{gemm_8hpp}{}\label{gemm_8hpp}\index{include/fast\_deconv/linalg/gemm.hpp@{include/fast\_deconv/linalg/gemm.hpp}}
+{\ttfamily \#include "{}cu\+Complex.\+h"{}}\newline
+{\ttfamily \#include "{}cublas\+\_\+v2.\+h"{}}\newline
+{\ttfamily \#include $<$fast\+\_\+deconv/core/resources.\+hpp$>$}\newline
+{\ttfamily \#include $<$fast\+\_\+deconv/util/cublas\+\_\+macros.\+hpp$>$}\newline
+{\ttfamily \#include $<$fast\+\_\+deconv/util/cuda\+\_\+macros.\+hpp$>$}\newline
+Include dependency graph for gemm.\+hpp\+:\nopagebreak
+\begin{figure}[H]
+\begin{center}
+\leavevmode
+\includegraphics[width=350pt]{gemm_8hpp__incl}
+\end{center}
+\end{figure}
+\doxysubsubsection*{Namespaces}
+\begin{DoxyCompactItemize}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv}{fast\+\_\+deconv}}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv_1_1linalg}{fast\+\_\+deconv\+::linalg}}
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Functions}
+\begin{DoxyCompactItemize}
+\item 
+void \mbox{\hyperlink{namespacefast__deconv_1_1linalg_a251e0acd6eb50273726f5e18a31781f4}{fast\+\_\+deconv\+::linalg\+::cgemm\+\_\+row\+\_\+major\+\_\+async}} (\mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{core\+::stream\+\_\+resources}} \&resources, int m, int n, int k, const cu\+Complex \texorpdfstring{$\ast$}{*}A, const cu\+Complex \texorpdfstring{$\ast$}{*}B, cu\+Complex \texorpdfstring{$\ast$}{*}C, cublas\+Operation\+\_\+t trans\+\_\+a=CUBLAS\+\_\+\+OP\+\_\+T, cublas\+Operation\+\_\+t trans\+\_\+b=CUBLAS\+\_\+\+OP\+\_\+T)
+\item 
+void \mbox{\hyperlink{namespacefast__deconv_1_1linalg_a6235266df9718a971c95bf671ccb19ea}{fast\+\_\+deconv\+::linalg\+::gemm\+\_\+row\+\_\+major\+\_\+async}} (\mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{core\+::stream\+\_\+resources}} \&resources, int m, int n, int k, const float \texorpdfstring{$\ast$}{*}A, const float \texorpdfstring{$\ast$}{*}B, float \texorpdfstring{$\ast$}{*}C, cublas\+Operation\+\_\+t trans\+\_\+a=CUBLAS\+\_\+\+OP\+\_\+T, cublas\+Operation\+\_\+t trans\+\_\+b=CUBLAS\+\_\+\+OP\+\_\+T)
+\end{DoxyCompactItemize}

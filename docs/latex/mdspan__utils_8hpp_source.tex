@@ -1,0 +1,32 @@
+\doxysection{mdspan\+\_\+utils.\+hpp}
+\hypertarget{mdspan__utils_8hpp_source}{}\label{mdspan__utils_8hpp_source}\index{include/fast\_deconv/util/mdspan\_utils.hpp@{include/fast\_deconv/util/mdspan\_utils.hpp}}
+\mbox{\hyperlink{mdspan__utils_8hpp}{Go to the documentation of this file.}}
+\begin{DoxyCode}{0}
+\DoxyCodeLine{00001\ \textcolor{preprocessor}{\#pragma\ once}}
+\DoxyCodeLine{00002\ }
+\DoxyCodeLine{00003\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{concepts_8hpp}{fast\_deconv/core/concepts.hpp}}>}}
+\DoxyCodeLine{00004\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{span__types_8hpp}{fast\_deconv/core/span\_types.hpp}}>}}
+\DoxyCodeLine{00005\ }
+\DoxyCodeLine{00006\ \textcolor{keyword}{namespace\ }\mbox{\hyperlink{namespacefast__deconv_1_1util}{fast\_deconv::util}}\ \{}
+\DoxyCodeLine{00007\ }
+\DoxyCodeLine{00008\ \textcolor{keyword}{template}\ <core::cpts::mdspan\ Mdspan>}
+\DoxyCodeLine{00009\ \_\_device\_\_\ \_\_forceinline\_\_\ \textcolor{keyword}{auto}\ \mbox{\hyperlink{namespacefast__deconv_1_1util_af5340dab386059e3c233367b3c04b9ba}{linear\_to\_indices}}(\textcolor{keyword}{typename}\ Mdspan::size\_type\ lin,\ \textcolor{keyword}{const}\ Mdspan\&\ m)}
+\DoxyCodeLine{00010\ \{}
+\DoxyCodeLine{00011\ \ \ \textcolor{keyword}{using\ }size\_t\_\ \ \ =\ \textcolor{keyword}{typename}\ Mdspan::size\_type;}
+\DoxyCodeLine{00012\ \ \ \textcolor{keyword}{using\ }index\_t\ \ \ =\ \textcolor{keyword}{typename}\ Mdspan::index\_type;}
+\DoxyCodeLine{00013\ \ \ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{int}\ R\ =\ Mdspan::rank();}
+\DoxyCodeLine{00014\ }
+\DoxyCodeLine{00015\ \ \ std::array<index\_t,\ R>\ idx\{\};}
+\DoxyCodeLine{00016\ }
+\DoxyCodeLine{00017\ \textcolor{preprocessor}{\#pragma\ unroll}}
+\DoxyCodeLine{00018\ \ \ \textcolor{keywordflow}{for}\ (\textcolor{keywordtype}{int}\ d\ =\ R\ -\/\ 1;\ d\ >=\ 0;\ -\/-\/d)\ \{}
+\DoxyCodeLine{00019\ \ \ \ \ \textcolor{keyword}{const}\ \textcolor{keyword}{auto}\ e\ \ \ \ =\ \textcolor{keyword}{static\_cast<}size\_t\_\textcolor{keyword}{>}(m.extent(d));}
+\DoxyCodeLine{00020\ \ \ \ \ \textcolor{keyword}{const}\ size\_t\_\ r\ =\ lin\ \%\ e;}
+\DoxyCodeLine{00021\ \ \ \ \ lin\ /=\ e;}
+\DoxyCodeLine{00022\ \ \ \ \ idx[d]\ =\ \textcolor{keyword}{static\_cast<}index\_t\textcolor{keyword}{>}(r);}
+\DoxyCodeLine{00023\ \ \ \}}
+\DoxyCodeLine{00024\ \ \ \textcolor{keywordflow}{return}\ idx;}
+\DoxyCodeLine{00025\ \}}
+\DoxyCodeLine{00026\ \}\ \ \textcolor{comment}{//\ namespace\ fast\_deconv::util}}
+
+\end{DoxyCode}

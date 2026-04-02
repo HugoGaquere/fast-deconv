@@ -1,0 +1,170 @@
+\doxysection{wscms.\+hpp}
+\hypertarget{wscms_8hpp_source}{}\label{wscms_8hpp_source}\index{include/fast\_deconv/algorithm/wscms.hpp@{include/fast\_deconv/algorithm/wscms.hpp}}
+\mbox{\hyperlink{wscms_8hpp}{Go to the documentation of this file.}}
+\begin{DoxyCode}{0}
+\DoxyCodeLine{00001\ \textcolor{preprocessor}{\#pragma\ once}}
+\DoxyCodeLine{00002\ }
+\DoxyCodeLine{00003\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{wscms__minor__loop_8cuh}{fast\_deconv/algorithm/detail/wscms\_minor\_loop.cuh}}>}}
+\DoxyCodeLine{00004\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{scale_8cuh}{fast\_deconv/algorithm/detail/scale.cuh}}>}}
+\DoxyCodeLine{00005\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{wscms__types_8hpp}{fast\_deconv/algorithm/wscms\_types.hpp}}>}}
+\DoxyCodeLine{00006\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{logger_8hpp}{fast\_deconv/core/logger.hpp}}>}}
+\DoxyCodeLine{00007\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{resources_8hpp}{fast\_deconv/core/resources.hpp}}>}}
+\DoxyCodeLine{00008\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{span__types_8hpp}{fast\_deconv/core/span\_types.hpp}}>}}
+\DoxyCodeLine{00009\ }
+\DoxyCodeLine{00010\ \textcolor{keyword}{namespace\ }\mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms}{fast\_deconv::algorithm::wscms}}\ \{}
+\DoxyCodeLine{00011\ }
+\DoxyCodeLine{00012\ \textcolor{keywordtype}{void}\ \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_a57c1cb57a2b6dd12e23296e3bcae4cbf}{run\_wscms}}(\mbox{\hyperlink{namespacefast__deconv_1_1core_a237cf3893cee8e814715ad25e4072a21}{core::device\_span4d<float>}}\&\ dirty,\ \mbox{\hyperlink{namespacefast__deconv_1_1core_aa4fab0763b2e7a0139d039b5c9614e83}{core::device\_span2d<float>}}\&\ mean\_residual,}
+\DoxyCodeLine{00013\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{keyword}{const}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a94161b943de66aa5c0c9caa9bd1e81d7}{core::device\_span6d<float>}}\&\ psfs,\ \textcolor{keyword}{const}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a237cf3893cee8e814715ad25e4072a21}{core::device\_span4d<float>}}\&\ psfs\_2,}
+\DoxyCodeLine{00014\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \mbox{\hyperlink{structfast__deconv_1_1algorithm_1_1wscms_1_1WSCMS__ctx}{WSCMS\_ctx}}\&\ wscms\_ctx,\ \mbox{\hyperlink{structfast__deconv_1_1algorithm_1_1wscms_1_1WSCMS__params}{WSCMS\_params}}\ params)}
+\DoxyCodeLine{00015\ \{}
+\DoxyCodeLine{00016\ \ \ \mbox{\hyperlink{logger_8hpp_adfafdcd76875619a3bdae8ae35961070}{FD\_LOG\_INFO}}(\textcolor{stringliteral}{"{}run\_wscms:\ dirty=\{\}\ psfs=\{\}\ n\_scales=\{\}\ max\_subminor\_iter=\{\}\ peak\_factor=\{\}"{}},}
+\DoxyCodeLine{00017\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ dirty,\ psfs,\ params.\mbox{\hyperlink{structfast__deconv_1_1algorithm_1_1wscms_1_1WSCMS__params_ae44d41fee168c261d0a7ad4d689f0ea5}{n\_scales}},\ params.\mbox{\hyperlink{structfast__deconv_1_1algorithm_1_1wscms_1_1WSCMS__params_a5cc17c3f3d9cf5a50b535677dc9083f1}{max\_subminor\_iter}},\ params.\mbox{\hyperlink{structfast__deconv_1_1algorithm_1_1wscms_1_1WSCMS__params_a37ed40b23f1c88215751627276501120}{peak\_factor}});}
+\DoxyCodeLine{00018\ \ \ \mbox{\hyperlink{logger_8hpp_a61cdcb1690d4daa6b98299c94649260b}{FD\_LOG\_DEBUG}}(\textcolor{stringliteral}{"{}run\_wscms:\ beam\_enable=\{\}\ do\_abs=\{\}\ per\_scale\_mask=\{\}\ padding=\{\}"{}},}
+\DoxyCodeLine{00019\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ params.\mbox{\hyperlink{structfast__deconv_1_1algorithm_1_1wscms_1_1WSCMS__params_a5ddefe46e8af2c0e9d48acb5e64c03ec}{beam\_enable}},\ params.\mbox{\hyperlink{structfast__deconv_1_1algorithm_1_1wscms_1_1WSCMS__params_af73cfa2b0cb4152e18ca11335777f9ec}{do\_abs}},\ params.\mbox{\hyperlink{structfast__deconv_1_1algorithm_1_1wscms_1_1WSCMS__params_afd9e933c6eeafce00247b4f0d1d9d684}{per\_scale\_mask}},\ params.\mbox{\hyperlink{structfast__deconv_1_1algorithm_1_1wscms_1_1WSCMS__params_acadb4403705f3bdd183c4088602a8dbc}{padding}});}
+\DoxyCodeLine{00020\ }
+\DoxyCodeLine{00021\ \ \ \mbox{\hyperlink{classfast__deconv_1_1core_1_1resources}{core::resources}}\ resources(0);}
+\DoxyCodeLine{00022\ \ \ \mbox{\hyperlink{namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail_a6b35df488906a3c89f0659e830848cf4}{detail::run\_wscms}}(resources,\ dirty,\ mean\_residual,\ psfs,\ psfs\_2,\ wscms\_ctx,\ params);}
+\DoxyCodeLine{00023\ }
+\DoxyCodeLine{00024\ \ \ \mbox{\hyperlink{logger_8hpp_adfafdcd76875619a3bdae8ae35961070}{FD\_LOG\_INFO}}(\textcolor{stringliteral}{"{}run\_wscms:\ completed"{}});}
+\DoxyCodeLine{00025\ \}}
+\DoxyCodeLine{00026\ }
+\DoxyCodeLine{00027\ \textcolor{comment}{//\ std::vector<ComponentEntry>\ minor\_cycle(const\ core::resources\&,\ const\ MinorCycleContext\&\ ctx,}}
+\DoxyCodeLine{00028\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::device\_span4d<float>\ dirty,}}
+\DoxyCodeLine{00029\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::device\_span4d<float>\ scaled\_dirty,}}
+\DoxyCodeLine{00030\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::device\_span6d<float>\ psfs,}}
+\DoxyCodeLine{00031\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::device\_span6d<float>\ psfs\_2,}}
+\DoxyCodeLine{00032\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::device\_span4d<bool>\ mask,}}
+\DoxyCodeLine{00033\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::host\_span2d<float>\ gains,\ std::uint32\_t\ scale\_idx)}}
+\DoxyCodeLine{00034\ \textcolor{comment}{//\ \{}}
+\DoxyCodeLine{00035\ \textcolor{comment}{//\ \ \ return\ detail::minor\_cycle(dirty,\ scaled\_dirty,\ psfs,\ psfs\_2,\ mask,\ gains,\ scale\_idx,\ ctx);}}
+\DoxyCodeLine{00036\ \textcolor{comment}{//\ \}}}
+\DoxyCodeLine{00037\ }
+\DoxyCodeLine{00038\ \textcolor{comment}{//\ void\ wscms\_minor\_cycles(const\ core::resources\&\ resources,\ core::device\_span2d<float>\&\ residual,}}
+\DoxyCodeLine{00039\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::device\_span4d<float>\&\ psfs\_2,}}
+\DoxyCodeLine{00040\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::device\_span2d<int>\&\ map\_pixels\_facets,}}
+\DoxyCodeLine{00041\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::device\_span2d<float>\&\ gains,\ int\ scale\_idx,\ float\ threshold,}}
+\DoxyCodeLine{00042\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ int\ max\_iter)}}
+\DoxyCodeLine{00043\ \textcolor{comment}{//\ \{}}
+\DoxyCodeLine{00044\ \ \ \textcolor{comment}{//\ if\ (residual.extent(0)\ !=\ map\_pixels\_facets.extent(0)\ ||\ residual.extent(1)\ !=}}
+\DoxyCodeLine{00045\ \ \ \textcolor{comment}{//\ map\_pixels\_facets.extent(1))}}
+\DoxyCodeLine{00046\ \ \ \textcolor{comment}{//\ \ \ throw\ std::invalid\_argument(}}
+\DoxyCodeLine{00047\ \ \ \textcolor{comment}{//\ \ \ \ \ \ \ "{}wscms\_minor\_cycles:\ residual\ and\ map\_pixels\_facets\ spatial\ "{}}}
+\DoxyCodeLine{00048\ \ \ \textcolor{comment}{//\ \ \ \ \ \ \ "{}dimensions\ must\ match"{});}}
+\DoxyCodeLine{00049\ \ \ \textcolor{comment}{//\ if\ (scale\_idx\ <\ 0\ ||\ scale\_idx\ >=\ static\_cast<int>(psfs\_2.extent(0)))}}
+\DoxyCodeLine{00050\ \ \ \textcolor{comment}{//\ \ \ throw\ std::invalid\_argument("{}wscms\_minor\_cycles:\ scale\_idx\ out\ of\ range"{});}}
+\DoxyCodeLine{00051\ \ \ \textcolor{comment}{//\ if\ (psfs\_2.extent(1)\ !=\ gains.extent(1))}}
+\DoxyCodeLine{00052\ \ \ \textcolor{comment}{//\ \ \ throw\ std::invalid\_argument("{}wscms\_minor\_cycles:\ psfs\_2\ n\_facet\ !=\ gains\ n\_facet"{});}}
+\DoxyCodeLine{00053\ \ \ \textcolor{comment}{//\ if\ (threshold\ <=\ 0)\ throw\ std::invalid\_argument("{}wscms\_minor\_cycles:\ threshold\ must\ be\ >\ 0"{});}}
+\DoxyCodeLine{00054\ \ \ \textcolor{comment}{//\ if\ (max\_iter\ <=\ 0)\ throw\ std::invalid\_argument("{}wscms\_minor\_cycles:\ max\_iter\ must\ be\ >\ 0"{});}}
+\DoxyCodeLine{00055\ \ \ \textcolor{comment}{//}}
+\DoxyCodeLine{00056\ \ \ \textcolor{comment}{//\ detail::wscms\_minor\_cycles(resources,\ residual,\ psfs\_2,\ map\_pixels\_facets,\ gains,\ scale\_idx,}}
+\DoxyCodeLine{00057\ \ \ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ threshold,\ max\_iter);}}
+\DoxyCodeLine{00058\ \textcolor{comment}{//\ \}}}
+\DoxyCodeLine{00059\ }
+\DoxyCodeLine{00060\ \textcolor{comment}{//\ void\ wscms\_minor\_cycles\_host\_loop(}}
+\DoxyCodeLine{00061\ \textcolor{comment}{//\ \ \ \ \ const\ core::resources\&\ resources,\ core::device\_span4d<float>\&\ residual,}}
+\DoxyCodeLine{00062\ \textcolor{comment}{//\ \ \ \ \ core::device\_span2d<float>\&\ mean\_residual,\ const\ core::device\_span6d<float>\&\ psfs,}}
+\DoxyCodeLine{00063\ \textcolor{comment}{//\ \ \ \ \ const\ core::device\_span4d<float>\&\ psfs\_2,\ const\ core::device\_span4d<float>\&\ jones\_norm,}}
+\DoxyCodeLine{00064\ \textcolor{comment}{//\ \ \ \ \ const\ core::device\_span2d<float>\&\ xdes,\ const\ core::device\_vect<float>\&\ weights,}}
+\DoxyCodeLine{00065\ \textcolor{comment}{//\ \ \ \ \ const\ core::host\_span2d<int>\&\ map\_pixels\_facets,\ const\ core::host\_span2d<float>\&\ gains,}}
+\DoxyCodeLine{00066\ \textcolor{comment}{//\ \ \ \ \ int\ scale\_idx,\ float\ threshold,\ int\ max\_iter)}}
+\DoxyCodeLine{00067\ \textcolor{comment}{//\ \{}}
+\DoxyCodeLine{00068\ \textcolor{comment}{//\ \ \ if\ (residual.extent(0)\ !=\ map\_pixels\_facets.extent(0)\ ||}}
+\DoxyCodeLine{00069\ \textcolor{comment}{//\ \ \ \ \ \ \ residual.extent(1)\ !=\ map\_pixels\_facets.extent(1))}}
+\DoxyCodeLine{00070\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument(}}
+\DoxyCodeLine{00071\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ "{}wscms\_minor\_cycles\_host\_loop:\ residual\ and\ map\_pixels\_facets\ "{}}}
+\DoxyCodeLine{00072\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ "{}spatial\ dimensions\ must\ match"{});}}
+\DoxyCodeLine{00073\ \textcolor{comment}{//\ \ \ if\ (scale\_idx\ <\ 0\ ||\ scale\_idx\ >=\ static\_cast<int>(psfs\_2.extent(0)))}}
+\DoxyCodeLine{00074\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument("{}wscms\_minor\_cycles\_host\_loop:\ scale\_idx\ out\ of\ range"{});}}
+\DoxyCodeLine{00075\ \textcolor{comment}{//\ \ \ if\ (psfs\_2.extent(1)\ !=\ gains.extent(1))}}
+\DoxyCodeLine{00076\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument("{}wscms\_minor\_cycles\_host\_loop:\ psfs\_2\ n\_facet\ !=\ gains\ n\_facet"{});}}
+\DoxyCodeLine{00077\ \textcolor{comment}{//\ \ \ if\ (threshold\ <=\ 0)}}
+\DoxyCodeLine{00078\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument("{}wscms\_minor\_cycles\_host\_loop:\ threshold\ must\ be\ >\ 0"{});}}
+\DoxyCodeLine{00079\ \textcolor{comment}{//\ \ \ if\ (max\_iter\ <=\ 0)}}
+\DoxyCodeLine{00080\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument("{}wscms\_minor\_cycles\_host\_loop:\ max\_iter\ must\ be\ >\ 0"{});}}
+\DoxyCodeLine{00081\ \textcolor{comment}{//}}
+\DoxyCodeLine{00082\ \textcolor{comment}{//\ \ \ detail::wscms\_minor\_cycles\_host\_loop(resources,\ residual,\ mean\_residual,\ psfs,\ psfs\_2,\ jones\_norm,}}
+\DoxyCodeLine{00083\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ xdes,\ weights,\ map\_pixels\_facets,\ gains,\ scale\_idx,}}
+\DoxyCodeLine{00084\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ threshold,\ max\_iter);}}
+\DoxyCodeLine{00085\ \textcolor{comment}{//\ \}}}
+\DoxyCodeLine{00086\ \textcolor{comment}{//}}
+\DoxyCodeLine{00087\ \textcolor{comment}{//\ void\ make\_scales(const\ core::resources\&\ resources,\ core::device\_vect<float>\ sigmas,}}
+\DoxyCodeLine{00088\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::device\_span3d<float>\ out\_scales,\ int\ scale\_ncol\_full)}}
+\DoxyCodeLine{00089\ \textcolor{comment}{//\ \{}}
+\DoxyCodeLine{00090\ \textcolor{comment}{//\ \ \ if\ (sigmas.size()\ !=\ out\_scales.extent(0))}}
+\DoxyCodeLine{00091\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument("{}make\_scales:\ sigmas.size()\ !=\ out\_scales\ n\_scales"{});}}
+\DoxyCodeLine{00092\ \textcolor{comment}{//\ \ \ if\ (scale\_ncol\_full\ <=\ 0)\ throw\ std::invalid\_argument("{}make\_scales:\ scale\_ncol\_full\ must\ be\ >\ 0"{});}}
+\DoxyCodeLine{00093\ \textcolor{comment}{//\ \ \ if\ (out\_scales.extent(2)\ !=\ static\_cast<std::size\_t>(scale\_ncol\_full\ /\ 2\ +\ 1))}}
+\DoxyCodeLine{00094\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument("{}make\_scales:\ out\_scales\ ncol\ must\ be\ scale\_ncol\_full\ /\ 2\ +\ 1"{});}}
+\DoxyCodeLine{00095\ \textcolor{comment}{//}}
+\DoxyCodeLine{00096\ \textcolor{comment}{//\ \ \ const\ uint\ n\_scales\ =\ sigmas.size();}}
+\DoxyCodeLine{00097\ \textcolor{comment}{//\ \ \ const\ uint\ scale\_nrow\ =\ out\_scales.extent(1);}}
+\DoxyCodeLine{00098\ \textcolor{comment}{//\ \ \ const\ uint\ scale\_ncol\ =\ out\_scales.extent(2);}}
+\DoxyCodeLine{00099\ \textcolor{comment}{//\ \ \ detail::make\_scales(resources,\ sigmas.data\_handle(),\ scale\_nrow,\ scale\_ncol,\ scale\_ncol\_full,}}
+\DoxyCodeLine{00100\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ n\_scales,\ out\_scales.data\_handle());}}
+\DoxyCodeLine{00101\ \textcolor{comment}{//\ \}}}
+\DoxyCodeLine{00102\ \textcolor{comment}{//}}
+\DoxyCodeLine{00103\ \textcolor{comment}{//\ scale\_convole\_ctx\ make\_scale\_convolve\_ctx(int\ nrow,\ int\ ncol,\ int\ n\_scales,\ float\ padding)}}
+\DoxyCodeLine{00104\ \textcolor{comment}{//\ \{}}
+\DoxyCodeLine{00105\ \textcolor{comment}{//\ \ \ return\ detail::make\_scale\_convolve\_ctx(nrow,\ ncol,\ n\_scales,\ padding);}}
+\DoxyCodeLine{00106\ \textcolor{comment}{//\ \}}}
+\DoxyCodeLine{00107\ \textcolor{comment}{//}}
+\DoxyCodeLine{00108\ \textcolor{comment}{//\ void\ scale\_convolve(const\ core::resources\&\ resources,\ const\ scale\_convole\_ctx\&\ ctx,}}
+\DoxyCodeLine{00109\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::device\_span2d<float>\ dirty,\ core::device\_span3d<float>\ scales,}}
+\DoxyCodeLine{00110\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::device\_span3d<float>\ out\_scaled\_dirty)}}
+\DoxyCodeLine{00111\ \textcolor{comment}{//\ \{}}
+\DoxyCodeLine{00112\ \textcolor{comment}{//\ \ \ if\ (static\_cast<int>(dirty.extent(0))\ !=\ ctx.img\_nrow\ ||}}
+\DoxyCodeLine{00113\ \textcolor{comment}{//\ \ \ \ \ \ \ static\_cast<int>(dirty.extent(1))\ !=\ ctx.img\_ncol)}}
+\DoxyCodeLine{00114\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument("{}scale\_convolve:\ dirty\ dimensions\ must\ match\ ctx\ image\ size"{});}}
+\DoxyCodeLine{00115\ \textcolor{comment}{//\ \ \ if\ (static\_cast<int>(scales.extent(0))\ !=\ ctx.n\_batches)}}
+\DoxyCodeLine{00116\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument("{}scale\_convolve:\ scales\ n\_scales\ must\ match\ ctx.n\_batches"{});}}
+\DoxyCodeLine{00117\ \textcolor{comment}{//\ \ \ if\ (static\_cast<int>(scales.extent(1))\ !=\ ctx.freq\_nrow\ ||}}
+\DoxyCodeLine{00118\ \textcolor{comment}{//\ \ \ \ \ \ \ static\_cast<int>(scales.extent(2))\ !=\ ctx.freq\_ncol)}}
+\DoxyCodeLine{00119\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument("{}scale\_convolve:\ scales\ freq\ dimensions\ must\ match\ ctx"{});}}
+\DoxyCodeLine{00120\ \textcolor{comment}{//\ \ \ if\ (static\_cast<int>(out\_scaled\_dirty.extent(0))\ !=\ ctx.n\_batches)}}
+\DoxyCodeLine{00121\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument(}}
+\DoxyCodeLine{00122\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ "{}scale\_convolve:\ out\_scaled\_dirty\ n\_scales\ must\ match\ ctx.n\_batches"{});}}
+\DoxyCodeLine{00123\ \textcolor{comment}{//\ \ \ if\ (static\_cast<int>(out\_scaled\_dirty.extent(1))\ !=\ ctx.img\_nrow\ ||}}
+\DoxyCodeLine{00124\ \textcolor{comment}{//\ \ \ \ \ \ \ static\_cast<int>(out\_scaled\_dirty.extent(2))\ !=\ ctx.img\_ncol)}}
+\DoxyCodeLine{00125\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument(}}
+\DoxyCodeLine{00126\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ "{}scale\_convolve:\ out\_scaled\_dirty\ spatial\ dimensions\ must\ match\ ctx\ image\ size"{});}}
+\DoxyCodeLine{00127\ \textcolor{comment}{//}}
+\DoxyCodeLine{00128\ \textcolor{comment}{//\ \ \ const\ uint\ n\_scales\ =\ scales.extent(0);}}
+\DoxyCodeLine{00129\ \textcolor{comment}{//\ \ \ detail::scale\_convolve(resources,\ ctx,\ dirty.data\_handle(),\ scales.data\_handle(),}}
+\DoxyCodeLine{00130\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ out\_scaled\_dirty.data\_handle(),\ n\_scales);}}
+\DoxyCodeLine{00131\ \textcolor{comment}{//\ \}}}
+\DoxyCodeLine{00132\ \textcolor{comment}{//}}
+\DoxyCodeLine{00133\ \textcolor{comment}{//\ //\ MaskSpan:\ device\_span2d<bool>\ (shared\ mask)\ or\ device\_span3d<bool>\ (per-\/scale\ mask)}}
+\DoxyCodeLine{00134\ \textcolor{comment}{//\ template\ <typename\ MaskSpan>}}
+\DoxyCodeLine{00135\ \textcolor{comment}{//\ scale\_selection\_result\ scale\_selection(const\ core::resources\&\ resources,}}
+\DoxyCodeLine{00136\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::device\_span3d<float>\ scaled\_dirty,\ MaskSpan\ mask,}}
+\DoxyCodeLine{00137\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ core::host\_vect<float>\ bias,\ bool\ do\_abs)}}
+\DoxyCodeLine{00138\ \textcolor{comment}{//\ \{}}
+\DoxyCodeLine{00139\ \textcolor{comment}{//\ \ \ static\_assert(MaskSpan::rank()\ ==\ 2\ ||\ MaskSpan::rank()\ ==\ 3,}}
+\DoxyCodeLine{00140\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ "{}scale\_selection:\ mask\ must\ be\ rank\ 2\ (shared)\ or\ rank\ 3\ (per-\/scale)"{});}}
+\DoxyCodeLine{00141\ \textcolor{comment}{//\ \ \ constexpr\ bool\ per\_scale\_mask\ =\ (MaskSpan::rank()\ ==\ 3);}}
+\DoxyCodeLine{00142\ \textcolor{comment}{//}}
+\DoxyCodeLine{00143\ \textcolor{comment}{//\ \ \ const\ int\ n\_scales\ =\ scaled\_dirty.extent(0);}}
+\DoxyCodeLine{00144\ \textcolor{comment}{//\ \ \ const\ int\ nrow\ =\ scaled\_dirty.extent(1);}}
+\DoxyCodeLine{00145\ \textcolor{comment}{//\ \ \ const\ int\ ncol\ =\ scaled\_dirty.extent(2);}}
+\DoxyCodeLine{00146\ \textcolor{comment}{//}}
+\DoxyCodeLine{00147\ \textcolor{comment}{//\ \ \ if\ (bias.size()\ !=\ static\_cast<std::size\_t>(n\_scales))}}
+\DoxyCodeLine{00148\ \textcolor{comment}{//\ \ \ \ \ throw\ std::invalid\_argument("{}scale\_selection:\ bias.size()\ !=\ n\_scales"{});}}
+\DoxyCodeLine{00149\ \textcolor{comment}{//\ \ \ if\ constexpr\ (per\_scale\_mask)\ \{}}
+\DoxyCodeLine{00150\ \textcolor{comment}{//\ \ \ \ \ if\ (mask.extent(0)\ !=\ scaled\_dirty.extent(0)\ ||\ mask.extent(1)\ !=\ scaled\_dirty.extent(1)\ ||}}
+\DoxyCodeLine{00151\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ mask.extent(2)\ !=\ scaled\_dirty.extent(2))}}
+\DoxyCodeLine{00152\ \textcolor{comment}{//\ \ \ \ \ \ \ throw\ std::invalid\_argument(}}
+\DoxyCodeLine{00153\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ "{}scale\_selection:\ per-\/scale\ mask\ dimensions\ must\ match\ scaled\_dirty"{});}}
+\DoxyCodeLine{00154\ \textcolor{comment}{//\ \ \ \}\ else\ \{}}
+\DoxyCodeLine{00155\ \textcolor{comment}{//\ \ \ \ \ if\ (mask.extent(0)\ !=\ scaled\_dirty.extent(1)\ ||\ mask.extent(1)\ !=\ scaled\_dirty.extent(2))}}
+\DoxyCodeLine{00156\ \textcolor{comment}{//\ \ \ \ \ \ \ throw\ std::invalid\_argument(}}
+\DoxyCodeLine{00157\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ "{}scale\_selection:\ shared\ mask\ spatial\ dimensions\ must\ match\ scaled\_dirty"{});}}
+\DoxyCodeLine{00158\ \textcolor{comment}{//\ \ \ \}}}
+\DoxyCodeLine{00159\ \textcolor{comment}{//}}
+\DoxyCodeLine{00160\ \textcolor{comment}{//\ \ \ return\ detail::scale\_selection(resources,\ scaled\_dirty.data\_handle(),\ mask.data\_handle(),}}
+\DoxyCodeLine{00161\ \textcolor{comment}{//\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ bias.data\_handle(),\ n\_scales,\ nrow,\ ncol,\ do\_abs,\ per\_scale\_mask);}}
+\DoxyCodeLine{00162\ \textcolor{comment}{//\ \}}}
+\DoxyCodeLine{00163\ }
+\DoxyCodeLine{00164\ \}\ \ \textcolor{comment}{//\ namespace\ fast\_deconv::algorithm::wscms}}
+
+\end{DoxyCode}

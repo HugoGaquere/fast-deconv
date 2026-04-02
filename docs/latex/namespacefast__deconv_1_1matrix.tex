@@ -1,0 +1,66 @@
+\doxysection{fast\+\_\+deconv\+::matrix Namespace Reference}
+\hypertarget{namespacefast__deconv_1_1matrix}{}\label{namespacefast__deconv_1_1matrix}\index{fast\_deconv::matrix@{fast\_deconv::matrix}}
+\doxysubsubsection*{Namespaces}
+\begin{DoxyCompactItemize}
+\item 
+namespace \mbox{\hyperlink{namespacefast__deconv_1_1matrix_1_1detail}{detail}}
+\end{DoxyCompactItemize}
+\doxysubsubsection*{Functions}
+\begin{DoxyCompactItemize}
+\item 
+void \mbox{\hyperlink{namespacefast__deconv_1_1matrix_a516e5ac2a08c67b7d8feb854f8c1478e}{argmax\+\_\+async}} (float \texorpdfstring{$\ast$}{*}d\+\_\+max\+\_\+out, uint \texorpdfstring{$\ast$}{*}d\+\_\+index\+\_\+out, const float \texorpdfstring{$\ast$}{*}data, const bool \texorpdfstring{$\ast$}{*}mask, size\+\_\+t size, size\+\_\+t mask\+\_\+size, bool use\+\_\+abs, \mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{core\+::stream\+\_\+resources}} \&resources)
+\item 
+std\+::pair$<$ int, float $>$ \mbox{\hyperlink{namespacefast__deconv_1_1matrix_ab213e792a4a84d99ab1d55317de81a28}{argmax}} (const float \texorpdfstring{$\ast$}{*}data, const bool \texorpdfstring{$\ast$}{*}mask, size\+\_\+t size, size\+\_\+t mask\+\_\+size, bool use\+\_\+abs, \mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{core\+::stream\+\_\+resources}} \&resources)
+\item 
+{\footnotesize template$<$cpts\+::mdspan Data, cpts\+::mdspan Mask$>$ }\\std\+::pair$<$ int, float $>$ \mbox{\hyperlink{namespacefast__deconv_1_1matrix_a02afe5f95ad736d07d820491e41f199d}{argmax}} (const Data \&data, const Mask \&mask, bool use\+\_\+abs, \mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{core\+::stream\+\_\+resources}} \&resources)
+\end{DoxyCompactItemize}
+
+
+\doxysubsection{Function Documentation}
+\Hypertarget{namespacefast__deconv_1_1matrix_a02afe5f95ad736d07d820491e41f199d}\label{namespacefast__deconv_1_1matrix_a02afe5f95ad736d07d820491e41f199d} 
+\index{fast\_deconv::matrix@{fast\_deconv::matrix}!argmax@{argmax}}
+\index{argmax@{argmax}!fast\_deconv::matrix@{fast\_deconv::matrix}}
+\doxysubsubsection{\texorpdfstring{argmax()}{argmax()}\hspace{0.1cm}{\footnotesize\ttfamily [1/2]}}
+{\footnotesize\ttfamily template$<$cpts\+::mdspan Data, cpts\+::mdspan Mask$>$ \\
+std\+::pair$<$ int, float $>$ fast\+\_\+deconv\+::matrix\+::argmax (\begin{DoxyParamCaption}\item[{const Data \&}]{data,  }\item[{const Mask \&}]{mask,  }\item[{bool}]{use\+\_\+abs,  }\item[{\mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{core\+::stream\+\_\+resources}} \&}]{resources }\end{DoxyParamCaption})\hspace{0.3cm}{\ttfamily [inline]}}
+
+Here is the call graph for this function\+:\nopagebreak
+\begin{figure}[H]
+\begin{center}
+\leavevmode
+\includegraphics[width=350pt]{namespacefast__deconv_1_1matrix_a02afe5f95ad736d07d820491e41f199d_cgraph}
+\end{center}
+\end{figure}
+\Hypertarget{namespacefast__deconv_1_1matrix_ab213e792a4a84d99ab1d55317de81a28}\label{namespacefast__deconv_1_1matrix_ab213e792a4a84d99ab1d55317de81a28} 
+\index{fast\_deconv::matrix@{fast\_deconv::matrix}!argmax@{argmax}}
+\index{argmax@{argmax}!fast\_deconv::matrix@{fast\_deconv::matrix}}
+\doxysubsubsection{\texorpdfstring{argmax()}{argmax()}\hspace{0.1cm}{\footnotesize\ttfamily [2/2]}}
+{\footnotesize\ttfamily std\+::pair$<$ int, float $>$ fast\+\_\+deconv\+::matrix\+::argmax (\begin{DoxyParamCaption}\item[{const float \texorpdfstring{$\ast$}{*}}]{data,  }\item[{const bool \texorpdfstring{$\ast$}{*}}]{mask,  }\item[{size\+\_\+t}]{size,  }\item[{size\+\_\+t}]{mask\+\_\+size,  }\item[{bool}]{use\+\_\+abs,  }\item[{\mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{core\+::stream\+\_\+resources}} \&}]{resources }\end{DoxyParamCaption})\hspace{0.3cm}{\ttfamily [inline]}}
+
+Here is the call graph for this function\+:\nopagebreak
+\begin{figure}[H]
+\begin{center}
+\leavevmode
+\includegraphics[width=350pt]{namespacefast__deconv_1_1matrix_ab213e792a4a84d99ab1d55317de81a28_cgraph}
+\end{center}
+\end{figure}
+Here is the caller graph for this function\+:\nopagebreak
+\begin{figure}[H]
+\begin{center}
+\leavevmode
+\includegraphics[width=342pt]{namespacefast__deconv_1_1matrix_ab213e792a4a84d99ab1d55317de81a28_icgraph}
+\end{center}
+\end{figure}
+\Hypertarget{namespacefast__deconv_1_1matrix_a516e5ac2a08c67b7d8feb854f8c1478e}\label{namespacefast__deconv_1_1matrix_a516e5ac2a08c67b7d8feb854f8c1478e} 
+\index{fast\_deconv::matrix@{fast\_deconv::matrix}!argmax\_async@{argmax\_async}}
+\index{argmax\_async@{argmax\_async}!fast\_deconv::matrix@{fast\_deconv::matrix}}
+\doxysubsubsection{\texorpdfstring{argmax\_async()}{argmax\_async()}}
+{\footnotesize\ttfamily void fast\+\_\+deconv\+::matrix\+::argmax\+\_\+async (\begin{DoxyParamCaption}\item[{float \texorpdfstring{$\ast$}{*}}]{d\+\_\+max\+\_\+out,  }\item[{uint \texorpdfstring{$\ast$}{*}}]{d\+\_\+index\+\_\+out,  }\item[{const float \texorpdfstring{$\ast$}{*}}]{data,  }\item[{const bool \texorpdfstring{$\ast$}{*}}]{mask,  }\item[{size\+\_\+t}]{size,  }\item[{size\+\_\+t}]{mask\+\_\+size,  }\item[{bool}]{use\+\_\+abs,  }\item[{\mbox{\hyperlink{classfast__deconv_1_1core_1_1stream__resources}{core\+::stream\+\_\+resources}} \&}]{resources }\end{DoxyParamCaption})\hspace{0.3cm}{\ttfamily [inline]}}
+
+Here is the caller graph for this function\+:\nopagebreak
+\begin{figure}[H]
+\begin{center}
+\leavevmode
+\includegraphics[width=350pt]{namespacefast__deconv_1_1matrix_a516e5ac2a08c67b7d8feb854f8c1478e_icgraph}
+\end{center}
+\end{figure}

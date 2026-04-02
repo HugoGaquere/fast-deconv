@@ -1,0 +1,161 @@
+\doxysection{access\+\_\+policy.\+hpp}
+\hypertarget{access__policy_8hpp_source}{}\label{access__policy_8hpp_source}\index{include/fast\_deconv/core/access\_policy.hpp@{include/fast\_deconv/core/access\_policy.hpp}}
+\mbox{\hyperlink{access__policy_8hpp}{Go to the documentation of this file.}}
+\begin{DoxyCode}{0}
+\DoxyCodeLine{00001\ \textcolor{preprocessor}{\#pragma\ once}}
+\DoxyCodeLine{00002\ \textcolor{preprocessor}{\#include\ <emu/cuda/device/mdspan.hpp>}}
+\DoxyCodeLine{00003\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{concepts_8hpp}{fast\_deconv/core/concepts.hpp}}>}}
+\DoxyCodeLine{00004\ \textcolor{preprocessor}{\#include\ <\mbox{\hyperlink{kernel__traits_8hpp}{fast\_deconv/core/kernel\_traits.hpp}}>}}
+\DoxyCodeLine{00005\ }
+\DoxyCodeLine{00006\ \textcolor{keyword}{namespace\ }\mbox{\hyperlink{namespacefast__deconv_1_1core}{fast\_deconv::core}}\ \{}
+\DoxyCodeLine{00007\ }
+\DoxyCodeLine{00008\ \textcolor{keyword}{template}\ <core::cpts::mdspan\ Mdspan>}
+\DoxyCodeLine{00009\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{bool}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_ab07b287aaa690115d2f985045bcef08d}{inner\_unit\_stride}}(\textcolor{keyword}{const}\ Mdspan\&\ m)}
+\DoxyCodeLine{00010\ \{}
+\DoxyCodeLine{00011\ \ \ \textcolor{keywordflow}{if}\ \textcolor{keyword}{constexpr}\ (\mbox{\hyperlink{conceptfast__deconv_1_1core_1_1cpts_1_1is__layout__right}{cpts::is\_layout\_right<Mdspan>}})\ \{}
+\DoxyCodeLine{00012\ \ \ \ \ \textcolor{keywordflow}{return}\ \textcolor{keyword}{true};}
+\DoxyCodeLine{00013\ \ \ \}\ \textcolor{keywordflow}{else}\ \textcolor{keywordflow}{if}\ \textcolor{keyword}{constexpr}\ (\mbox{\hyperlink{conceptfast__deconv_1_1core_1_1cpts_1_1is__layout__left}{cpts::is\_layout\_left<Mdspan>}})\ \{}
+\DoxyCodeLine{00014\ \ \ \ \ \textcolor{keywordflow}{return}\ \textcolor{keyword}{false};}
+\DoxyCodeLine{00015\ \ \ \}\ \textcolor{keywordflow}{else}\ \{}
+\DoxyCodeLine{00016\ \ \ \ \ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{int}\ R\ =\ Mdspan::rank();}
+\DoxyCodeLine{00017\ \ \ \ \ \textcolor{keywordflow}{return}\ m.mapping().stride(R\ -\/\ 1)\ ==\ 1;}
+\DoxyCodeLine{00018\ \ \ \}}
+\DoxyCodeLine{00019\ \}}
+\DoxyCodeLine{00020\ }
+\DoxyCodeLine{00021\ \textcolor{keyword}{template}\ <core::cpts::mdspan\ Mdspan>}
+\DoxyCodeLine{00022\ \textcolor{keywordtype}{bool}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a29d0946a9864d617b83a3c7d747ca22b}{rows\_aligned\_for\_vec}}(\textcolor{keyword}{const}\ Mdspan\&\ m,\ std::size\_t\ vec\_bytes)}
+\DoxyCodeLine{00023\ \{}
+\DoxyCodeLine{00024\ \ \ \textcolor{keywordflow}{if}\ \textcolor{keyword}{constexpr}\ (\mbox{\hyperlink{conceptfast__deconv_1_1core_1_1cpts_1_1is__layout__right}{cpts::is\_layout\_right<Mdspan>}})\ \{}
+\DoxyCodeLine{00025\ \ \ \ \ \textcolor{keywordflow}{return}\ \textcolor{keyword}{true};}
+\DoxyCodeLine{00026\ \ \ \}\ \textcolor{keywordflow}{else}\ \textcolor{keywordflow}{if}\ \textcolor{keyword}{constexpr}\ (!\mbox{\hyperlink{conceptfast__deconv_1_1core_1_1cpts_1_1is__layout__stride}{cpts::is\_layout\_stride<Mdspan>}})\ \{}
+\DoxyCodeLine{00027\ \ \ \ \ \textcolor{keywordflow}{return}\ \textcolor{keyword}{false};}
+\DoxyCodeLine{00028\ \ \ \}\ \textcolor{keywordflow}{else}\ \{}
+\DoxyCodeLine{00029\ \ \ \ \ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{int}\ R\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ =\ Mdspan::rank();}
+\DoxyCodeLine{00030\ \ \ \ \ \textcolor{keyword}{constexpr}\ std::size\_t\ elem\_size\ =\ \textcolor{keyword}{sizeof}(\textcolor{keyword}{typename}\ Mdspan::element\_type);}
+\DoxyCodeLine{00031\ \ \ \ \ \textcolor{keywordflow}{for}\ (\textcolor{keywordtype}{int}\ d\ =\ 0;\ d\ <\ R\ -\/\ 1;\ ++d)\ \{}
+\DoxyCodeLine{00032\ \ \ \ \ \ \ \textcolor{keyword}{const}\ std::size\_t\ stride\_bytes\ =\ \textcolor{keyword}{static\_cast<}std::size\_t\textcolor{keyword}{>}(m.mapping().stride(d))\ *\ elem\_size;}
+\DoxyCodeLine{00033\ \ \ \ \ \ \ \textcolor{keywordflow}{if}\ ((stride\_bytes\ \&\ (vec\_bytes\ -\/\ 1))\ !=\ 0)\ \textcolor{keywordflow}{return}\ \textcolor{keyword}{false};}
+\DoxyCodeLine{00034\ \ \ \ \ \}}
+\DoxyCodeLine{00035\ \ \ \ \ \textcolor{keywordflow}{return}\ \textcolor{keyword}{true};}
+\DoxyCodeLine{00036\ \ \ \}}
+\DoxyCodeLine{00037\ \}}
+\DoxyCodeLine{00038\ }
+\DoxyCodeLine{00039\ \textcolor{keyword}{template}\ <cpts::mdspan...\ Mdspans>}
+\DoxyCodeLine{00040\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{bool}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a9410a521e098d564dc8021b5b39d7f2f}{all\_inner\_unit\_stride}}(\textcolor{keyword}{const}\ Mdspans\&...\ mdspans)}
+\DoxyCodeLine{00041\ \{}
+\DoxyCodeLine{00042\ \ \ \textcolor{keywordflow}{return}\ (\mbox{\hyperlink{namespacefast__deconv_1_1core_ab07b287aaa690115d2f985045bcef08d}{inner\_unit\_stride}}(mdspans)\ \&\&\ ...);}
+\DoxyCodeLine{00043\ \}}
+\DoxyCodeLine{00044\ }
+\DoxyCodeLine{00045\ \textcolor{keyword}{template}\ <\textcolor{keyword}{typename}\ Ptr>}
+\DoxyCodeLine{00046\ \textcolor{keyword}{requires}\ std::is\_pointer\_v<Ptr>\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{bool}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_aa06769097e3a38f0218663d9cecbe815}{is\_aligned\_for\_vec}}(std::size\_t\ vec\_bytes,}
+\DoxyCodeLine{00047\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ Ptr\ p)\ \textcolor{keyword}{noexcept}}
+\DoxyCodeLine{00048\ \{}
+\DoxyCodeLine{00049\ \ \ \textcolor{comment}{//\ vec\_bytes\ should\ be\ power-\/of-\/two\ for\ this\ fast\ check.}}
+\DoxyCodeLine{00050\ \ \ \textcolor{keywordflow}{return}\ (\textcolor{keyword}{reinterpret\_cast<}std::uintptr\_t\textcolor{keyword}{>}(p)\ \&\ (vec\_bytes\ -\/\ 1))\ ==\ 0;}
+\DoxyCodeLine{00051\ \}}
+\DoxyCodeLine{00052\ }
+\DoxyCodeLine{00053\ \textcolor{keyword}{template}\ <core::cpts::mdspan\ Mdspan>}
+\DoxyCodeLine{00054\ \textcolor{keywordtype}{bool}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_aa06769097e3a38f0218663d9cecbe815}{is\_aligned\_for\_vec}}(std::size\_t\ vec\_bytes,\ \textcolor{keyword}{const}\ Mdspan\&\ m)\ \textcolor{keyword}{noexcept}}
+\DoxyCodeLine{00055\ \{}
+\DoxyCodeLine{00056\ \ \ \textcolor{keyword}{auto}\ p\ =\ m.data\_handle();}
+\DoxyCodeLine{00057\ \ \ \textcolor{keywordflow}{return}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_aa06769097e3a38f0218663d9cecbe815}{is\_aligned\_for\_vec}}(vec\_bytes,\ p);}
+\DoxyCodeLine{00058\ \}}
+\DoxyCodeLine{00059\ }
+\DoxyCodeLine{00060\ \textcolor{keyword}{template}\ <cpts::mdspan...\ Mdspans>}
+\DoxyCodeLine{00061\ \textcolor{keyword}{constexpr}\ \textcolor{keywordtype}{bool}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a7e9d6a03a2442d028d9c6cf7ab598363}{all\_aligned\_for\_vec}}(std::size\_t\ vec\_bytes,\ \textcolor{keyword}{const}\ Mdspans\&...\ mdspans)}
+\DoxyCodeLine{00062\ \{}
+\DoxyCodeLine{00063\ \ \ \textcolor{keywordflow}{return}\ (\mbox{\hyperlink{namespacefast__deconv_1_1core_aa06769097e3a38f0218663d9cecbe815}{is\_aligned\_for\_vec}}(vec\_bytes,\ mdspans)\ \&\&\ ...);}
+\DoxyCodeLine{00064\ \}}
+\DoxyCodeLine{00065\ }
+\DoxyCodeLine{00066\ \textcolor{keyword}{enum\ class}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55ab}{AccessType}}\ :\ \textcolor{keywordtype}{int}\ \{}
+\DoxyCodeLine{00067\ \ \ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf60357a8d17e45793298323f1b372a74}{Scalar}}\ =\ 1,}
+\DoxyCodeLine{00068\ \ \ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abafe98032d4f1c52a2f0b617f9205d5f80}{Vec2}}\ \ \ =\ 2,}
+\DoxyCodeLine{00069\ \ \ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf67402842935c0240e8109e7312def66}{Vec4}}\ \ \ =\ 4,}
+\DoxyCodeLine{00070\ \};}
+\DoxyCodeLine{00071\ }
+\DoxyCodeLine{00072\ \textcolor{keyword}{struct\ }\mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy}{AccessPolicy}}\ \{}
+\DoxyCodeLine{00073\ \ \ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55ab}{AccessType}}\ \mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy_aa600f7311b96d7b0eec78938683331c7}{load\_policy}};}
+\DoxyCodeLine{00074\ \ \ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55ab}{AccessType}}\ \mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy_a80148a91878982b335eceb4fb2445260}{store\_policy}};}
+\DoxyCodeLine{00075\ }
+\DoxyCodeLine{00076\ \ \ \_\_host\_\_\ \_\_device\_\_\ [[nodiscard]]\ \textcolor{keywordtype}{int}\ \mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy_ac6e0312c458744d514a5ed4ca308c0bc}{load\_width}}()\textcolor{keyword}{\ const\ }\{\ \textcolor{keywordflow}{return}\ \textcolor{keyword}{static\_cast<}\textcolor{keywordtype}{int}\textcolor{keyword}{>}(\mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy_aa600f7311b96d7b0eec78938683331c7}{load\_policy}});\ \}}
+\DoxyCodeLine{00077\ }
+\DoxyCodeLine{00078\ \ \ \_\_host\_\_\ \_\_device\_\_\ [[nodiscard]]\ \textcolor{keywordtype}{int}\ \mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy_a257eab4df1a0925cecc97439cfe01cd5}{store\_width}}()\textcolor{keyword}{\ const}}
+\DoxyCodeLine{00079\ \textcolor{keyword}{\ \ }\{}
+\DoxyCodeLine{00080\ \ \ \ \ \textcolor{keywordflow}{return}\ \textcolor{keyword}{static\_cast<}\textcolor{keywordtype}{int}\textcolor{keyword}{>}(\mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy_a80148a91878982b335eceb4fb2445260}{store\_policy}});}
+\DoxyCodeLine{00081\ \ \ \}}
+\DoxyCodeLine{00082\ \};}
+\DoxyCodeLine{00083\ }
+\DoxyCodeLine{00084\ \textcolor{keyword}{template}\ <cpts::mdspan\ Mdspan>}
+\DoxyCodeLine{00085\ \textcolor{keyword}{constexpr}\ \mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy}{AccessPolicy}}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a22f6471b4dedbe58b0a6d0edf0fb272b}{determine\_policy\_mdspan}}(\textcolor{keyword}{const}\ Mdspan\&\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}})}
+\DoxyCodeLine{00086\ \{}
+\DoxyCodeLine{00087\ \ \ \textcolor{keyword}{static\_assert}(!\mbox{\hyperlink{conceptfast__deconv_1_1core_1_1cpts_1_1is__layout__left}{cpts::is\_layout\_left<Mdspan>}},}
+\DoxyCodeLine{00088\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \textcolor{stringliteral}{"{}determine\_policy:\ layout\_left\ is\ not\ implemented\ yet."{}});}
+\DoxyCodeLine{00089\ }
+\DoxyCodeLine{00090\ \ \ \textcolor{keyword}{using\ }layout\_type\ =\ Mdspan::layout\_type;}
+\DoxyCodeLine{00091\ }
+\DoxyCodeLine{00092\ \ \ \textcolor{keywordtype}{bool}\ can\_vectorize\ =\ \textcolor{keyword}{false};}
+\DoxyCodeLine{00093\ \ \ \textcolor{keywordflow}{if}\ \textcolor{keyword}{constexpr}\ (\mbox{\hyperlink{conceptfast__deconv_1_1core_1_1cpts_1_1is__layout__right}{cpts::is\_layout\_right<Mdspan>}})\ \{}
+\DoxyCodeLine{00094\ \ \ \ \ can\_vectorize\ =\ \textcolor{keyword}{true};}
+\DoxyCodeLine{00095\ \ \ \ \ \textcolor{comment}{//\ fmt::println("{}is\_layout\_right"{});}}
+\DoxyCodeLine{00096\ \ \ \}\ \textcolor{keywordflow}{else}\ \textcolor{keywordflow}{if}\ \textcolor{keyword}{constexpr}\ (\mbox{\hyperlink{conceptfast__deconv_1_1core_1_1cpts_1_1is__layout__stride}{cpts::is\_layout\_stride<Mdspan>}})\ \{}
+\DoxyCodeLine{00097\ \ \ \ \ \textcolor{comment}{//\ fmt::println("{}is\_layout\_stride"{});}}
+\DoxyCodeLine{00098\ \ \ \ \ \textcolor{keyword}{const}\ \textcolor{keywordtype}{bool}\ unit\_stride\ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_ab07b287aaa690115d2f985045bcef08d}{inner\_unit\_stride}}(\mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}});}
+\DoxyCodeLine{00099\ \ \ \ \ \textcolor{comment}{//\ if\ (!unit\_stride)\ //\ fmt::println("{}no\ vectorize:\ innermost\ stride\ !=\ 1"{});}}
+\DoxyCodeLine{00100\ \ \ \ \ can\_vectorize\ =\ unit\_stride;}
+\DoxyCodeLine{00101\ \ \ \}\ \textcolor{keywordflow}{else}\ \{}
+\DoxyCodeLine{00102\ \ \ \ \ \textcolor{comment}{//\ fmt::println("{}no\ vectorize:\ unsupported\ layout"{});}}
+\DoxyCodeLine{00103\ \ \ \}}
+\DoxyCodeLine{00104\ }
+\DoxyCodeLine{00105\ \ \ \textcolor{keywordflow}{if}\ (can\_vectorize)\ \{}
+\DoxyCodeLine{00106\ \ \ \ \ \textcolor{comment}{//\ fmt::println("{}can\_vectorize"{});}}
+\DoxyCodeLine{00107\ \ \ \ \ \textcolor{keyword}{constexpr}\ std::size\_t\ elem\_size\ =\ \textcolor{keyword}{sizeof}(\textcolor{keyword}{typename}\ Mdspan::element\_type);}
+\DoxyCodeLine{00108\ \ \ \ \ \textcolor{keyword}{const}\ std::size\_t\ vec4\_bytes\ \ \ \ =\ \textcolor{keyword}{static\_cast<}std::size\_t\textcolor{keyword}{>}(\mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf67402842935c0240e8109e7312def66}{AccessType::Vec4}})\ *\ elem\_size;}
+\DoxyCodeLine{00109\ \ \ \ \ \textcolor{keyword}{const}\ std::size\_t\ vec2\_bytes\ \ \ \ =\ \textcolor{keyword}{static\_cast<}std::size\_t\textcolor{keyword}{>}(\mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abafe98032d4f1c52a2f0b617f9205d5f80}{AccessType::Vec2}})\ *\ elem\_size;}
+\DoxyCodeLine{00110\ \ \ \ \ \textcolor{keywordflow}{if}\ (\mbox{\hyperlink{namespacefast__deconv_1_1core_aa06769097e3a38f0218663d9cecbe815}{is\_aligned\_for\_vec}}(vec4\_bytes,\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}})\ \&\&\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a29d0946a9864d617b83a3c7d747ca22b}{rows\_aligned\_for\_vec}}(\mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}},\ vec4\_bytes))}
+\DoxyCodeLine{00111\ \ \ \ \ \ \ \textcolor{keywordflow}{return}\ \{}
+\DoxyCodeLine{00112\ \ \ \ \ \ \ \ \ .load\_policy\ \ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf67402842935c0240e8109e7312def66}{AccessType::Vec4}},}
+\DoxyCodeLine{00113\ \ \ \ \ \ \ \ \ .store\_policy\ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf67402842935c0240e8109e7312def66}{AccessType::Vec4}},}
+\DoxyCodeLine{00114\ \ \ \ \ \ \ \};}
+\DoxyCodeLine{00115\ \ \ \ \ \textcolor{keywordflow}{if}\ (\mbox{\hyperlink{namespacefast__deconv_1_1core_aa06769097e3a38f0218663d9cecbe815}{is\_aligned\_for\_vec}}(vec2\_bytes,\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}})\ \&\&\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a29d0946a9864d617b83a3c7d747ca22b}{rows\_aligned\_for\_vec}}(\mbox{\hyperlink{namespacefast__deconv_1_1core_a1e1c99ce475a2fd8ea41db17b1e884ee}{mdspan}},\ vec2\_bytes))}
+\DoxyCodeLine{00116\ \ \ \ \ \ \ \textcolor{keywordflow}{return}\ \{}
+\DoxyCodeLine{00117\ \ \ \ \ \ \ \ \ .load\_policy\ \ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abafe98032d4f1c52a2f0b617f9205d5f80}{AccessType::Vec2}},}
+\DoxyCodeLine{00118\ \ \ \ \ \ \ \ \ .store\_policy\ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abafe98032d4f1c52a2f0b617f9205d5f80}{AccessType::Vec2}},}
+\DoxyCodeLine{00119\ \ \ \ \ \ \ \};}
+\DoxyCodeLine{00120\ \ \ \}}
+\DoxyCodeLine{00121\ }
+\DoxyCodeLine{00122\ \ \ \textcolor{comment}{//\ fallback\ to\ scalar}}
+\DoxyCodeLine{00123\ \ \ \textcolor{keywordflow}{return}\ \{}
+\DoxyCodeLine{00124\ \ \ \ \ .load\_policy\ \ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf60357a8d17e45793298323f1b372a74}{AccessType::Scalar}},}
+\DoxyCodeLine{00125\ \ \ \ \ .store\_policy\ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf60357a8d17e45793298323f1b372a74}{AccessType::Scalar}},}
+\DoxyCodeLine{00126\ \ \ \};}
+\DoxyCodeLine{00127\ \}}
+\DoxyCodeLine{00128\ }
+\DoxyCodeLine{00129\ \textcolor{keyword}{template}\ <\textcolor{keyword}{typename}\ KernelTag,\ cpts::mdspan...\ Mdspans>}
+\DoxyCodeLine{00130\ \mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy}{AccessPolicy}}\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a813c30d11c5caf5611e0689a514b9a33}{determine\_policy}}(\textcolor{keyword}{const}\ Mdspans\&...\ mdspans)}
+\DoxyCodeLine{00131\ \{}
+\DoxyCodeLine{00132\ \ \ \textcolor{keyword}{using\ }traits\ =\ \mbox{\hyperlink{structfast__deconv_1_1core_1_1kernel__traits}{kernel\_traits<KernelTag>}};}
+\DoxyCodeLine{00133\ }
+\DoxyCodeLine{00134\ \ \ \textcolor{keywordflow}{if}\ \textcolor{keyword}{constexpr}\ (!traits::supports\_vectorization)}
+\DoxyCodeLine{00135\ \ \ \ \ \textcolor{keywordflow}{return}\ \{}
+\DoxyCodeLine{00136\ \ \ \ \ \ \ .load\_policy\ \ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf60357a8d17e45793298323f1b372a74}{AccessType::Scalar}},}
+\DoxyCodeLine{00137\ \ \ \ \ \ \ .store\_policy\ =\ \mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf60357a8d17e45793298323f1b372a74}{AccessType::Scalar}},}
+\DoxyCodeLine{00138\ \ \ \ \ \};}
+\DoxyCodeLine{00139\ }
+\DoxyCodeLine{00140\ \ \ std::array<\mbox{\hyperlink{structfast__deconv_1_1core_1_1AccessPolicy}{AccessPolicy}},\ \textcolor{keyword}{sizeof}...(mdspans)>\ policies\ =\ \{\mbox{\hyperlink{namespacefast__deconv_1_1core_a22f6471b4dedbe58b0a6d0edf0fb272b}{determine\_policy\_mdspan}}(mdspans)...\};}
+\DoxyCodeLine{00141\ }
+\DoxyCodeLine{00142\ \ \ \textcolor{keywordtype}{int}\ min\_load\ \ =\ \textcolor{keyword}{static\_cast<}\textcolor{keywordtype}{int}\textcolor{keyword}{>}(\mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf67402842935c0240e8109e7312def66}{AccessType::Vec4}});}
+\DoxyCodeLine{00143\ \ \ \textcolor{keywordtype}{int}\ min\_store\ =\ \textcolor{keyword}{static\_cast<}\textcolor{keywordtype}{int}\textcolor{keyword}{>}(\mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55abaf67402842935c0240e8109e7312def66}{AccessType::Vec4}});}
+\DoxyCodeLine{00144\ \ \ \textcolor{keywordflow}{for}\ (\textcolor{keyword}{const}\ \textcolor{keyword}{auto}\&\ p\ :\ policies)\ \{}
+\DoxyCodeLine{00145\ \ \ \ \ min\_load\ \ =\ std::min(min\_load,\ \textcolor{keyword}{static\_cast<}\textcolor{keywordtype}{int}\textcolor{keyword}{>}(p.load\_policy));}
+\DoxyCodeLine{00146\ \ \ \ \ min\_store\ =\ std::min(min\_store,\ \textcolor{keyword}{static\_cast<}\textcolor{keywordtype}{int}\textcolor{keyword}{>}(p.store\_policy));}
+\DoxyCodeLine{00147\ \ \ \}}
+\DoxyCodeLine{00148\ }
+\DoxyCodeLine{00149\ \ \ \textcolor{keywordflow}{return}\ \{}
+\DoxyCodeLine{00150\ \ \ \ \ .load\_policy\ \ =\ \textcolor{keyword}{static\_cast<}\mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55ab}{AccessType}}\textcolor{keyword}{>}(min\_load),}
+\DoxyCodeLine{00151\ \ \ \ \ .store\_policy\ =\ \textcolor{keyword}{static\_cast<}\mbox{\hyperlink{namespacefast__deconv_1_1core_a602bd322652a963c8b43ff8367ad55ab}{AccessType}}\textcolor{keyword}{>}(min\_store),}
+\DoxyCodeLine{00152\ \ \ \};}
+\DoxyCodeLine{00153\ \}}
+\DoxyCodeLine{00154\ }
+\DoxyCodeLine{00155\ \}\ \ \textcolor{comment}{//\ namespace\ fast\_deconv::core}}
+
+\end{DoxyCode}
