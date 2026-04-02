@@ -11,32 +11,15 @@ find_package(CUDAToolkit REQUIRED)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-
 set(
-  CONNAN_ARGS
+  CONAN_ARGS
   "" CACHE STRING
   "Additional conan args"
 )
 
-# Only when building the python module
 if(SKBUILD)
   set(CONAN_INSTALL_ARGS "--build=missing;--options=fast_deconv/*:python_module=True;${CONAN_ARGS}")
 endif()
-
-# Set build type to release if nothing was specified
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  message(STATUS "Setting build type to 'Release' as none was specified.")
-    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
-else()
-    message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
-endif()
-# set(CMAKE_BUILD_TYPE "Debug")
-
-#-------------------------------------------------------------------#
-# Cuda configuration
-#-------------------------------------------------------------------#
-set(CMAKE_CUDA_FLAGS "-Wall")
 
 #-------------------------------------------------------------------#
 # Dependencies
@@ -46,31 +29,8 @@ find_package(spdlog CONFIG REQUIRED)
 find_package(emu CONFIG REQUIRED)
 
 #-------------------------------------------------------------------#
-# MathDx configuration (optional)
-#-------------------------------------------------------------------#
-if(DEFINED ENV{MATHDX_ROOT})
-  set(MATHDX_ROOT "$ENV{MATHDX_ROOT}")
-endif()
-
-if(DEFINED MATHDX_ROOT)
-  message(STATUS "Looking for MathDx in ${MATHDX_ROOT}")
-  find_package(mathdx
-    COMPONENTS cublasdx cufftdx
-    CONFIG
-    PATHS "${MATHDX_ROOT}"
-  )
-  if(mathdx_FOUND)
-    message(STATUS "MathDx found: ${mathdx_VERSION}")
-    set(FAST_DECONV_HAS_MATHDX ON)
-  else()
-    message(WARNING "MathDx not found at ${MATHDX_ROOT}")
-  endif()
-endif()
-
-#-------------------------------------------------------------------#
 # Core library
 #-------------------------------------------------------------------#
-
 add_library(fast_deconv INTERFACE)
 
 target_include_directories(fast_deconv INTERFACE
@@ -83,14 +43,6 @@ target_link_libraries(fast_deconv INTERFACE
   emu::emu
   CUDA::cublas
   CUDA::cufft
-  # CUDA::thrust
-  # $<TARGET_NAME_IF_EXISTS:mathdx::cublasdx>
-  # $<TARGET_NAME_IF_EXISTS:mathdx::cufftdx>
-)
-
-# Set the targeting architectures
-set_target_properties(fast_deconv PROPERTIES
-                CUDA_ARCHITECTURES native
 )
 
 target_compile_definitions(fast_deconv INTERFACE SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG)
@@ -101,12 +53,15 @@ target_compile_options(fast_deconv INTERFACE
   $<$<COMPILE_LANGUAGE:CUDA>:
   --extended-lambda
   --expt-relaxed-constexpr
+  --compiler-options=-Wall
+  $<$<CONFIG:Release>:
+    --use_fast_math
+    # -dlto
+    --restrict
+    --generate-line-info
+  >
   >
 )
-
-if(FAST_DECONV_HAS_MATHDX)
-  target_compile_definitions(fast_deconv INTERFACE FAST_DECONV_HAS_MATHDX)
-endif()
 
 #-------------------------------------------------------------------#
 # Python extension
@@ -133,7 +88,7 @@ if (SKBUILD)
   set(CMAKE_INSTALL_RPATH "$ORIGIN")
 
   # We also copy/bundle every shared libraries to the destination
-  install(TARGETS fast_deconv DESTINATION ${SKBUILD_PROJECT_NAME})
+  # install(TARGETS fast_deconv DESTINATION ${SKBUILD_PROJECT_NAME})
   file(GLOB SHARED_LIBS "${CMAKE_BINARY_DIR}/[!_]*.so*")
   install(FILES ${SHARED_LIBS} DESTINATION ${SKBUILD_PROJECT_NAME})
 endif()
@@ -141,20 +96,19 @@ endif()
 #-------------------------------------------------------------------#
 # Example executable
 #-------------------------------------------------------------------#
- add_executable(fast_deconv_app
-   src/main.cu
- )
- target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
-
- add_executable(example_wscms src/example_wscms.cu)
- target_link_libraries(example_wscms PRIVATE fast_deconv)
+if (NOT SKBUILD)
+  add_executable(fast_deconv_app src/main.cu)
+  target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
+  add_executable(example_wscms src/example_wscms.cu)
+  target_link_libraries(example_wscms PRIVATE fast_deconv)
+endif()
 
 #-------------------------------------------------------------------#
 # Tests
 #-------------------------------------------------------------------#
 option(BUILD_TESTS "Build unit tests" ON)
 
-if(BUILD_TESTS)
+if(BUILD_TESTS AND NOT SKBUILD)
   enable_testing()
   find_package(GTest CONFIG REQUIRED)
 
@@ -178,18 +132,33 @@ if(BUILD_TESTS)
 endif()
 
 #-------------------------------------------------------------------#
-# Installation
+# Archives, not used for now
 #-------------------------------------------------------------------#
-if (NOT SKBUILD)
-  # Only install the headers and the library when building the C++ library.
-  install(TARGETS fast_deconv
-        FILE_SET HEADERS
-  )
-endif()
 
-
-
-
+#-------------------------------------------------------------------#
+# MathDx configuration
+#-------------------------------------------------------------------#
+# if(FAST_DECONV_HAS_MATHDX)
+#   target_compile_definitions(fast_deconv INTERFACE FAST_DECONV_HAS_MATHDX)
+# endif()
+# if(DEFINED ENV{MATHDX_ROOT})
+#   set(MATHDX_ROOT "$ENV{MATHDX_ROOT}")
+# endif()
+#
+# if(DEFINED MATHDX_ROOT)
+#   message(STATUS "Looking for MathDx in ${MATHDX_ROOT}")
+#   find_package(mathdx
+#     COMPONENTS cublasdx cufftdx
+#     CONFIG
+#     PATHS "${MATHDX_ROOT}"
+#   )
+#   if(mathdx_FOUND)
+#     message(STATUS "MathDx found: ${mathdx_VERSION}")
+#     set(FAST_DECONV_HAS_MATHDX ON)
+#   else()
+#     message(WARNING "MathDx not found at ${MATHDX_ROOT}")
+#   endif()
+# endif()
 #-------------------------------------------------------------------#
 # cuTensor configuration
 #-------------------------------------------------------------------#
