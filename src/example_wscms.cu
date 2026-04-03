@@ -114,9 +114,9 @@ int main()
 
   // ----- Build WSCMS context and params -----
   wscms::WSCMS_ctx ctx{
-      .jones_norm = jones_norm,
+      .psfs = psfs,
+      .psfs_2 = psfs_2,
       .xdes = xdes,
-      .weights_freq = weights_freq,
       .scale_masks = scale_masks,
       .scale_sigmas = scale_sigmas,
       .scale_bias = scale_bias,
@@ -140,7 +140,8 @@ int main()
   printf("Running WSCMS on %dx%d image, %d scales, %d freq, %d facet...\n", nrow, ncol, n_scales,
          n_freq, n_facet);
 
-  wscms::run_wscms(resources, dirty, mean_residual, psfs, psfs_2, ctx, scale_ctx, params);
+  wscms::run_wscms(resources, dirty, mean_residual, psfs, psfs_2, jones_norm, weights_freq, ctx,
+                   scale_ctx, params);
 
   cudaDeviceSynchronize();
   printf("Done.\n");

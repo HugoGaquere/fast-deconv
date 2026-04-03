@@ -20,7 +20,10 @@ std::vector<sky_component> run_wscms(const core::resources& resources,
                                      core::device_span4d<float>& dirty,
                                      core::device_span2d<float>& mean_residual,
                                      const core::device_span6d<float>& psfs,
-                                     const core::device_span4d<float>& psfs_2, WSCMS_ctx& wscms_ctx,
+                                     const core::device_span4d<float>& psfs_2,
+                                     const core::device_span4d<float>& jones_norm,
+                                     const core::device_vect<float>& weights_freq,
+                                     WSCMS_ctx& wscms_ctx,
                                      const scale_convole_ctx& scale_ctx, WSCMS_params params)
 {
   log::set_level(spdlog::level::debug);
@@ -65,7 +68,8 @@ std::vector<sky_component> run_wscms(const core::resources& resources,
               sel.best_row, sel.best_col);
 
   const std::vector<sky_component> components = wscms_minor_cycles_host_loop(
-      resources, dirty, scaled_mean_dirty, psfs, psfs_2, sel.best_scale, wscms_ctx, params);
+      resources, dirty, scaled_mean_dirty, psfs, psfs_2, jones_norm, weights_freq, sel.best_scale,
+      wscms_ctx, params);
 
   return components;
 }

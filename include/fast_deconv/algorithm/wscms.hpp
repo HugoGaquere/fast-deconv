@@ -12,7 +12,10 @@ namespace fast_deconv::algorithm::wscms {
 std::vector<sky_component> run_wscms(core::resources& resources, core::device_span4d<float>& dirty,
                                      core::device_span2d<float>& mean_residual,
                                      const core::device_span6d<float>& psfs,
-                                     const core::device_span4d<float>& psfs_2, WSCMS_ctx& wscms_ctx,
+                                     const core::device_span4d<float>& psfs_2,
+                                     const core::device_span4d<float>& jones_norm,
+                                     const core::device_vect<float>& weights_freq,
+                                     WSCMS_ctx& wscms_ctx,
                                      const scale_convole_ctx& scale_ctx, WSCMS_params params)
 {
   // FD_LOG_INFO("run_wscms: dirty={} psfs={} n_scales={} max_iter={} peak_factor={}", dirty, psfs,
@@ -21,8 +24,9 @@ std::vector<sky_component> run_wscms(core::resources& resources, core::device_sp
   // params.beam_enable,
   //              params.clean_negative);
 
-  std::vector<sky_component> components = detail::run_wscms(resources, dirty, mean_residual, psfs,
-                                                            psfs_2, wscms_ctx, scale_ctx, params);
+  std::vector<sky_component> components = detail::run_wscms(
+      resources, dirty, mean_residual, psfs, psfs_2, jones_norm, weights_freq, wscms_ctx, scale_ctx,
+      params);
 
   // FD_LOG_INFO("run_wscms: completed");
   return components;
@@ -31,14 +35,13 @@ std::vector<sky_component> run_wscms(core::resources& resources, core::device_sp
 class Wscms {
  public:
   Wscms(const core::device_span6d<float>& psfs, const core::device_span4d<float>& psfs_2,
-        const core::device_span4d<float>& jones_norm, const core::device_span2d<float>& xdes,
-        const core::device_vect<float>& weights_freq, const core::device_span2d<bool>& scale_masks,
+        const core::device_span2d<float>& xdes, const core::device_span2d<bool>& scale_masks,
         const core::device_vect<float>& scale_sigmas, const core::host_vect<float>& scale_bias,
         const core::host_span2d<int>& map_pixel_facet, const core::host_span2d<float>& gains,
         int dirty_nrows, int dirty_ncols, float peak_factor, bool clean_negative, float fft_padding,
         int exec_device = 0)
-      : ctx_{psfs,         psfs_2,     jones_norm,      xdes, weights_freq, scale_masks,
-             scale_sigmas, scale_bias, map_pixel_facet, gains},
+      : ctx_{psfs, psfs_2, xdes, scale_masks, scale_sigmas, scale_bias,
+             map_pixel_facet, gains},
         params_{
             .clean_negative = clean_negative,
             .peak_factor = peak_factor,
@@ -50,12 +53,20 @@ class Wscms {
         resources_(exec_device) {};
 
   std::vector<sky_component> run(core::device_span4d<float>& dirty,
-                                 core::device_span2d<float>& mean_residual, int max_iterations)
+                                 core::device_span2d<float>& mean_residual,
+                                 const core::device_span4d<float>& jones_norm,
+                                 const core::device_vect<float>& weights_freq, int max_iterations)
   {
     params_.max_iteration = max_iterations;
-    return run_wscms(resources_, dirty, mean_residual, ctx_.psfs, ctx_.psfs_2, ctx_, convolve_ctx_,
-                     params_);
+    return run_wscms(resources_, dirty, mean_residual, ctx_.psfs, ctx_.psfs_2, jones_norm,
+                     weights_freq, ctx_, convolve_ctx_, params_);
   }
+
+  void set_peak_factor(float v) { params_.peak_factor = v; }
+  float peak_factor() const { return params_.peak_factor; }
+
+  void set_clean_negative(bool v) { params_.clean_negative = v; }
+  bool clean_negative() const { return params_.clean_negative; }
 
  private:
   WSCMS_ctx ctx_;

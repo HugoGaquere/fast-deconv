@@ -535,8 +535,9 @@ sky_component build_sky_component(const core::stream_resources& stream_res, int 
 
 std::vector<sky_component> wscms_minor_cycles_host_loop(
     const core::resources& resources, core::device_span4d<float>& residual, float* mean_residual,
-    const core::device_span6d<float>& psfs, const core::device_span4d<float>& psfs_2, int scale_idx,
-    WSCMS_ctx ctx, WSCMS_params params)
+    const core::device_span6d<float>& psfs, const core::device_span4d<float>& psfs_2,
+    const core::device_span4d<float>& jones_norm, const core::device_vect<float>& weights_freq,
+    int scale_idx, WSCMS_ctx ctx, WSCMS_params params)
 {
   const auto& stream_res = resources.get_stream_resources();
   const auto& stream_res_2 = resources.get_stream_resources();
@@ -557,8 +558,8 @@ std::vector<sky_component> wscms_minor_cycles_host_loop(
   float* mean_residual_ptr = mean_residual;
   float* residual_ptr = residual.data_handle();
   float* xdes_ptr = ctx.xdes.data_handle();
-  float* jones_norm_ptr = ctx.jones_norm.data_handle();
-  float* weights_ptr = ctx.weights_freq.data_handle();
+  float* jones_norm_ptr = jones_norm.data_handle();
+  float* weights_ptr = weights_freq.data_handle();
 
   // Allocate device memory for compact coefficients that will later be copied to
   // the computed sky components
