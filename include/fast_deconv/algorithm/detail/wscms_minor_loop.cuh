@@ -26,7 +26,6 @@ std::vector<sky_component> run_wscms(const core::resources& resources,
                                      WSCMS_ctx& wscms_ctx,
                                      const scale_convole_ctx& scale_ctx, WSCMS_params params)
 {
-  log::set_level(spdlog::level::debug);
 
   bool per_scale_mask = false; // TODO: FIX THAT
   const auto& stream_r = resources.get_stream_resources();

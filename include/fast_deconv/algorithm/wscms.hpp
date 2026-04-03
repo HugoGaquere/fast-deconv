@@ -15,20 +15,18 @@ std::vector<sky_component> run_wscms(core::resources& resources, core::device_sp
                                      const core::device_span4d<float>& psfs_2,
                                      const core::device_span4d<float>& jones_norm,
                                      const core::device_vect<float>& weights_freq,
-                                     WSCMS_ctx& wscms_ctx,
-                                     const scale_convole_ctx& scale_ctx, WSCMS_params params)
+                                     WSCMS_ctx& wscms_ctx, const scale_convole_ctx& scale_ctx,
+                                     WSCMS_params params)
 {
-  // FD_LOG_INFO("run_wscms: dirty={} psfs={} n_scales={} max_iter={} peak_factor={}", dirty, psfs,
-  //             params.n_scales, params.max_iter, params.peak_factor);
-  // FD_LOG_DEBUG("run_wscms: beam_enable={} clean_negative={} per_scale_mask={}",
-  // params.beam_enable,
-  //              params.clean_negative);
+  log::set_level(spdlog::level::info);
+  FD_LOG_INFO("run_wscms: dirty={} psfs={} n_scales={} max_iter={} peak_factor={}", dirty, psfs,
+              params.n_scales, params.max_iteration, params.peak_factor);
 
-  std::vector<sky_component> components = detail::run_wscms(
-      resources, dirty, mean_residual, psfs, psfs_2, jones_norm, weights_freq, wscms_ctx, scale_ctx,
-      params);
+  std::vector<sky_component> components =
+      detail::run_wscms(resources, dirty, mean_residual, psfs, psfs_2, jones_norm, weights_freq,
+                        wscms_ctx, scale_ctx, params);
 
-  // FD_LOG_INFO("run_wscms: completed");
+  FD_LOG_INFO("run_wscms: completed");
   return components;
 }
 
@@ -40,8 +38,7 @@ class Wscms {
         const core::host_span2d<int>& map_pixel_facet, const core::host_span2d<float>& gains,
         int dirty_nrows, int dirty_ncols, float peak_factor, bool clean_negative, float fft_padding,
         int exec_device = 0)
-      : ctx_{psfs, psfs_2, xdes, scale_masks, scale_sigmas, scale_bias,
-             map_pixel_facet, gains},
+      : ctx_{psfs, psfs_2, xdes, scale_masks, scale_sigmas, scale_bias, map_pixel_facet, gains},
         params_{
             .clean_negative = clean_negative,
             .peak_factor = peak_factor,

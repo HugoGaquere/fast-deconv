@@ -45,7 +45,7 @@ target_link_libraries(fast_deconv INTERFACE
   CUDA::cufft
 )
 
-target_compile_definitions(fast_deconv INTERFACE SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG)
+target_compile_definitions(fast_deconv INTERFACE SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF)
 
 target_compile_features(fast_deconv INTERFACE cxx_std_20)
 
@@ -55,7 +55,7 @@ target_compile_options(fast_deconv INTERFACE
   --expt-relaxed-constexpr
   --compiler-options=-Wall
   $<$<CONFIG:Release>:
-    --use_fast_math
+    # --use_fast_math
     # -dlto
     --restrict
     --generate-line-info
