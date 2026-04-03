@@ -489,19 +489,6 @@ void subtract_component(const core::resources& resources, const core::stream_res
   compute_spectral_coeffs(resources, stream_res, compact_coeffs, d_per_chan, dirty, weights,
                           d_A_pinv, d_SAX, n_freq, n_order, nrow, ncol, peak_row, peak_col);
 
-  // Log compact coefficients and per-channel values
-  {
-    std::vector<float> h_compact(n_order);
-    std::vector<float> h_per_chan(n_freq);
-    CHECK_CUDA(cudaMemcpyAsync(h_compact.data(), compact_coeffs, n_order * sizeof(float),
-                               cudaMemcpyDeviceToHost, cuda_stream));
-    CHECK_CUDA(cudaMemcpyAsync(h_per_chan.data(), d_per_chan, n_freq * sizeof(float),
-                               cudaMemcpyDeviceToHost, cuda_stream));
-    stream_res.sync();
-    FD_LOG_DEBUG("subtract_component: coeffs=[{}] per_chan=[{}]", fmt::join(h_compact, ", "),
-                 fmt::join(h_per_chan, ", "));
-  }
-
   // Step 4: subtract PSF from dirty
   overlap_region ovr = compute_overlap_region(peak_row, peak_col, nrow, ncol, psf_nrow, psf_ncol);
   const int total = n_freq * ovr.w * ovr.h;
@@ -593,8 +580,6 @@ std::vector<sky_component> wscms_minor_cycles_host_loop(
 
   FD_LOG_INFO("minor_loop: initial_peak={:.8f} threshold={:.8f} max_iteration={}", h_peak.value,
               threshold, params.max_iteration);
-  FD_LOG_DEBUG("minor_loop: grid=[{},{}] psf=[{},{}] n_freq={} n_order={}", nrow, ncol, psf_nrow,
-               psf_ncol, n_freq, n_order);
 
   int n_iter = 0;
   while (h_peak.value > threshold && n_iter < params.max_iteration) {
@@ -603,9 +588,6 @@ std::vector<sky_component> wscms_minor_cycles_host_loop(
     float gain = ctx.gains(scale_idx, facet_idx);
     float factor = gain * h_peak.value;
 
-    FD_LOG_DEBUG("minor_loop: iter={} peak={:.8f} at ({},{}) facet={} gain={:.4f} factor={}",
-                 n_iter, h_peak.value, peak_row, peak_col, facet_idx, gain, factor);
-
     // Stream 1: PSF subtraction from mean dirty
     const float* psf_2_ptr = psfs_2.data_handle() + psfs_2.mapping()(scale_idx, facet_idx, 0, 0);
     overlap_region ovr = compute_overlap_region(peak_row, peak_col, nrow, ncol, psf_nrow, psf_ncol);
@@ -613,18 +595,6 @@ std::vector<sky_component> wscms_minor_cycles_host_loop(
         mean_residual_ptr, psf_2_ptr, ovr, factor);
 
     // Stream 2: subtract component from dirty
-    {
-      // Log apparent flux at peak pixel across frequencies
-      std::vector<float> h_flux(n_freq);
-      const int peak_offset = peak_row * ncol + peak_col;
-      for (int f = 0; f < n_freq; f++) {
-        CHECK_CUDA(cudaMemcpyAsync(&h_flux[f], residual_ptr + f * nrow * ncol + peak_offset,
-                                   sizeof(float), cudaMemcpyDeviceToHost,
-                                   stream_res_2.cuda_stream));
-      }
-      stream_res_2.sync();
-      FD_LOG_DEBUG("minor_loop: apparent_flux=[{}]", fmt::join(h_flux, ", "));
-    }
     const float* psf_ptr = psfs.data_handle() + psfs.mapping()(scale_idx, facet_idx, 0, 0, 0, 0);
     subtract_component(resources, stream_res_2, residual_ptr, d_compact_coeffs, psf_ptr, xdes_ptr,
                        jones_norm_ptr, weights_ptr, gain, n_freq, n_order, nrow, ncol, psf_nrow,
