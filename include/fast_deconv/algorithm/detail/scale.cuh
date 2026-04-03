@@ -66,7 +66,7 @@ __global__ void multiply_batched_kernel(complex_type* freq_dirty, float* scales,
 //               mask_stride=npix: (n_scales, npix)  per-scale masks
 // True = masked (set to -inf)
 __global__ void apply_mask_kernel(float* scaled_dirty, const bool* mask, int npix, int n_scales,
-                                  int mask_stride, bool do_abs)
+                                  int mask_stride, bool clean_negative)
 {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
   if (tid >= npix) return;
@@ -76,7 +76,7 @@ __global__ void apply_mask_kernel(float* scaled_dirty, const bool* mask, int npi
     const bool masked = mask[s * mask_stride + tid];
     if (masked) {
       scaled_dirty[idx] = -INFINITY;
-    } else if (do_abs) {
+    } else if (clean_negative) {
       scaled_dirty[idx] = fabsf(scaled_dirty[idx]);
     }
   }
@@ -106,7 +106,7 @@ void make_scales(const core::resources& resources, const core::stream_resources&
 scale_selection_result scale_selection(const core::resources& resources,
                                        const core::stream_resources& stream_res,
                                        float* scaled_dirty, const bool* mask, const float* bias,
-                                       int n_scales, int nrow, int ncol, bool do_abs,
+                                       int n_scales, int nrow, int ncol, bool clean_negative,
                                        bool per_scale_mask)
 {
   const auto cuda_stream = stream_res.cuda_stream;
@@ -116,7 +116,7 @@ scale_selection_result scale_selection(const core::resources& resources,
 
   // 1. Apply mask + abs in-place
   apply_mask_kernel<<<CEIL_DIV(npix, 256), 256, 0, cuda_stream>>>(scaled_dirty, mask, npix,
-                                                                  n_scales, mask_stride, do_abs);
+                                                                  n_scales, mask_stride, clean_negative);
 
   // 2. Build segment offsets [0, npix, 2*npix, ..., n_scales*npix]
   int* d_offsets = resources.alloc_async<int>(n_scales + 1, stream_res);

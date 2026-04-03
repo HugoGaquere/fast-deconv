@@ -12,24 +12,23 @@ namespace fast_deconv::algorithm::wscms {
 static constexpr int MAX_SPECTRAL_ORDER = 4;
 
 struct WSCMS_ctx {
-  core::device_span4d<float> jones_norm;
-  core::device_span2d<float> xdes;
-  core::device_vect<float> weights_freq;
-  core::device_span2d<bool> scale_masks;
-  core::device_vect<float> scale_sigmas;
-  core::host_vect<float> scale_bias;
-  core::host_span2d<int> map_pixel_facet;
-  core::host_span2d<float> gains;
+  const core::device_span6d<float> psfs;
+  const core::device_span4d<float> psfs_2;
+  const core::device_span4d<float> jones_norm;
+  const core::device_span2d<float> xdes;
+  const core::device_vect<float> weights_freq;
+  const core::device_span2d<bool> scale_masks;
+  const core::device_vect<float> scale_sigmas;
+  const core::host_vect<float> scale_bias;
+  const core::host_span2d<int> map_pixel_facet;
+  const core::host_span2d<float> gains;
 };
 
 struct WSCMS_params {
-  bool beam_enable;
-  bool do_abs;
-  bool per_scale_mask;
+  bool clean_negative;
   float peak_factor;
-  int max_subminor_iter;
+  int max_iteration;
   int n_scales;
-  float padding;
 };
 
 struct scale_convole_ctx {

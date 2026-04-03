@@ -4,12 +4,11 @@
 
 #include <cstdio>
 #include <cstring>
-#include <vector>
-
 #include <fast_deconv/algorithm/wscms.hpp>
-#include <fast_deconv/core/logger.hpp>
 #include <fast_deconv/algorithm/wscms_types.hpp>
+#include <fast_deconv/core/logger.hpp>
 #include <fast_deconv/core/span_types.hpp>
+#include <vector>
 
 namespace core = fast_deconv::core;
 namespace wscms = fast_deconv::algorithm::wscms;
@@ -29,8 +28,8 @@ int main()
   // ----- Dimensions -----
   constexpr int n_freq = 2;    // spectral channels
   constexpr int n_facet = 1;   // facets
-  constexpr int nrow = 1024;     // image rows
-  constexpr int ncol = 1024;     // image cols
+  constexpr int nrow = 1024;   // image rows
+  constexpr int ncol = 1024;   // image cols
   constexpr int n_scales = 3;  // number of scales
 
   // PSF has shape (n_freq, n_facet, n_freq, n_facet, psf_nrow, psf_ncol)
@@ -84,7 +83,8 @@ int main()
   float* d_scale_sigmas = device_alloc_zero<float>(n_scales);
   {
     std::vector<float> sigmas = {0.0f, 1.0f, 2.0f};
-    cudaMemcpy(d_scale_sigmas, sigmas.data(), sigmas.size() * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_scale_sigmas, sigmas.data(), sigmas.size() * sizeof(float),
+               cudaMemcpyHostToDevice);
   }
 
   // scale_bias: (n_scales) on host
@@ -125,20 +125,22 @@ int main()
   };
 
   wscms::WSCMS_params params{
-      .beam_enable = false,
-      .do_abs = true,
-      .per_scale_mask = false,
+      .clean_negative = true,
       .peak_factor = 0.1f,
-      .max_subminor_iter = 100,
+      .max_iteration = 100,
       .n_scales = n_scales,
-      .padding = 1.5f,
   };
+
+  const fast_deconv::algorithm::wscms::scale_convole_ctx scale_ctx =
+      fast_deconv::algorithm::wscms::detail::make_scale_convolve_ctx(nrow, ncol, n_scales, 1.5f);
+
+  fast_deconv::core::resources resources(0);
 
   // ----- Run WSCMS -----
   printf("Running WSCMS on %dx%d image, %d scales, %d freq, %d facet...\n", nrow, ncol, n_scales,
          n_freq, n_facet);
 
-  wscms::run_wscms(dirty, mean_residual, psfs, psfs_2, ctx, params);
+  wscms::run_wscms(resources, dirty, mean_residual, psfs, psfs_2, ctx, scale_ctx, params);
 
   cudaDeviceSynchronize();
   printf("Done.\n");

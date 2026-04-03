@@ -20,28 +20,21 @@ std::vector<sky_component> run_wscms(const core::resources& resources,
                                      core::device_span4d<float>& dirty,
                                      core::device_span2d<float>& mean_residual,
                                      const core::device_span6d<float>& psfs,
-                                     const core::device_span4d<float>& psfs_2, WSCMS_ctx wscms_ctx,
-                                     WSCMS_params params)
+                                     const core::device_span4d<float>& psfs_2, WSCMS_ctx& wscms_ctx,
+                                     const scale_convole_ctx& scale_ctx, WSCMS_params params)
 {
   log::set_level(spdlog::level::debug);
 
-  const int dirty_nrows = dirty.extent(2);
-  const int dirty_ncols = dirty.extent(3);
-  const scale_convole_ctx scale_ctx =
-      make_scale_convolve_ctx(dirty_nrows, dirty_ncols, params.n_scales, params.padding);
-
-  float* scaled_mean_dirty = nullptr;
-  CHECK_CUDA(cudaMalloc(reinterpret_cast<void**>(&scaled_mean_dirty),
-                        dirty_nrows * dirty_ncols * sizeof(float)));
-  FD_LOG_DEBUG("scale_convolve_ctx: img=[{},{}] padded=[{},{}] freq=[{},{}] n_batches={}",
-               scale_ctx.img_nrow, scale_ctx.img_ncol, scale_ctx.img_padded_nrow,
-               scale_ctx.img_padded_ncol, scale_ctx.freq_nrow, scale_ctx.freq_ncol,
-               scale_ctx.n_batches);
-
+  bool per_scale_mask = false; // TODO: FIX THAT
   const auto& stream_r = resources.get_stream_resources();
   const int n_scales = params.n_scales;
+  const int dirty_nrows = dirty.extent(2);
+  const int dirty_ncols = dirty.extent(3);
   const int npix = dirty_nrows * dirty_ncols;
   const int freq_scales_total = scale_ctx.freq_nrow * scale_ctx.freq_ncol * n_scales;
+
+  float* scaled_mean_dirty = nullptr;
+  CHECK_CUDA(cudaMalloc(reinterpret_cast<void**>(&scaled_mean_dirty), dirty_nrows * dirty_ncols * sizeof(float)));
 
   // 1. Generate Gaussian scale kernels in half-complex frequency domain
   float* scale_kernels = resources.alloc_async<float>(freq_scales_total, stream_r);
@@ -57,7 +50,7 @@ std::vector<sky_component> run_wscms(const core::resources& resources,
   scale_selection_result sel =
       scale_selection(resources, stream_r, scales_x_dirty, wscms_ctx.scale_masks.data_handle(),
                       wscms_ctx.scale_bias.data_handle(), n_scales, dirty_nrows, dirty_ncols,
-                      params.do_abs, params.per_scale_mask);
+                      params.clean_negative, per_scale_mask);
   stream_r.sync();
 
   // 4. Copy the winning slice to output

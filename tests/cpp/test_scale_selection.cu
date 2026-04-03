@@ -185,7 +185,7 @@ TEST_F(ScaleSelectionTest, ScaleSelectionResult)
   // Run scale_selection (bias is host pointer)
   auto result = fast_deconv::algorithm::wscms::detail::scale_selection(
       resources, stream_res, d_scaled_dirty, d_mask, bias_npy.as_float32(), n_scales, nrow, ncol,
-      /*do_abs=*/true, /*per_scale_mask=*/false);
+      /*clean_negative=*/true, /*per_scale_mask=*/false);
 
   // Compare results
   EXPECT_EQ(result.best_scale, expected_scale.as_int32()[0]);

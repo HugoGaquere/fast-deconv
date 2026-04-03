@@ -144,7 +144,7 @@ __global__ void clean_minor_cycles_kernel(float* residual, float* psfs, int* map
                                           float* gains, int nrow, int ncol, int psf_nrow,
                                           int psf_ncol, int n_facet,
                                           IndexedValue* __restrict__ block_scratch, float threshold,
-                                          int max_iter)
+                                          int max_iteration)
 {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
   const int stride = blockDim.x * gridDim.x;
@@ -167,7 +167,7 @@ __global__ void clean_minor_cycles_kernel(float* residual, float* psfs, int* map
   IndexedValue peak = block_scratch[0];
 
   int n_iter = 0;
-  while (peak.value > threshold && n_iter < max_iter) {
+  while (peak.value > threshold && n_iter < max_iteration) {
     // Phase 1: Unravel peak index + compute ROI + gain factor
     // All threads compute identically (broadcast reads from L2)
     auto [peak_row, peak_col] = unravel_index_2D(peak.index, ncol);
@@ -209,7 +209,7 @@ void wscms_minor_cycles(const core::resources& resources, core::device_span2d<fl
                         core::device_span4d<float>& psfs_2,
                         core::device_span2d<int>& map_pixels_facets,
                         core::device_span2d<float>& gains, int scale_idx, float threshold,
-                        int max_iter)
+                        int max_iteration)
 {
   int nrow = residual.extent(0);
   int ncol = residual.extent(1);
@@ -240,7 +240,7 @@ void wscms_minor_cycles(const core::resources& resources, core::device_span2d<fl
                   static_cast<void*>(&nrow),       static_cast<void*>(&ncol),
                   static_cast<void*>(&psf_nrow),   static_cast<void*>(&psf_ncol),
                   static_cast<void*>(&n_facet),    static_cast<void*>(&d_block_scratch),
-                  static_cast<void*>(&threshold),  static_cast<void*>(&max_iter)};
+                  static_cast<void*>(&threshold),  static_cast<void*>(&max_iteration)};
 
   CHECK_CUDA(cudaLaunchCooperativeKernel((void*)clean_minor_cycles_kernel<COOP_BLOCK_SIZE>,
                                          dim3(launch_blocks), dim3(COOP_BLOCK_SIZE), args, 0,
@@ -543,7 +543,7 @@ std::vector<sky_component> wscms_minor_cycles_host_loop(
   auto cuda_stream = stream_res.cuda_stream;
 
   std::vector<sky_component> sky_components;
-  sky_components.reserve(params.max_subminor_iter);
+  sky_components.reserve(params.max_iteration);
 
   const int nrow = residual.extent(2);
   const int ncol = residual.extent(3);
@@ -590,13 +590,13 @@ std::vector<sky_component> wscms_minor_cycles_host_loop(
   apply_threshold_mask_kernel<<<CEIL_DIV(n, 256), 256, 0, cuda_stream>>>(mean_residual_ptr, n,
                                                                          threshold);
 
-  FD_LOG_INFO("minor_loop: initial_peak={:.8f} threshold={:.8f} max_iter={}", h_peak.value,
-              threshold, params.max_subminor_iter);
+  FD_LOG_INFO("minor_loop: initial_peak={:.8f} threshold={:.8f} max_iteration={}", h_peak.value,
+              threshold, params.max_iteration);
   FD_LOG_DEBUG("minor_loop: grid=[{},{}] psf=[{},{}] n_freq={} n_order={}", nrow, ncol, psf_nrow,
                psf_ncol, n_freq, n_order);
 
   int n_iter = 0;
-  while (h_peak.value > threshold && n_iter < params.max_subminor_iter) {
+  while (h_peak.value > threshold && n_iter < params.max_iteration) {
     auto [peak_row, peak_col] = unravel_index_2D(h_peak.key, ncol);
     int facet_idx = ctx.map_pixel_facet(peak_row, peak_col);
     float gain = ctx.gains(scale_idx, facet_idx);
