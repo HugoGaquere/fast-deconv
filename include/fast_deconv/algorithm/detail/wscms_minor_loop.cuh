@@ -16,7 +16,7 @@
 
 namespace fast_deconv::algorithm::wscms::detail {
 
-std::vector<sky_component> run_wscms(const core::resources& resources,
+wscms_result run_wscms(const core::resources& resources,
                                      core::device_span4d<float>& dirty,
                                      core::device_span2d<float>& mean_residual,
                                      const core::device_span6d<float>& psfs,
@@ -66,11 +66,11 @@ std::vector<sky_component> run_wscms(const core::resources& resources,
   FD_LOG_INFO("selected scale_idx={} peak={:.6f} at ({},{})", sel.best_scale, sel.best_peak,
               sel.best_row, sel.best_col);
 
-  const std::vector<sky_component> components = wscms_minor_cycles_host_loop(
-      resources, dirty, scaled_mean_dirty, psfs, psfs_2, jones_norm, weights_freq, sel.best_scale,
-      wscms_ctx, params);
+  wscms_result result = wscms_minor_cycles_host_loop(resources, dirty, scaled_mean_dirty, psfs,
+                                                     psfs_2, jones_norm, weights_freq,
+                                                     sel.best_scale, wscms_ctx, params);
 
-  return components;
+  return result;
 }
 
 }  // namespace fast_deconv::algorithm::wscms::detail

@@ -9,7 +9,7 @@
 
 namespace fast_deconv::algorithm::wscms {
 
-std::vector<sky_component> run_wscms(core::resources& resources, core::device_span4d<float>& dirty,
+wscms_result run_wscms(core::resources& resources, core::device_span4d<float>& dirty,
                                      core::device_span2d<float>& mean_residual,
                                      const core::device_span6d<float>& psfs,
                                      const core::device_span4d<float>& psfs_2,
@@ -22,12 +22,12 @@ std::vector<sky_component> run_wscms(core::resources& resources, core::device_sp
   FD_LOG_INFO("run_wscms: dirty={} psfs={} n_scales={} max_iter={} peak_factor={}", dirty, psfs,
               params.n_scales, params.max_iteration, params.peak_factor);
 
-  std::vector<sky_component> components =
+  wscms_result result =
       detail::run_wscms(resources, dirty, mean_residual, psfs, psfs_2, jones_norm, weights_freq,
                         wscms_ctx, scale_ctx, params);
 
   FD_LOG_INFO("run_wscms: completed");
-  return components;
+  return result;
 }
 
 class Wscms {
@@ -49,7 +49,7 @@ class Wscms {
             dirty_nrows, dirty_ncols, static_cast<int>(scale_sigmas.size()), fft_padding)),
         resources_(exec_device) {};
 
-  std::vector<sky_component> run(core::device_span4d<float>& dirty,
+  wscms_result run(core::device_span4d<float>& dirty,
                                  core::device_span2d<float>& mean_residual,
                                  const core::device_span4d<float>& jones_norm,
                                  const core::device_vect<float>& weights_freq, int max_iterations)

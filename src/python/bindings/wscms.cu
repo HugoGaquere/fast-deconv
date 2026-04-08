@@ -25,6 +25,10 @@ void bind_wscms(py::module_& m)
       .def_readonly("gain", &wscms::sky_component::gain)
       .def_readonly("coeffs", &wscms::sky_component::coeffs);
 
+  py::class_<wscms::wscms_result>(wscms_module, "WscmsResult")
+      .def_readonly("components", &wscms::wscms_result::components)
+      .def_readonly("final_flux", &wscms::wscms_result::final_flux);
+
   py::class_<wscms::Wscms>(wscms_module, "Wscms")
       .def(py::init<const core::device_span6d<float>&, const core::device_span4d<float>&,
                     const core::device_span2d<float>&, const core::device_span2d<bool>&,

@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cfloat>
 #include <cub/cub.cuh>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
 #include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/logger.hpp>
 #include <fast_deconv/core/resources.hpp>
@@ -520,7 +522,7 @@ sky_component build_sky_component(const core::stream_resources& stream_res, int 
   return component;
 }
 
-std::vector<sky_component> wscms_minor_cycles_host_loop(
+wscms_result wscms_minor_cycles_host_loop(
     const core::resources& resources, core::device_span4d<float>& residual, float* mean_residual,
     const core::device_span6d<float>& psfs, const core::device_span4d<float>& psfs_2,
     const core::device_span4d<float>& jones_norm, const core::device_vect<float>& weights_freq,
@@ -622,7 +624,123 @@ std::vector<sky_component> wscms_minor_cycles_host_loop(
   resources.free_async(d_temp, stream_res);
   resources.free_async(d_argmax_out, stream_res);
   stream_res.sync();
-  return sky_components;
+  return wscms_result{std::move(sky_components), h_peak.value};
+}
+
+// ================================================================== //
+//     Mean residual recomputation
+// ================================================================== //
+
+/**
+ * @brief   Recompute the mean residual as a weighted sum over frequencies.
+ * @details Computes @p mean_out[i] = sum_f @p dirty[f * freq_stride + i] * @p weights[f]
+ *          for each spatial pixel @p i in [0, npix).
+ *          Matches the Python: `mean_dirty = sum(dirty[:, 0] * weights[:, None, None], axis=0)`.
+ *
+ * @param[out] mean_out     Output mean residual image, size @p npix.
+ * @param[in]  dirty        Multi-frequency dirty image, layout (n_freq, n_stokes, nrow, ncol).
+ * @param[in]  weights      Per-frequency weights, size @p n_freq.
+ * @param[in]  n_freq       Number of frequency channels.
+ * @param[in]  freq_stride  Stride between frequency planes (n_stokes * npix).
+ * @param[in]  npix         Number of spatial pixels (nrow * ncol).
+ */
+__global__ void recompute_mean_residual_kernel(float* __restrict__ mean_out,
+                                               const float* __restrict__ dirty,
+                                               const float* __restrict__ weights, int n_freq,
+                                               int freq_stride, int npix)
+{
+  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < npix; i += blockDim.x * gridDim.x) {
+    float sum = 0.0f;
+    for (int f = 0; f < n_freq; f++) {
+      sum += dirty[f * freq_stride + i] * weights[f];
+    }
+    mean_out[i] = sum;
+  }
+}
+
+/**
+ * @brief   Recompute mean residual from multi-channel dirty image.
+ * @details Host wrapper that launches @ref recompute_mean_residual_kernel.
+ *
+ * @param[in]  stream_res   CUDA stream resources.
+ * @param[out] mean_out     Output mean residual, device pointer, size @p npix.
+ * @param[in]  dirty        Multi-frequency dirty image, device pointer.
+ * @param[in]  weights      Per-frequency weights, device pointer, size @p n_freq.
+ * @param[in]  n_freq       Number of frequency channels.
+ * @param[in]  freq_stride  Stride between frequency planes (n_stokes * nrow * ncol).
+ * @param[in]  npix         Number of spatial pixels (nrow * ncol).
+ */
+void recompute_mean_residual(const core::stream_resources& stream_res, float* mean_out,
+                             const float* dirty, const float* weights, int n_freq, int freq_stride,
+                             int npix)
+{
+  recompute_mean_residual_kernel<<<CEIL_DIV(npix, 256), 256, 0, stream_res.cuda_stream>>>(
+      mean_out, dirty, weights, n_freq, freq_stride, npix);
+}
+
+// ================================================================== //
+//     Peak flux computation
+// ================================================================== //
+
+/**
+ * @brief   Functor for thrust transform iterator: applies mask and optional abs.
+ * @details Returns -FLT_MAX for masked pixels so they are excluded from the max reduction.
+ *          When @p clean_negative is true, returns fabsf of the value.
+ */
+struct masked_peak_op {
+  const float* data;
+  const bool* mask;
+  bool clean_negative;
+
+  __host__ __device__ __forceinline__ float operator()(int idx) const
+  {
+    if (mask[idx]) return -FLT_MAX;
+    return clean_negative ? fabsf(data[idx]) : data[idx];
+  }
+};
+
+/**
+ * @brief   Compute the peak flux of the masked mean residual on GPU.
+ * @details Uses CUB DeviceReduce::Max with a thrust transform iterator to avoid
+ *          allocating a temporary masked copy. Masked pixels (mask[i] == true)
+ *          are excluded. When @p clean_negative is true, the absolute value
+ *          is used.
+ *
+ * @param[in] resources      GPU memory allocator.
+ * @param[in] stream_res     CUDA stream resources.
+ * @param[in] mean_residual  Mean residual image, device pointer, size @p npix.
+ * @param[in] mask           Boolean mask, device pointer, size @p npix (true = masked).
+ * @param[in] npix           Number of spatial pixels.
+ * @param[in] clean_negative If true, search for max of absolute values.
+ *
+ * @return Peak flux value (on host).
+ */
+float compute_peak_flux(const core::resources& resources, const core::stream_resources& stream_res,
+                        const float* mean_residual, const bool* mask, int npix,
+                        bool clean_negative)
+{
+  auto cuda_stream = stream_res.cuda_stream;
+
+  masked_peak_op op{mean_residual, mask, clean_negative};
+  thrust::counting_iterator<int> counting(0);
+  auto iter = thrust::make_transform_iterator(counting, op);
+
+  float* d_out = resources.alloc_async<float>(1, stream_res);
+
+  size_t temp_bytes = 0;
+  cub::DeviceReduce::Max(nullptr, temp_bytes, iter, d_out, npix, cuda_stream);
+  char* d_temp = resources.alloc_async<char>(temp_bytes, stream_res);
+  cub::DeviceReduce::Max(d_temp, temp_bytes, iter, d_out, npix, cuda_stream);
+
+  float h_result;
+  CHECK_CUDA(
+      cudaMemcpyAsync(&h_result, d_out, sizeof(float), cudaMemcpyDeviceToHost, cuda_stream));
+  stream_res.sync();
+
+  resources.free_async(d_temp, stream_res);
+  resources.free_async(d_out, stream_res);
+
+  return h_result;
 }
 
 }  // namespace fast_deconv::algorithm::wscms::detail

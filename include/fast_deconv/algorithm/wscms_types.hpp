@@ -52,6 +52,11 @@ struct sky_component {
   std::vector<float> coeffs;
 };
 
+struct wscms_result {
+  std::vector<sky_component> components;
+  float final_flux;
+};
+
 struct scale_selection_result {
   int best_scale;
   int best_row;
