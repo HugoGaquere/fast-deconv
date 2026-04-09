@@ -18,12 +18,12 @@ struct WSCMS_ctx {
   core::device_vect<float> scale_sigmas;
   core::host_vect<float> scale_bias;
   core::host_span2d<int> map_pixel_facet;
-  core::host_span2d<float> gains;
 };
 
 struct WSCMS_params {
   bool clean_negative;
   float peak_factor;
+  float gamma;  // CLEAN loop gain
   int max_sub_iteration;  // sub-minor loop iterations per scale selection
   int n_scales;
 

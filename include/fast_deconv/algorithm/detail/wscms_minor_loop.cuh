@@ -93,13 +93,27 @@ wscms_result wscms_minor_cycle(const core::resources& resources,
   convolve_psfs_for_scale(resources, stream_r, psf_ctx, wscms_ctx.raw_psfs.data_handle(), sigma,
                           weights_freq.data_handle(), n_facets, nch, conv_psfs, conv2_psfs);
 
-  // 6. Run sub-minor loop with single-scale PSFs
+  // 6. Compute per-facet gains from convolved PSFs
+  std::vector<float> h_scale_gains(n_facets);
+  if (sigma == 0.0f) {
+    std::fill(h_scale_gains.begin(), h_scale_gains.end(), params.gamma);
+  } else {
+    float* d_gains = resources.alloc_async<float>(n_facets, stream_r);
+    compute_scale_gains(resources, stream_r, conv_psfs, weights_freq.data_handle(),
+                        n_facets, nch, psf_npix, params.gamma, d_gains);
+    CHECK_CUDA(cudaMemcpyAsync(h_scale_gains.data(), d_gains, sizeof(float) * n_facets,
+                               cudaMemcpyDeviceToHost, stream_r.cuda_stream));
+    stream_r.sync();
+    resources.free_async(d_gains, stream_r);
+  }
+
+  // 7. Run sub-minor loop with single-scale PSFs
   wscms_result result =
       wscms_subminor_cycles(resources, dirty, scaled_mean_dirty, conv_psfs, conv2_psfs, n_facets,
                             psf_nrow, psf_ncol, jones_norm, weights_freq, sel.best_scale,
-                            wscms_ctx, params);
+                            h_scale_gains.data(), wscms_ctx, params);
 
-  // 7. Free PSF temporaries
+  // 8. Free PSF temporaries
   resources.free_async(conv2_psfs, stream_r);
   resources.free_async(conv_psfs, stream_r);
 

@@ -541,7 +541,8 @@ sky_component build_sky_component(const core::stream_resources& stream_res, int 
  * @param[in]     jones_norm     Jones normalization.
  * @param[in]     weights_freq   Per-frequency weights.
  * @param[in]     scale_idx      Index of the selected scale (for component metadata).
- * @param[in]     ctx            WSCMS context (xdes, gains, map_pixel_facet, etc.).
+ * @param[in]     scale_gains    Per-facet gains for the selected scale, host, size n_facets.
+ * @param[in]     ctx            WSCMS context (xdes, map_pixel_facet, etc.).
  * @param[in]     params         Algorithm parameters.
  *
  * @return wscms_result with extracted components and final peak flux.
@@ -550,7 +551,7 @@ wscms_result wscms_subminor_cycles(
     const core::resources& resources, core::device_span4d<float>& residual, float* mean_residual,
     const float* conv_psfs, const float* conv2_psfs, int n_facets, int psf_nrow, int psf_ncol,
     const core::device_span4d<float>& jones_norm, const core::device_vect<float>& weights_freq,
-    int scale_idx, WSCMS_ctx ctx, WSCMS_params params)
+    int scale_idx, const float* scale_gains, WSCMS_ctx ctx, WSCMS_params params)
 {
   const auto& stream_res = resources.get_stream_resources();
   const auto& stream_res_2 = resources.get_stream_resources();
@@ -609,7 +610,7 @@ wscms_result wscms_subminor_cycles(
   while (h_peak.value > threshold && n_iter < params.max_sub_iteration) {
     auto [peak_row, peak_col] = unravel_index_2D(h_peak.key, ncol);
     int facet_idx = ctx.map_pixel_facet(peak_row, peak_col);
-    float gain = ctx.gains(scale_idx, facet_idx);
+    float gain = scale_gains[facet_idx];
     float factor = gain * h_peak.value;
 
     // Stream 1: PSF subtraction from mean dirty

@@ -495,4 +495,67 @@ void convolve_psfs_for_scale(const core::resources& resources,
   stream_res.sync();
 }
 
+/**
+ * @brief   Compute per-facet gains from single-convolved PSFs.
+ * @details For each facet, computes the weighted mean of the single-convolved
+ *          PSF over channels, then takes the max value. The gain is
+ *          gamma / max(weighted_mean).
+ *
+ *          For scale 0 (sigma == 0), the caller should set gains to gamma
+ *          directly and skip this function.
+ *
+ * @param[in]  resources  GPU memory allocator.
+ * @param[in]  stream_res CUDA stream resources.
+ * @param[in]  conv_psfs  Single-convolved PSFs, device,
+ *                        layout (n_facets, nch, psf_npix), pre-computed by
+ *                        convolve_psfs_for_scale.
+ * @param[in]  weights    Per-channel weights, device, size nch.
+ * @param[in]  n_facets   Number of facets.
+ * @param[in]  nch        Number of frequency channels.
+ * @param[in]  psf_npix   Number of spatial pixels per PSF (psf_nrow * psf_ncol).
+ * @param[in]  gamma      CLEAN loop gain parameter.
+ * @param[out] out_gains  Output gains, device, size n_facets, pre-allocated.
+ */
+void compute_scale_gains(const core::resources& resources,
+                         const core::stream_resources& stream_res,
+                         const float* conv_psfs, const float* weights,
+                         int n_facets, int nch, int psf_npix,
+                         float gamma, float* out_gains)
+{
+  const auto cuda_stream = stream_res.cuda_stream;
+  const int facet_stride = nch * psf_npix;
+
+  // Scratch buffer for the weighted mean PSF of each facet
+  float* wmean = resources.alloc_async<float>(psf_npix, stream_res);
+
+  // CUB DeviceReduce::Max temp storage (query once, reuse across facets)
+  float* d_max = resources.alloc_async<float>(1, stream_res);
+  size_t temp_bytes = 0;
+  cub::DeviceReduce::Max(nullptr, temp_bytes, wmean, d_max, psf_npix, cuda_stream);
+  char* d_temp = resources.alloc_async<char>(temp_bytes, stream_res);
+
+  for (int f = 0; f < n_facets; f++) {
+    // 1. Weighted mean over channels
+    weighted_mean_channels_kernel<<<CEIL_DIV(psf_npix, 256), 256, 0, cuda_stream>>>(
+        conv_psfs + f * facet_stride, weights, wmean, psf_npix, nch);
+
+    // 2. Max reduction
+    cub::DeviceReduce::Max(d_temp, temp_bytes, wmean, d_max, psf_npix, cuda_stream);
+
+    // 3. gain = gamma / max_val
+    float h_max;
+    CHECK_CUDA(cudaMemcpyAsync(&h_max, d_max, sizeof(float),
+                               cudaMemcpyDeviceToHost, cuda_stream));
+    stream_res.sync();
+
+    float gain = gamma / h_max;
+    CHECK_CUDA(cudaMemcpyAsync(out_gains + f, &gain, sizeof(float),
+                               cudaMemcpyHostToDevice, cuda_stream));
+  }
+
+  resources.free_async(d_temp, stream_res);
+  resources.free_async(d_max, stream_res);
+  resources.free_async(wmean, stream_res);
+}
+
 }  // namespace fast_deconv::algorithm::wscms::detail

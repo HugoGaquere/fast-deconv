@@ -33,12 +33,13 @@ class Wscms {
   Wscms(const core::device_span5d<float>& raw_psfs, const core::device_span2d<float>& xdes,
         const core::device_span2d<bool>& scale_masks, const core::device_vect<float>& scale_sigmas,
         const core::host_vect<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet,
-        const core::host_span2d<float>& gains, int dirty_nrows, int dirty_ncols, float peak_factor,
+        float gamma, int dirty_nrows, int dirty_ncols, float peak_factor,
         bool clean_negative, float fft_padding, int exec_device = 0)
-      : ctx_{raw_psfs, xdes, scale_masks, scale_sigmas, scale_bias, map_pixel_facet, gains},
+      : ctx_{raw_psfs, xdes, scale_masks, scale_sigmas, scale_bias, map_pixel_facet},
         params_{
             .clean_negative = clean_negative,
             .peak_factor = peak_factor,
+            .gamma = gamma,
             .max_sub_iteration = 0,
             .n_scales = static_cast<int>(scale_sigmas.size()),
         },
