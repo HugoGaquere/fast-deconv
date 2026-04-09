@@ -75,6 +75,43 @@ void pad_ifftshift(float* input, float* output, int nx, int ny, int px, int py, 
                                                            npad_y);
 }
 
+// Pads and ifftshifts a batched 2D image in one pass.
+// Input:  (n_batch, nx, ny) real, origin at center
+// Output: (n_batch, px, py) real, origin at (0,0), zero-padded
+// Output must be zeroed before launch.
+__global__ void pad_ifftshift_batched_kernel(const float* input, float* output, int nx, int ny,
+                                             int px, int py, int npad_x, int npad_y, int n_batch)
+{
+  const int row = blockIdx.y * blockDim.y + threadIdx.y;
+  const int col = blockIdx.x * blockDim.x + threadIdx.x;
+  if (row >= nx || col >= ny) return;
+
+  const int pad_row = row + npad_x;
+  const int pad_col = col + npad_y;
+
+  const int out_row = (pad_row + (px + 1) / 2) % px;
+  const int out_col = (pad_col + (py + 1) / 2) % py;
+
+  const int in_stride = nx * ny;
+  const int out_stride = px * py;
+  const int in_idx = row * ny + col;
+  const int out_idx = out_row * py + out_col;
+
+  for (int b = 0; b < n_batch; b++) {
+    output[b * out_stride + out_idx] = input[b * in_stride + in_idx];
+  }
+}
+
+void pad_ifftshift_batched(float* input, float* output, int nx, int ny, int px, int py,
+                           int npad_x, int npad_y, int n_batch, cudaStream_t stream)
+{
+  cudaMemsetAsync(output, 0, sizeof(float) * px * py * n_batch, stream);
+  dim3 block_dim(16, 16);
+  dim3 grid_dim(CEIL_DIV(ny, block_dim.x), CEIL_DIV(nx, block_dim.y));
+  pad_ifftshift_batched_kernel<<<grid_dim, block_dim, 0, stream>>>(input, output, nx, ny, px, py,
+                                                                   npad_x, npad_y, n_batch);
+}
+
 void fftshift_crop(float* input, float* output, int nx, int ny, int px, int py, int npad_x,
                    int npad_y, int n_batch, cudaStream_t stream)
 {

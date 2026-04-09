@@ -42,9 +42,6 @@ int main()
   // dirty: (n_freq, n_facet, nrow, ncol)
   float* d_dirty = device_alloc_zero<float>(n_freq * n_facet * nrow * ncol);
 
-  // mean_residual: (nrow, ncol)
-  float* d_mean_residual = device_alloc_zero<float>(nrow * ncol);
-
   // psfs: (n_freq, n_facet, n_freq, n_facet, psf_nrow, psf_ncol)
   float* d_psfs =
       device_alloc_zero<float>(n_freq * n_facet * n_freq * n_facet * psf_nrow * psf_ncol);
@@ -96,9 +93,13 @@ int main()
   // gains: (n_scales, n_facet) on host
   std::vector<float> h_gains(n_scales * n_facet, 0.5f);
 
+  // mask: (nrow * ncol) — no pixel masked
+  bool* d_mask = nullptr;
+  cudaMalloc(reinterpret_cast<void**>(&d_mask), nrow * ncol * sizeof(bool));
+  cudaMemset(d_mask, 0, nrow * ncol * sizeof(bool));
+
   // ----- Build mdspan views -----
   core::device_span4d<float> dirty(d_dirty, n_freq, n_facet, nrow, ncol);
-  core::device_span2d<float> mean_residual(d_mean_residual, nrow, ncol);
   core::device_span6d<float> psfs(d_psfs, n_freq, n_facet, n_freq, n_facet, psf_nrow, psf_ncol);
   core::device_span4d<float> psfs_2(d_psfs_2, n_scales, n_facet, psf_nrow, psf_ncol);
 
@@ -127,8 +128,13 @@ int main()
   wscms::WSCMS_params params{
       .clean_negative = true,
       .peak_factor = 0.1f,
-      .max_iteration = 100,
+      .max_sub_iteration = 100,
       .n_scales = n_scales,
+      .stop_flux = 0.0f,
+      .max_iteration = 1000,
+      .divergence_factor = 1.5f,
+      .stall_threshold = 1e-6f,
+      .forbidden_scales = {},
   };
 
   const fast_deconv::algorithm::wscms::scale_convole_ctx scale_ctx =
@@ -140,15 +146,14 @@ int main()
   printf("Running WSCMS on %dx%d image, %d scales, %d freq, %d facet...\n", nrow, ncol, n_scales,
          n_freq, n_facet);
 
-  wscms::run_wscms(resources, dirty, mean_residual, psfs, psfs_2, jones_norm, weights_freq, ctx,
-                   scale_ctx, params);
+  wscms::run_wscms(resources, dirty, psfs, psfs_2, jones_norm, weights_freq, ctx, scale_ctx, d_mask,
+                   params);
 
   cudaDeviceSynchronize();
   printf("Done.\n");
 
   // ----- Cleanup -----
   cudaFree(d_dirty);
-  cudaFree(d_mean_residual);
   cudaFree(d_psfs);
   cudaFree(d_psfs_2);
   cudaFree(d_jones_norm);
@@ -156,6 +161,7 @@ int main()
   cudaFree(d_weights_freq);
   cudaFree(d_scale_masks);
   cudaFree(d_scale_sigmas);
+  cudaFree(d_mask);
 
   return 0;
 }

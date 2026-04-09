@@ -522,9 +522,33 @@ sky_component build_sky_component(const core::stream_resources& stream_res, int 
   return component;
 }
 
-wscms_result wscms_minor_cycles_host_loop(
+/**
+ * @brief   Run sub-minor iterations for a single selected scale.
+ * @details Iteratively finds peaks in the mean residual, subtracts the
+ *          scale-convolved PSF from both the mean residual and the
+ *          per-channel dirty image, and extracts sky components.
+ *
+ * @param[in]     resources      GPU memory allocator.
+ * @param[in,out] residual       Multi-frequency dirty image (n_freq, n_stokes, nrow, ncol).
+ * @param[in,out] mean_residual  Mean residual image pointer, size nrow * ncol.
+ * @param[in]     conv_psfs      Single-convolved PSFs for the selected scale, device,
+ *                               layout (n_facets, nch, 1, psf_nrow, psf_ncol).
+ * @param[in]     conv2_psfs     Double-convolved mean PSFs for the selected scale, device,
+ *                               layout (n_facets, psf_nrow, psf_ncol).
+ * @param[in]     n_facets       Number of facets.
+ * @param[in]     psf_nrow       PSF height.
+ * @param[in]     psf_ncol       PSF width.
+ * @param[in]     jones_norm     Jones normalization.
+ * @param[in]     weights_freq   Per-frequency weights.
+ * @param[in]     scale_idx      Index of the selected scale (for component metadata).
+ * @param[in]     ctx            WSCMS context (xdes, gains, map_pixel_facet, etc.).
+ * @param[in]     params         Algorithm parameters.
+ *
+ * @return wscms_result with extracted components and final peak flux.
+ */
+wscms_result wscms_subminor_cycles(
     const core::resources& resources, core::device_span4d<float>& residual, float* mean_residual,
-    const core::device_span6d<float>& psfs, const core::device_span4d<float>& psfs_2,
+    const float* conv_psfs, const float* conv2_psfs, int n_facets, int psf_nrow, int psf_ncol,
     const core::device_span4d<float>& jones_norm, const core::device_vect<float>& weights_freq,
     int scale_idx, WSCMS_ctx ctx, WSCMS_params params)
 {
@@ -533,12 +557,10 @@ wscms_result wscms_minor_cycles_host_loop(
   auto cuda_stream = stream_res.cuda_stream;
 
   std::vector<sky_component> sky_components;
-  sky_components.reserve(params.max_iteration);
+  sky_components.reserve(params.max_sub_iteration);
 
   const int nrow = residual.extent(2);
   const int ncol = residual.extent(3);
-  const int psf_nrow = psfs_2.extent(2);
-  const int psf_ncol = psfs_2.extent(3);
   const int n = nrow * ncol;
 
   const int n_freq = ctx.xdes.extent(0);
@@ -581,23 +603,23 @@ wscms_result wscms_minor_cycles_host_loop(
                                                                          threshold);
 
   FD_LOG_INFO("minor_loop: initial_peak={:.8f} threshold={:.8f} max_iteration={}", h_peak.value,
-              threshold, params.max_iteration);
+              threshold, params.max_sub_iteration);
 
   int n_iter = 0;
-  while (h_peak.value > threshold && n_iter < params.max_iteration) {
+  while (h_peak.value > threshold && n_iter < params.max_sub_iteration) {
     auto [peak_row, peak_col] = unravel_index_2D(h_peak.key, ncol);
     int facet_idx = ctx.map_pixel_facet(peak_row, peak_col);
     float gain = ctx.gains(scale_idx, facet_idx);
     float factor = gain * h_peak.value;
 
     // Stream 1: PSF subtraction from mean dirty
-    const float* psf_2_ptr = psfs_2.data_handle() + psfs_2.mapping()(scale_idx, facet_idx, 0, 0);
+    const float* psf_2_ptr = conv2_psfs + facet_idx * psf_nrow * psf_ncol;
     overlap_region ovr = compute_overlap_region(peak_row, peak_col, nrow, ncol, psf_nrow, psf_ncol);
     psf_subtract_kernel<<<CEIL_DIV(ovr.w * ovr.h, 256), 256, 0, cuda_stream>>>(
         mean_residual_ptr, psf_2_ptr, ovr, factor);
 
     // Stream 2: subtract component from dirty
-    const float* psf_ptr = psfs.data_handle() + psfs.mapping()(scale_idx, facet_idx, 0, 0, 0, 0);
+    const float* psf_ptr = conv_psfs + facet_idx * n_freq * psf_nrow * psf_ncol;
     subtract_component(resources, stream_res_2, residual_ptr, d_compact_coeffs, psf_ptr, xdes_ptr,
                        jones_norm_ptr, weights_ptr, gain, n_freq, n_order, nrow, ncol, psf_nrow,
                        psf_ncol, peak_row, peak_col);
@@ -632,7 +654,7 @@ wscms_result wscms_minor_cycles_host_loop(
 // ================================================================== //
 
 /**
- * @brief   Recompute the mean residual as a weighted sum over frequencies.
+ * @brief   Compute the mean residual as a weighted sum over frequencies.
  * @details Computes @p mean_out[i] = sum_f @p dirty[f * freq_stride + i] * @p weights[f]
  *          for each spatial pixel @p i in [0, npix).
  *          Matches the Python: `mean_dirty = sum(dirty[:, 0] * weights[:, None, None], axis=0)`.
@@ -644,7 +666,7 @@ wscms_result wscms_minor_cycles_host_loop(
  * @param[in]  freq_stride  Stride between frequency planes (n_stokes * npix).
  * @param[in]  npix         Number of spatial pixels (nrow * ncol).
  */
-__global__ void recompute_mean_residual_kernel(float* __restrict__ mean_out,
+__global__ void compute_mean_residual_kernel(float* __restrict__ mean_out,
                                                const float* __restrict__ dirty,
                                                const float* __restrict__ weights, int n_freq,
                                                int freq_stride, int npix)
@@ -659,8 +681,8 @@ __global__ void recompute_mean_residual_kernel(float* __restrict__ mean_out,
 }
 
 /**
- * @brief   Recompute mean residual from multi-channel dirty image.
- * @details Host wrapper that launches @ref recompute_mean_residual_kernel.
+ * @brief   Compute mean residual from multi-channel dirty image.
+ * @details Host wrapper that launches @ref compute_mean_residual_kernel.
  *
  * @param[in]  stream_res   CUDA stream resources.
  * @param[out] mean_out     Output mean residual, device pointer, size @p npix.
@@ -670,11 +692,11 @@ __global__ void recompute_mean_residual_kernel(float* __restrict__ mean_out,
  * @param[in]  freq_stride  Stride between frequency planes (n_stokes * nrow * ncol).
  * @param[in]  npix         Number of spatial pixels (nrow * ncol).
  */
-void recompute_mean_residual(const core::stream_resources& stream_res, float* mean_out,
+void compute_mean_residual(const core::stream_resources& stream_res, float* mean_out,
                              const float* dirty, const float* weights, int n_freq, int freq_stride,
                              int npix)
 {
-  recompute_mean_residual_kernel<<<CEIL_DIV(npix, 256), 256, 0, stream_res.cuda_stream>>>(
+  compute_mean_residual_kernel<<<CEIL_DIV(npix, 256), 256, 0, stream_res.cuda_stream>>>(
       mean_out, dirty, weights, n_freq, freq_stride, npix);
 }
 
@@ -741,6 +763,124 @@ float compute_peak_flux(const core::resources& resources, const core::stream_res
   resources.free_async(d_out, stream_res);
 
   return h_result;
+}
+
+// ================================================================== //
+//     RMS computation
+// ================================================================== //
+
+/**
+ * @brief   Functor that returns the pixel value for unmasked pixels, 0 otherwise.
+ * @details Used with thrust transform iterators for sum and sum-of-squares
+ *          reductions over unmasked pixels.
+ */
+struct masked_value_op {
+  const float* data;
+  const bool* mask;
+
+  __host__ __device__ __forceinline__ float operator()(int idx) const
+  {
+    return mask[idx] ? 0.0f : data[idx];
+  }
+};
+
+/**
+ * @brief   Functor that returns the squared pixel value for unmasked pixels, 0 otherwise.
+ */
+struct masked_value_sq_op {
+  const float* data;
+  const bool* mask;
+
+  __host__ __device__ __forceinline__ float operator()(int idx) const
+  {
+    if (mask[idx]) return 0.0f;
+    float v = data[idx];
+    return v * v;
+  }
+};
+
+/**
+ * @brief   Functor that returns 1 for unmasked pixels, 0 otherwise.
+ */
+struct masked_count_op {
+  const bool* mask;
+
+  __host__ __device__ __forceinline__ int operator()(int idx) const
+  {
+    return mask[idx] ? 0 : 1;
+  }
+};
+
+/**
+ * @brief   Compute the RMS (standard deviation) of unmasked mean residual pixels on GPU.
+ * @details Uses CUB DeviceReduce::Sum with thrust transform iterators to compute
+ *          count, sum, and sum-of-squares of unmasked pixels in three reductions,
+ *          then returns sqrt(E[x^2] - E[x]^2). Mirrors Python `cp.std(d_unmasked)`.
+ *
+ * @param[in] resources      GPU memory allocator.
+ * @param[in] stream_res     CUDA stream resources.
+ * @param[in] mean_residual  Mean residual image, device pointer, size @p npix.
+ * @param[in] mask           Boolean mask, device pointer, size @p npix (true = masked).
+ * @param[in] npix           Number of spatial pixels.
+ *
+ * @return RMS value (on host).
+ */
+float compute_rms(const core::resources& resources, const core::stream_resources& stream_res,
+                  const float* mean_residual, const bool* mask, int npix)
+{
+  auto cuda_stream = stream_res.cuda_stream;
+  thrust::counting_iterator<int> counting(0);
+
+  // Allocate outputs for the three reductions
+  float* d_sum = resources.alloc_async<float>(1, stream_res);
+  float* d_sum_sq = resources.alloc_async<float>(1, stream_res);
+  int* d_count = resources.alloc_async<int>(1, stream_res);
+
+  // Sum of unmasked values
+  auto sum_iter = thrust::make_transform_iterator(counting, masked_value_op{mean_residual, mask});
+  size_t temp_bytes_sum = 0;
+  cub::DeviceReduce::Sum(nullptr, temp_bytes_sum, sum_iter, d_sum, npix, cuda_stream);
+  char* d_temp_sum = resources.alloc_async<char>(temp_bytes_sum, stream_res);
+  cub::DeviceReduce::Sum(d_temp_sum, temp_bytes_sum, sum_iter, d_sum, npix, cuda_stream);
+
+  // Sum of squared unmasked values
+  auto sq_iter =
+      thrust::make_transform_iterator(counting, masked_value_sq_op{mean_residual, mask});
+  size_t temp_bytes_sq = 0;
+  cub::DeviceReduce::Sum(nullptr, temp_bytes_sq, sq_iter, d_sum_sq, npix, cuda_stream);
+  char* d_temp_sq = resources.alloc_async<char>(temp_bytes_sq, stream_res);
+  cub::DeviceReduce::Sum(d_temp_sq, temp_bytes_sq, sq_iter, d_sum_sq, npix, cuda_stream);
+
+  // Count of unmasked pixels
+  auto count_iter = thrust::make_transform_iterator(counting, masked_count_op{mask});
+  size_t temp_bytes_cnt = 0;
+  cub::DeviceReduce::Sum(nullptr, temp_bytes_cnt, count_iter, d_count, npix, cuda_stream);
+  char* d_temp_cnt = resources.alloc_async<char>(temp_bytes_cnt, stream_res);
+  cub::DeviceReduce::Sum(d_temp_cnt, temp_bytes_cnt, count_iter, d_count, npix, cuda_stream);
+
+  // Copy results to host
+  float h_sum, h_sum_sq;
+  int h_count;
+  CHECK_CUDA(
+      cudaMemcpyAsync(&h_sum, d_sum, sizeof(float), cudaMemcpyDeviceToHost, cuda_stream));
+  CHECK_CUDA(
+      cudaMemcpyAsync(&h_sum_sq, d_sum_sq, sizeof(float), cudaMemcpyDeviceToHost, cuda_stream));
+  CHECK_CUDA(
+      cudaMemcpyAsync(&h_count, d_count, sizeof(int), cudaMemcpyDeviceToHost, cuda_stream));
+  stream_res.sync();
+
+  // Cleanup
+  resources.free_async(d_temp_cnt, stream_res);
+  resources.free_async(d_temp_sq, stream_res);
+  resources.free_async(d_temp_sum, stream_res);
+  resources.free_async(d_count, stream_res);
+  resources.free_async(d_sum_sq, stream_res);
+  resources.free_async(d_sum, stream_res);
+
+  if (h_count == 0) return 0.0f;
+  float mean = h_sum / static_cast<float>(h_count);
+  float var = h_sum_sq / static_cast<float>(h_count) - mean * mean;
+  return std::sqrt(std::max(var, 0.0f));
 }
 
 }  // namespace fast_deconv::algorithm::wscms::detail

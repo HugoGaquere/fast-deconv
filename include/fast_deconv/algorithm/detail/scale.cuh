@@ -1,6 +1,7 @@
 #pragma once
 #include <cufft.h>
 
+#include <algorithm>
 #include <array>
 #include <cub/cub.cuh>
 #include <fast_deconv/linalg/detail/fft.cuh>
@@ -102,12 +103,14 @@ void make_scales(const core::resources& resources, const core::stream_resources&
 // mask: device, True = masked. Either (npix,) shared or (n_scales, npix) per-scale.
 // bias: (n_scales,) host memory, multiplied with per-scale peaks to select best scale.
 // per_scale_mask: false = shared mask (npix,), true = per-scale masks (n_scales, npix)
+// retired_scales: scale indices to exclude from selection.
 // Returns unbiased peak value and pixel coordinates.
 scale_selection_result scale_selection(const core::resources& resources,
                                        const core::stream_resources& stream_res,
                                        float* scaled_dirty, const bool* mask, const float* bias,
                                        int n_scales, int nrow, int ncol, bool clean_negative,
-                                       bool per_scale_mask)
+                                       bool per_scale_mask,
+                                       const std::vector<int>& retired_scales = {})
 {
   const auto cuda_stream = stream_res.cuda_stream;
 
@@ -149,10 +152,11 @@ scale_selection_result scale_selection(const core::resources& resources,
   resources.free_async(d_peaks, stream_res);
   resources.free_async(d_temp, stream_res);
 
-  // 5. Biased scale selection on host
-  int best_scale = 0;
+  // 5. Biased scale selection on host (skip retired scales)
+  int best_scale = -1;
   float best_biased = -INFINITY;
   for (int s = 0; s < n_scales; s++) {
+    if (std::find(retired_scales.begin(), retired_scales.end(), s) != retired_scales.end()) continue;
     float biased = h_peaks[s].value * bias[s];
     if (biased > best_biased) {
       best_biased = biased;
@@ -268,6 +272,227 @@ void copy_scale_slice(const core::stream_resources& stream_res, const float* sca
 {
   const float* src = scaled_dirty + best_scale * npix;
   cudaMemcpyAsync(out, src, npix * sizeof(float), cudaMemcpyDeviceToDevice, stream_res.cuda_stream);
+}
+
+// ================================================================== //
+//     PSF convolution for a single scale
+// ================================================================== //
+
+/**
+ * @brief   Multiply batched freq-domain PSFs by a single Gaussian kernel,
+ *          producing both G and G^2 variants.
+ * @details For each frequency pixel and each batch, computes:
+ *          freq_conv[b,i]  = freq_psf[b,i] * scale[i] * norm
+ *          freq_conv2[b,i] = freq_psf[b,i] * scale[i]^2 * norm
+ *
+ * @param[in]  freq_psf     Input half-complex PSFs, (n_batch, freq_total).
+ * @param[in]  scale_kernel Gaussian kernel in freq domain, size freq_total.
+ * @param[out] freq_conv    Output for single-convolved PSFs.
+ * @param[out] freq_conv2   Output for double-convolved PSFs.
+ * @param[in]  freq_total   Number of complex elements per slice (freq_nrow * freq_ncol).
+ * @param[in]  n_batch      Number of 2D slices.
+ * @param[in]  norm         Normalization factor (1 / padded_total).
+ */
+__global__ void multiply_psf_scale_kernel(const complex_type* freq_psf, const float* scale_kernel,
+                                          complex_type* freq_conv, complex_type* freq_conv2,
+                                          int freq_total, int n_batch, float norm)
+{
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid >= freq_total) return;
+
+  const float g = scale_kernel[tid];
+  const float g_norm = g * norm;
+  const float g2_norm = g * g * norm;
+
+  for (int b = 0; b < n_batch; b++) {
+    const int idx = b * freq_total + tid;
+    const complex_type val = freq_psf[idx];
+    freq_conv[idx] = {val.x * g_norm, val.y * g_norm};
+    freq_conv2[idx] = {val.x * g2_norm, val.y * g2_norm};
+  }
+}
+
+/**
+ * @brief   Compute weighted mean over channels for each spatial pixel.
+ * @details Computes output[i] = sum_c( input[c * npix + i] * weights[c] )
+ *          for each pixel i in [0, npix).
+ *
+ * @param[in]  input   Channel images, layout (nch, npix), device.
+ * @param[in]  weights Per-channel weights, size nch, device.
+ * @param[out] output  Weighted mean image, size npix, device.
+ * @param[in]  npix    Number of spatial pixels.
+ * @param[in]  nch     Number of channels.
+ */
+__global__ void weighted_mean_channels_kernel(const float* __restrict__ input,
+                                              const float* __restrict__ weights,
+                                              float* __restrict__ output, int npix, int nch)
+{
+  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < npix; i += blockDim.x * gridDim.x) {
+    float sum = 0.0f;
+    for (int c = 0; c < nch; c++) {
+      sum += input[c * npix + i] * weights[c];
+    }
+    output[i] = sum;
+  }
+}
+
+/**
+ * @brief   Create a PSF convolution context with FFT plans for batched PSF processing.
+ *
+ * @param[in] psf_nrow Number of rows in the PSF.
+ * @param[in] psf_ncol Number of columns in the PSF.
+ * @param[in] nch      Batch size (number of frequency channels).
+ * @param[in] padding  FFT padding factor (e.g. 1.5).
+ *
+ * @return psf_convolve_ctx with initialized FFT plans.
+ */
+psf_convolve_ctx make_psf_convolve_ctx(int psf_nrow, int psf_ncol, int nch, float padding)
+{
+  const auto [npad_row, npad_col] = linalg::detail::compute_padding(psf_nrow, psf_ncol, padding);
+
+  psf_convolve_ctx ctx;
+  ctx.psf_nrow = psf_nrow;
+  ctx.psf_ncol = psf_ncol;
+  ctx.padding_nrow = npad_row;
+  ctx.padding_ncol = npad_col;
+  ctx.psf_padded_nrow = psf_nrow + 2 * npad_row;
+  ctx.psf_padded_ncol = psf_ncol + 2 * npad_col;
+  ctx.freq_nrow = ctx.psf_padded_nrow;
+  ctx.freq_ncol = ctx.psf_padded_ncol / 2 + 1;
+  ctx.n_batch = nch;
+
+  std::array<int, 2> fft_size{ctx.psf_padded_nrow, ctx.psf_padded_ncol};
+  CUFFT_CALL(cufftPlanMany(&ctx.plan_forward, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
+                           CUFFT_R2C, nch));
+  CUFFT_CALL(cufftPlanMany(&ctx.plan_backward, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
+                           CUFFT_C2R, nch));
+  CUFFT_CALL(cufftPlanMany(&ctx.plan_backward_2, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
+                           CUFFT_C2R, nch));
+  return ctx;
+}
+
+/**
+ * @brief   Convolve raw PSFs with Gaussian(sigma) for all facets, producing
+ *          single-convolved and double-convolved (weighted mean) PSFs.
+ * @details For each facet, batches over nch frequency channels:
+ *          - conv_psf  = PSF * G(sigma)      [per-channel]
+ *          - conv2_mean = wmean(PSF * G^2)    [weighted mean over channels]
+ *
+ *          Scale 0 (sigma == 0) is handled as a fast path: conv_psf is a
+ *          device-to-device copy and conv2_mean is a weighted channel mean.
+ *
+ * @param[in]  resources    GPU memory allocator.
+ * @param[in]  stream_res   CUDA stream resources.
+ * @param[in]  ctx          PSF convolution context (FFT plans, padding).
+ * @param[in]  raw_psfs     Raw PSFs, device, layout (n_facets, nch, npol, psf_h, psf_w).
+ * @param[in]  sigma        Gaussian sigma for this scale.
+ * @param[in]  weights      Per-channel weights, device, size nch.
+ * @param[in]  n_facets     Number of facets.
+ * @param[in]  nch          Number of frequency channels.
+ * @param[out] out_conv_psf  Output single-convolved PSFs, device,
+ *                           layout (n_facets, nch, 1, psf_h, psf_w), pre-allocated.
+ * @param[out] out_conv2_mean Output double-convolved weighted mean PSFs, device,
+ *                            layout (n_facets, psf_h, psf_w), pre-allocated.
+ */
+void convolve_psfs_for_scale(const core::resources& resources,
+                             const core::stream_resources& stream_res,
+                             const psf_convolve_ctx& ctx, const float* raw_psfs, float sigma,
+                             const float* weights, int n_facets, int nch, float* out_conv_psf,
+                             float* out_conv2_mean)
+{
+  const auto cuda_stream = stream_res.cuda_stream;
+  const int psf_npix = ctx.psf_nrow * ctx.psf_ncol;
+  const int facet_stride = nch * psf_npix;  // npol=1 after squeeze
+  const int padded_total = ctx.psf_padded_nrow * ctx.psf_padded_ncol;
+  const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
+
+  // Scale 0 fast path: no convolution needed
+  if (sigma == 0.0f) {
+    cudaMemcpyAsync(out_conv_psf, raw_psfs, sizeof(float) * n_facets * facet_stride,
+                    cudaMemcpyDeviceToDevice, cuda_stream);
+    for (int f = 0; f < n_facets; f++) {
+      weighted_mean_channels_kernel<<<CEIL_DIV(psf_npix, 256), 256, 0, cuda_stream>>>(
+          raw_psfs + f * facet_stride, weights, out_conv2_mean + f * psf_npix, psf_npix, nch);
+    }
+    stream_res.sync();
+    return;
+  }
+
+  CUFFT_CALL(cufftSetStream(ctx.plan_forward, cuda_stream));
+  CUFFT_CALL(cufftSetStream(ctx.plan_backward, cuda_stream));
+  CUFFT_CALL(cufftSetStream(ctx.plan_backward_2, cuda_stream));
+
+  // Allocate temporaries
+  float* padded_psf = resources.alloc_async<float>(nch * padded_total, stream_res);
+  complex_type* freq_psf = resources.alloc_async<complex_type>(nch * freq_total, stream_res);
+  complex_type* freq_conv = resources.alloc_async<complex_type>(nch * freq_total, stream_res);
+  complex_type* freq_conv2 = resources.alloc_async<complex_type>(nch * freq_total, stream_res);
+  float* padded_conv = resources.alloc_async<float>(nch * padded_total, stream_res);
+  float* padded_conv2 = resources.alloc_async<float>(nch * padded_total, stream_res);
+  float* conv2_cropped = resources.alloc_async<float>(nch * psf_npix, stream_res);
+
+  // Generate Gaussian scale kernel at PSF resolution (single kernel, reused for all facets)
+  float* scale_kernel = resources.alloc_async<float>(freq_total, stream_res);
+  float sigma_arr = sigma;
+  float* d_sigma = resources.alloc_async<float>(1, stream_res);
+  CHECK_CUDA(
+      cudaMemcpyAsync(d_sigma, &sigma_arr, sizeof(float), cudaMemcpyHostToDevice, cuda_stream));
+  make_scales_kernel_half<<<dim3(CEIL_DIV(ctx.freq_ncol, 16), CEIL_DIV(ctx.freq_nrow, 16)),
+                            dim3(16, 16), 0, cuda_stream>>>(
+      d_sigma, ctx.freq_nrow, ctx.freq_ncol, ctx.psf_padded_ncol, 1, scale_kernel);
+  resources.free_async(d_sigma, stream_res);
+
+  const float norm = 1.0f / static_cast<float>(padded_total);
+
+  for (int f = 0; f < n_facets; f++) {
+    const float* src = raw_psfs + f * facet_stride;
+    float* dst_conv = out_conv_psf + f * facet_stride;
+    float* dst_conv2_mean = out_conv2_mean + f * psf_npix;
+
+    // 1. Pad + ifftshift (batched over nch)
+    linalg::detail::pad_ifftshift_batched(const_cast<float*>(src), padded_psf, ctx.psf_nrow,
+                                          ctx.psf_ncol, ctx.psf_padded_nrow, ctx.psf_padded_ncol,
+                                          ctx.padding_nrow, ctx.padding_ncol, nch, cuda_stream);
+
+    // 2. Batched R2C FFT
+    CUFFT_CALL(cufftExecR2C(ctx.plan_forward, padded_psf, freq_psf));
+
+    // 3. Multiply by G and G^2
+    multiply_psf_scale_kernel<<<CEIL_DIV(freq_total, 256), 256, 0, cuda_stream>>>(
+        freq_psf, scale_kernel, freq_conv, freq_conv2, freq_total, nch, norm);
+
+    // 4. Batched C2R IFFT for conv_psf
+    CUFFT_CALL(cufftExecC2R(ctx.plan_backward, freq_conv, padded_conv));
+
+    // 5. Batched C2R IFFT for conv2_psf
+    CUFFT_CALL(cufftExecC2R(ctx.plan_backward_2, freq_conv2, padded_conv2));
+
+    // 6. fftshift + crop for conv_psf -> output
+    linalg::detail::fftshift_crop(padded_conv, dst_conv, ctx.psf_nrow, ctx.psf_ncol,
+                                  ctx.psf_padded_nrow, ctx.psf_padded_ncol, ctx.padding_nrow,
+                                  ctx.padding_ncol, nch, cuda_stream);
+
+    // 7. fftshift + crop for conv2_psf -> temporary
+    linalg::detail::fftshift_crop(padded_conv2, conv2_cropped, ctx.psf_nrow, ctx.psf_ncol,
+                                  ctx.psf_padded_nrow, ctx.psf_padded_ncol, ctx.padding_nrow,
+                                  ctx.padding_ncol, nch, cuda_stream);
+
+    // 8. Weighted mean over channels -> conv2_mean output
+    weighted_mean_channels_kernel<<<CEIL_DIV(psf_npix, 256), 256, 0, cuda_stream>>>(
+        conv2_cropped, weights, dst_conv2_mean, psf_npix, nch);
+  }
+
+  // Cleanup temporaries
+  resources.free_async(conv2_cropped, stream_res);
+  resources.free_async(padded_conv2, stream_res);
+  resources.free_async(padded_conv, stream_res);
+  resources.free_async(freq_conv2, stream_res);
+  resources.free_async(freq_conv, stream_res);
+  resources.free_async(freq_psf, stream_res);
+  resources.free_async(padded_psf, stream_res);
+  resources.free_async(scale_kernel, stream_res);
+
+  stream_res.sync();
 }
 
 }  // namespace fast_deconv::algorithm::wscms::detail
