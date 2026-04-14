@@ -1,12 +1,12 @@
 #pragma once
 #include <cooperative_groups.h>
 #include <cuda_runtime.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
 
 #include <algorithm>
 #include <cfloat>
 #include <cub/cub.cuh>
-#include <thrust/iterator/counting_iterator.h>
-#include <thrust/iterator/transform_iterator.h>
 #include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/logger.hpp>
 #include <fast_deconv/core/resources.hpp>
@@ -476,7 +476,6 @@ void subtract_component(const core::resources& resources, const core::stream_res
   float* d_SAX = resources.alloc_async<float>(n_freq * n_order, stream_res);
   float* d_A = resources.alloc_async<float>(n_freq * n_order, stream_res);
   float* d_A_pinv = resources.alloc_async<float>(n_order * n_freq, stream_res);
-  // float* d_compact = resources.alloc_async<float>(n_order, stream_res);
   float* d_per_chan = resources.alloc_async<float>(n_freq, stream_res);
 
   // Step 1: build SAX = sqrt(jn) * xdes and A = sqrt(w) * SAX
@@ -499,34 +498,17 @@ void subtract_component(const core::resources& resources, const core::stream_res
 
   // Free temporaries
   resources.free_async(d_per_chan, stream_res);
-  // resources.free_async(d_compact, stream_res);
   resources.free_async(d_A_pinv, stream_res);
   resources.free_async(d_A, stream_res);
   resources.free_async(d_SAX, stream_res);
-}
-
-sky_component build_sky_component(const core::stream_resources& stream_res, int peak_row,
-                                  int peak_col, int scale_idx, float gain, float* d_compact_coeffs,
-                                  int n_order)
-{
-  sky_component component{
-      .row = peak_row,
-      .col = peak_col,
-      .scale_idx = scale_idx,
-      .gain = gain,
-      .coeffs = std::vector<float>(n_order),
-  };
-  CHECK_CUDA(cudaMemcpyAsync(component.coeffs.data(), d_compact_coeffs, n_order * sizeof(float),
-                             cudaMemcpyDeviceToHost, stream_res.cuda_stream));
-  stream_res.sync();
-  return component;
 }
 
 /**
  * @brief   Run sub-minor iterations for a single selected scale.
  * @details Iteratively finds peaks in the mean residual, subtracts the
  *          scale-convolved PSF from both the mean residual and the
- *          per-channel dirty image, and extracts sky components.
+ *          per-channel dirty image, and writes component metadata and spectral
+ *          coefficients into caller-provided buffers.
  *
  * @param[in]     resources      GPU memory allocator.
  * @param[in,out] residual       Multi-frequency dirty image (n_freq, n_stokes, nrow, ncol).
@@ -544,21 +526,24 @@ sky_component build_sky_component(const core::stream_resources& stream_res, int 
  * @param[in]     scale_gains    Per-facet gains for the selected scale, host, size n_facets.
  * @param[in]     ctx            WSCMS context (xdes, map_pixel_facet, etc.).
  * @param[in]     params         Algorithm parameters.
+ * @param[out]    d_coeffs_out   Device buffer for spectral coefficients, layout [n_iter, n_order].
+ *                               Must be pre-allocated with at least max_sub_iteration * n_order floats.
+ * @param[out]    metas_out      Host vector to append per-component metadata to.
  *
- * @return wscms_result with extracted components and final peak flux.
+ * @return Number of components produced.
  */
-wscms_result wscms_subminor_cycles(
-    const core::resources& resources, core::device_span4d<float>& residual, float* mean_residual,
-    const float* conv_psfs, const float* conv2_psfs, int n_facets, int psf_nrow, int psf_ncol,
-    const core::device_span4d<float>& jones_norm, const core::device_vect<float>& weights_freq,
-    int scale_idx, const float* scale_gains, WSCMS_ctx ctx, WSCMS_params params)
+int wscms_subminor_cycles(const core::resources& resources,
+                          core::device_span4d<float>& residual, float* mean_residual,
+                          const float* conv_psfs, const float* conv2_psfs, int n_facets,
+                          int psf_nrow, int psf_ncol,
+                          const core::device_span4d<float>& jones_norm,
+                          const core::device_vect<float>& weights_freq, int scale_idx,
+                          const float* scale_gains, WSCMS_ctx ctx, WSCMS_params params,
+                          float* d_coeffs_out, std::vector<component_meta>& metas_out)
 {
   const auto& stream_res = resources.get_stream_resources();
   const auto& stream_res_2 = resources.get_stream_resources();
   auto cuda_stream = stream_res.cuda_stream;
-
-  std::vector<sky_component> sky_components;
-  sky_components.reserve(params.max_sub_iteration);
 
   const int nrow = residual.extent(2);
   const int ncol = residual.extent(3);
@@ -572,10 +557,6 @@ wscms_result wscms_subminor_cycles(
   float* xdes_ptr = ctx.xdes.data_handle();
   float* jones_norm_ptr = jones_norm.data_handle();
   float* weights_ptr = weights_freq.data_handle();
-
-  // Allocate device memory for compact coefficients that will later be copied to
-  // the computed sky components
-  float* d_compact_coeffs = resources.alloc_async<float>(n_order, stream_res);
 
   // Allocate output for DeviceReduce::ArgMax
   using KVPair = cub::KeyValuePair<int, float>;
@@ -619,35 +600,36 @@ wscms_result wscms_subminor_cycles(
     psf_subtract_kernel<<<CEIL_DIV(ovr.w * ovr.h, 256), 256, 0, cuda_stream>>>(
         mean_residual_ptr, psf_2_ptr, ovr, factor);
 
-    // Stream 2: subtract component from dirty
-    const float* psf_ptr = conv_psfs + facet_idx * n_freq * psf_nrow * psf_ncol;
-    subtract_component(resources, stream_res_2, residual_ptr, d_compact_coeffs, psf_ptr, xdes_ptr,
-                       jones_norm_ptr, weights_ptr, gain, n_freq, n_order, nrow, ncol, psf_nrow,
-                       psf_ncol, peak_row, peak_col);
-
-    auto component = build_sky_component(stream_res_2, peak_row, peak_col, scale_idx, gain,
-                                         d_compact_coeffs, n_order);
-    sky_components.push_back(component);
-
     // Stream 1: Find peak
     cub::DeviceReduce::ArgMax(d_temp, temp_storage_bytes, mean_residual_ptr, d_argmax_out, n,
                               cuda_stream);
     CHECK_CUDA(cudaMemcpyAsync(&h_peak, d_argmax_out, sizeof(KVPair), cudaMemcpyDeviceToHost,
                                cuda_stream));
 
+    // Stream 2: subtract component from dirty, coefficients written to caller's buffer
+    const float* psf_ptr = conv_psfs + facet_idx * n_freq * psf_nrow * psf_ncol;
+    float* d_iter_coeffs = d_coeffs_out + n_iter * n_order;
+    subtract_component(resources, stream_res_2, residual_ptr, d_iter_coeffs, psf_ptr, xdes_ptr,
+                       jones_norm_ptr, weights_ptr, gain, n_freq, n_order, nrow, ncol, psf_nrow,
+                       psf_ncol, peak_row, peak_col);
+
+    metas_out.push_back(
+        component_meta{static_cast<int>(peak_row), static_cast<int>(peak_col), scale_idx, gain});
+
     stream_res.sync();
-    stream_res_2.sync();
 
     n_iter++;
   }
 
   FD_LOG_INFO("minor_loop: finished after {} iterations, final_peak={:.8f}", n_iter, h_peak.value);
 
-  // Cleanup
+  // Wait for stream 2 to finish all subtract_component work before caller reads coefficients
+  stream_res_2.sync();
+
   resources.free_async(d_temp, stream_res);
   resources.free_async(d_argmax_out, stream_res);
   stream_res.sync();
-  return wscms_result{std::move(sky_components), h_peak.value};
+  return n_iter;
 }
 
 // ================================================================== //
@@ -668,9 +650,9 @@ wscms_result wscms_subminor_cycles(
  * @param[in]  npix         Number of spatial pixels (nrow * ncol).
  */
 __global__ void compute_mean_residual_kernel(float* __restrict__ mean_out,
-                                               const float* __restrict__ dirty,
-                                               const float* __restrict__ weights, int n_freq,
-                                               int freq_stride, int npix)
+                                             const float* __restrict__ dirty,
+                                             const float* __restrict__ weights, int n_freq,
+                                             int freq_stride, int npix)
 {
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < npix; i += blockDim.x * gridDim.x) {
     float sum = 0.0f;
@@ -694,8 +676,8 @@ __global__ void compute_mean_residual_kernel(float* __restrict__ mean_out,
  * @param[in]  npix         Number of spatial pixels (nrow * ncol).
  */
 void compute_mean_residual(const core::stream_resources& stream_res, float* mean_out,
-                             const float* dirty, const float* weights, int n_freq, int freq_stride,
-                             int npix)
+                           const float* dirty, const float* weights, int n_freq, int freq_stride,
+                           int npix)
 {
   compute_mean_residual_kernel<<<CEIL_DIV(npix, 256), 256, 0, stream_res.cuda_stream>>>(
       mean_out, dirty, weights, n_freq, freq_stride, npix);
@@ -739,8 +721,7 @@ struct masked_peak_op {
  * @return Peak flux value (on host).
  */
 float compute_peak_flux(const core::resources& resources, const core::stream_resources& stream_res,
-                        const float* mean_residual, const bool* mask, int npix,
-                        bool clean_negative)
+                        const float* mean_residual, const bool* mask, int npix, bool clean_negative)
 {
   auto cuda_stream = stream_res.cuda_stream;
 
@@ -756,8 +737,7 @@ float compute_peak_flux(const core::resources& resources, const core::stream_res
   cub::DeviceReduce::Max(d_temp, temp_bytes, iter, d_out, npix, cuda_stream);
 
   float h_result;
-  CHECK_CUDA(
-      cudaMemcpyAsync(&h_result, d_out, sizeof(float), cudaMemcpyDeviceToHost, cuda_stream));
+  CHECK_CUDA(cudaMemcpyAsync(&h_result, d_out, sizeof(float), cudaMemcpyDeviceToHost, cuda_stream));
   stream_res.sync();
 
   resources.free_async(d_temp, stream_res);
@@ -806,10 +786,7 @@ struct masked_value_sq_op {
 struct masked_count_op {
   const bool* mask;
 
-  __host__ __device__ __forceinline__ int operator()(int idx) const
-  {
-    return mask[idx] ? 0 : 1;
-  }
+  __host__ __device__ __forceinline__ int operator()(int idx) const { return mask[idx] ? 0 : 1; }
 };
 
 /**
@@ -845,8 +822,7 @@ float compute_rms(const core::resources& resources, const core::stream_resources
   cub::DeviceReduce::Sum(d_temp_sum, temp_bytes_sum, sum_iter, d_sum, npix, cuda_stream);
 
   // Sum of squared unmasked values
-  auto sq_iter =
-      thrust::make_transform_iterator(counting, masked_value_sq_op{mean_residual, mask});
+  auto sq_iter = thrust::make_transform_iterator(counting, masked_value_sq_op{mean_residual, mask});
   size_t temp_bytes_sq = 0;
   cub::DeviceReduce::Sum(nullptr, temp_bytes_sq, sq_iter, d_sum_sq, npix, cuda_stream);
   char* d_temp_sq = resources.alloc_async<char>(temp_bytes_sq, stream_res);
@@ -862,12 +838,10 @@ float compute_rms(const core::resources& resources, const core::stream_resources
   // Copy results to host
   float h_sum, h_sum_sq;
   int h_count;
-  CHECK_CUDA(
-      cudaMemcpyAsync(&h_sum, d_sum, sizeof(float), cudaMemcpyDeviceToHost, cuda_stream));
+  CHECK_CUDA(cudaMemcpyAsync(&h_sum, d_sum, sizeof(float), cudaMemcpyDeviceToHost, cuda_stream));
   CHECK_CUDA(
       cudaMemcpyAsync(&h_sum_sq, d_sum_sq, sizeof(float), cudaMemcpyDeviceToHost, cuda_stream));
-  CHECK_CUDA(
-      cudaMemcpyAsync(&h_count, d_count, sizeof(int), cudaMemcpyDeviceToHost, cuda_stream));
+  CHECK_CUDA(cudaMemcpyAsync(&h_count, d_count, sizeof(int), cudaMemcpyDeviceToHost, cuda_stream));
   stream_res.sync();
 
   // Cleanup

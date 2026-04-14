@@ -3,8 +3,9 @@
 #include <cuda_runtime.h>
 
 #include <cfloat>
+#include <cstddef>
+#include <cstdint>
 #include <cub/cub.cuh>
-#include <unordered_map>
 #include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/logger.hpp>
 #include <fast_deconv/core/resources.hpp>
@@ -34,16 +35,17 @@ namespace fast_deconv::algorithm::wscms::detail {
  * @param[in]     scale_ctx      Scale convolution context (FFT plans, padding).
  * @param[in]     psf_ctx        PSF convolution context (FFT plans for PSF-sized convolutions).
  * @param[in]     params         Algorithm parameters.
+ * @param[out]    d_coeffs_out   Device buffer for spectral coefficients (caller-allocated).
+ * @param[out]    metas_out      Host vector to append per-component metadata to.
  *
- * @return wscms_result with extracted components and the selected scale index.
+ * @return Number of components produced.
  */
-wscms_result wscms_minor_cycle(const core::resources& resources,
-                               core::device_span4d<float>& dirty, float* mean_residual,
-                               const core::device_span4d<float>& jones_norm,
-                               const core::device_vect<float>& weights_freq,
-                               float* scale_kernels, WSCMS_ctx& wscms_ctx,
-                               const scale_convole_ctx& scale_ctx,
-                               const psf_convolve_ctx& psf_ctx, WSCMS_params params)
+int wscms_minor_cycle(const core::resources& resources, core::device_span4d<float>& dirty,
+                      float* mean_residual, const core::device_span4d<float>& jones_norm,
+                      const core::device_vect<float>& weights_freq, float* scale_kernels,
+                      WSCMS_ctx& wscms_ctx, const scale_convole_ctx& scale_ctx,
+                      const psf_convolve_ctx& psf_ctx, WSCMS_params params, float* d_coeffs_out,
+                      std::vector<component_meta>& metas_out)
 {
   bool per_scale_mask = false;  // TODO: FIX THAT
   const auto& stream_r = resources.get_stream_resources();
@@ -62,62 +64,48 @@ wscms_result wscms_minor_cycle(const core::resources& resources,
 
   // 1. Convolve dirty image with all scale kernels
   float* scales_x_dirty = resources.alloc_async<float>(npix * n_scales, stream_r);
-  scale_convolve(resources, stream_r, scale_ctx, mean_residual, scale_kernels,
-                 scales_x_dirty, n_scales);
+  scale_convolve(resources, stream_r, scale_ctx, mean_residual, scale_kernels, scales_x_dirty,
+                 n_scales);
 
   // 2. Select the best scale
   scale_selection_result sel =
       scale_selection(resources, stream_r, scales_x_dirty, wscms_ctx.scale_masks.data_handle(),
                       wscms_ctx.scale_bias.data_handle(), n_scales, dirty_nrows, dirty_ncols,
                       params.clean_negative, per_scale_mask, params.forbidden_scales);
-  stream_r.sync();
 
   // 3. Copy the winning slice to output
   copy_scale_slice(stream_r, scales_x_dirty, scaled_mean_dirty, sel.best_scale, npix);
 
   // 4. Cleanup scale selection temporaries
   resources.free_async(scales_x_dirty, stream_r);
-  stream_r.sync();
 
   FD_LOG_INFO("selected scale_idx={} peak={:.6f} at ({},{})", sel.best_scale, sel.best_peak,
               sel.best_row, sel.best_col);
 
-  // 5. Compute convolved PSFs on-the-fly for the selected scale
+  // 5. Compute convolved PSFs for the selected scale
   float* conv_psfs = resources.alloc_async<float>(n_facets * nch * psf_npix, stream_r);
   float* conv2_psfs = resources.alloc_async<float>(n_facets * psf_npix, stream_r);
 
-  float sigma;
-  CHECK_CUDA(cudaMemcpyAsync(&sigma, wscms_ctx.scale_sigmas.data_handle() + sel.best_scale,
-                             sizeof(float), cudaMemcpyDeviceToHost, stream_r.cuda_stream));
-  stream_r.sync();
-  convolve_psfs_for_scale(resources, stream_r, psf_ctx, wscms_ctx.raw_psfs.data_handle(), sigma,
+  convolve_psfs_for_scale(resources, stream_r, psf_ctx, wscms_ctx.raw_psfs.data_handle(),
+                          wscms_ctx.scale_sigmas.data_handle() + sel.best_scale, sel.best_scale,
                           weights_freq.data_handle(), n_facets, nch, conv_psfs, conv2_psfs);
 
   // 6. Compute per-facet gains from convolved PSFs
-  std::vector<float> h_scale_gains(n_facets);
-  if (sigma == 0.0f) {
-    std::fill(h_scale_gains.begin(), h_scale_gains.end(), params.gamma);
-  } else {
-    float* d_gains = resources.alloc_async<float>(n_facets, stream_r);
-    compute_scale_gains(resources, stream_r, conv_psfs, weights_freq.data_handle(),
-                        n_facets, nch, psf_npix, params.gamma, d_gains);
-    CHECK_CUDA(cudaMemcpyAsync(h_scale_gains.data(), d_gains, sizeof(float) * n_facets,
-                               cudaMemcpyDeviceToHost, stream_r.cuda_stream));
-    stream_r.sync();
-    resources.free_async(d_gains, stream_r);
-  }
+  std::vector<float> h_scale_gains =
+      compute_scale_gains(resources, stream_r, conv_psfs, weights_freq.data_handle(), n_facets, nch,
+                          psf_npix, sel.best_scale, params.gamma);
 
   // 7. Run sub-minor loop with single-scale PSFs
-  wscms_result result =
+  int n_components =
       wscms_subminor_cycles(resources, dirty, scaled_mean_dirty, conv_psfs, conv2_psfs, n_facets,
                             psf_nrow, psf_ncol, jones_norm, weights_freq, sel.best_scale,
-                            h_scale_gains.data(), wscms_ctx, params);
+                            h_scale_gains.data(), wscms_ctx, params, d_coeffs_out, metas_out);
 
   // 8. Free PSF temporaries
   resources.free_async(conv2_psfs, stream_r);
   resources.free_async(conv_psfs, stream_r);
 
-  return result;
+  return n_components;
 }
 
 /**
@@ -137,12 +125,10 @@ wscms_result wscms_minor_cycle(const core::resources& resources,
  *
  * @return wscms_result with all extracted components, exit reason, and iteration count.
  */
-wscms_result wscms_minor_cycles(const core::resources& resources,
-                                core::device_span4d<float>& dirty,
+wscms_result wscms_minor_cycles(const core::resources& resources, core::device_span4d<float>& dirty,
                                 const core::device_span4d<float>& jones_norm,
-                                const core::device_vect<float>& weights_freq,
-                                WSCMS_ctx& wscms_ctx, const scale_convole_ctx& scale_ctx,
-                                const psf_convolve_ctx& psf_ctx,
+                                const core::device_vect<float>& weights_freq, WSCMS_ctx& wscms_ctx,
+                                const scale_convole_ctx& scale_ctx, const psf_convolve_ctx& psf_ctx,
                                 const bool* mask, WSCMS_params params)
 {
   const auto& stream_r = resources.get_stream_resources();
@@ -156,16 +142,24 @@ wscms_result wscms_minor_cycles(const core::resources& resources,
   float* mean_residual = resources.alloc_async<float>(npix, stream_r);
 
   // Allocate scale kernels once (constant across iterations)
+  FD_LOG_INFO("Make scales: freq_scales_total={}", freq_scales_total);
   float* scale_kernels = resources.alloc_async<float>(freq_scales_total, stream_r);
   make_scales(resources, stream_r, wscms_ctx.scale_sigmas.data_handle(), scale_ctx.freq_nrow,
               scale_ctx.freq_ncol, scale_ctx.img_padded_ncol, params.n_scales, scale_kernels);
 
+  // Shared device buffer for all component coefficients across all outer iterations
+  const int n_order = wscms_ctx.xdes.extent(1);
+  float* d_all_coeffs = resources.alloc_async<float>(params.max_iteration * n_order, stream_r);
+  std::vector<component_meta> all_metas;
+  all_metas.reserve(params.max_iteration);
+
   // Initial mean residual
+  FD_LOG_INFO("Compute mean residual");
   compute_mean_residual(stream_r, mean_residual, dirty.data_handle(), weights_freq.data_handle(),
                         n_freq, freq_stride, npix);
-  stream_r.sync();
 
   // Initial flux and RMS
+  FD_LOG_INFO("Compute peak flux");
   float track_flux =
       compute_peak_flux(resources, stream_r, mean_residual, mask, npix, params.clean_negative);
   float track_rms = compute_rms(resources, stream_r, mean_residual, mask, npix);
@@ -178,7 +172,7 @@ wscms_result wscms_minor_cycles(const core::resources& resources,
   int total_iterations = 0;
   int diverged_count = 0;
   std::vector<int> retired_scales(params.forbidden_scales);
-  std::unordered_map<int, int> scale_stall_count;
+  std::vector<int> scale_stall_count(params.n_scales, 0);
   std::vector<bool> scales_stalled(params.n_scales, false);
   for (int s : params.forbidden_scales) {
     if (s >= 0 && s < params.n_scales) scales_stalled[s] = true;
@@ -197,31 +191,27 @@ wscms_result wscms_minor_cycles(const core::resources& resources,
 
     // Run one minor cycle (scale selection + on-the-fly PSF convolution + sub-minor iterations)
     params.forbidden_scales = retired_scales;
-    wscms_result cycle_result =
-        wscms_minor_cycle(resources, dirty, mean_residual, jones_norm, weights_freq,
-                          scale_kernels, wscms_ctx, scale_ctx, psf_ctx, params);
+    float* d_coeffs_cursor = d_all_coeffs + total_iterations * n_order;
+    int n_subminor =
+        wscms_minor_cycle(resources, dirty, mean_residual, jones_norm, weights_freq, scale_kernels,
+                          wscms_ctx, scale_ctx, psf_ctx, params, d_coeffs_cursor, all_metas);
 
-    // Accumulate components
-    int n_subminor = static_cast<int>(cycle_result.components.size());
     if (n_subminor == 0) {
       exit_reason = wscms_exit_reason::stalled;
       FD_LOG_INFO("wscms_minor_cycles: no components found, stopping");
       break;
     }
 
-    int i_scale = cycle_result.components[0].scale_idx;
-    result.components.insert(result.components.end(),
-                             std::make_move_iterator(cycle_result.components.begin()),
-                             std::make_move_iterator(cycle_result.components.end()));
+    int i_scale = all_metas.back().scale_idx;
     total_iterations += n_subminor;
 
     // Recompute mean residual from dirty
-    compute_mean_residual(stream_r, mean_residual, dirty.data_handle(),
-                          weights_freq.data_handle(), n_freq, freq_stride, npix);
-    stream_r.sync();
+    compute_mean_residual(stream_r, mean_residual, dirty.data_handle(), weights_freq.data_handle(),
+                          n_freq, freq_stride, npix);
 
     float this_flux =
         compute_peak_flux(resources, stream_r, mean_residual, mask, npix, params.clean_negative);
+
     float this_rms = compute_rms(resources, stream_r, mean_residual, mask, npix);
 
     FD_LOG_INFO("wscms_minor_cycles: [iter={}] flux={:.8f} rms={:.8f} scale={}", total_iterations,
@@ -267,7 +257,30 @@ wscms_result wscms_minor_cycles(const core::resources& resources,
     track_rms = this_rms;
   }
 
+  // Final bulk D2H copy of all coefficients and sky_component construction
+  int total_components = static_cast<int>(all_metas.size());
+  if (total_components > 0) {
+    std::vector<float> h_all_coeffs(total_components * n_order);
+    CHECK_CUDA(cudaMemcpyAsync(h_all_coeffs.data(), d_all_coeffs,
+                               total_components * n_order * sizeof(float), cudaMemcpyDeviceToHost,
+                               stream_r.cuda_stream));
+    stream_r.sync();
+
+    result.components.reserve(total_components);
+    for (int i = 0; i < total_components; i++) {
+      result.components.push_back(sky_component{
+          .row = all_metas[i].row,
+          .col = all_metas[i].col,
+          .scale_idx = all_metas[i].scale_idx,
+          .gain = all_metas[i].gain,
+          .coeffs = std::vector<float>(h_all_coeffs.begin() + i * n_order,
+                                       h_all_coeffs.begin() + (i + 1) * n_order),
+      });
+    }
+  }
+
   // Cleanup
+  resources.free_async(d_all_coeffs, stream_r);
   resources.free_async(scale_kernels, stream_r);
   resources.free_async(mean_residual, stream_r);
   stream_r.sync();

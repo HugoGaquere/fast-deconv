@@ -23,15 +23,15 @@ struct WSCMS_ctx {
 struct WSCMS_params {
   bool clean_negative;
   float peak_factor;
-  float gamma;  // CLEAN loop gain
+  float gamma;            // CLEAN loop gain
   int max_sub_iteration;  // sub-minor loop iterations per scale selection
   int n_scales;
 
   // Outer loop parameters
-  float stop_flux;          // stop when peak flux drops below this
-  int max_iteration;        // total minor iterations across all scale selections
-  float divergence_factor;  // flux growth ratio that counts as divergence
-  float stall_threshold;    // RMS change below this counts as a stall
+  float stop_flux;                    // stop when peak flux drops below this
+  int max_iteration;                  // total minor iterations across all scale selections
+  float divergence_factor;            // flux growth ratio that counts as divergence
+  float stall_threshold;              // RMS change below this counts as a stall
   std::vector<int> forbidden_scales;  // scales excluded from selection
 };
 
@@ -51,7 +51,7 @@ struct scale_convole_ctx {
 };
 
 struct psf_convolve_ctx {
-  int psf_nrow, psf_ncol;                  // PSF spatial size
+  int psf_nrow, psf_ncol;                   // PSF spatial size
   int padding_nrow, padding_ncol;           // padding amounts
   int psf_padded_nrow, psf_padded_ncol;     // padded spatial size
   int freq_nrow, freq_ncol;                 // frequency domain size (half-complex)
@@ -75,11 +75,19 @@ struct sky_component {
   std::vector<float> coeffs;
 };
 
+/// @brief Host-side metadata for a single sky component (coefficients stored separately on device).
+struct component_meta {
+  int row;
+  int col;
+  int scale_idx;
+  float gain;
+};
+
 enum class wscms_exit_reason {
-  flux_threshold,   // peak flux dropped below stop_flux
-  diverged,         // flux growth exceeded divergence_factor
-  stalled,          // all scales stalled (RMS change below threshold)
-  max_iterations,   // reached max_iteration count
+  flux_threshold,  // peak flux dropped below stop_flux
+  diverged,        // flux growth exceeded divergence_factor
+  stalled,         // all scales stalled (RMS change below threshold)
+  max_iterations,  // reached max_iteration count
 };
 
 struct wscms_result {

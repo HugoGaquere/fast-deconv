@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "fast_deconv/algorithm/wscms_types.hpp"
+#include "fast_deconv/core/logger.hpp"
 #include "fast_deconv/core/resources.hpp"
 
 namespace {
@@ -15,12 +16,21 @@ namespace {
 #define PI 3.141592654f
 #define PI_SQUARRED 9.869604403f
 
-__global__ void make_scales_kernel_half(float* sigmas, int scale_nrow, int scale_ncol_half,
+/**
+ * @brief   Build Gaussian scale kernels in half-complex frequency space.
+ * @details Each thread computes one (row, col) frequency bin for all scales.
+ *          Output layout is (n_scales, scale_nrow, scale_ncol_half).
+ *
+ * @param[in]  sigmas          Gaussian sigmas, device, size n_scales.
+ * @param[in]  scale_nrow      Number of rows in the frequency grid.
+ * @param[in]  scale_ncol_half Number of columns in the half-complex grid (ncol/2 + 1).
+ * @param[in]  scale_ncol_full Full spatial column count (used for frequency normalization).
+ * @param[in]  n_scales        Number of scales.
+ * @param[out] scales          Output kernels, device, size n_scales * scale_nrow * scale_ncol_half.
+ */
+__global__ void make_scales_kernel_half(const float* sigmas, int scale_nrow, int scale_ncol_half,
                                         int scale_ncol_full, int n_scales, float* scales)
 {
-  // col only ranges from 0 to ncol/2 (ncol/2+1 values)
-  // All frequencies are non-negative: no conditional branch needed
-
   const int row = blockIdx.y * blockDim.y + threadIdx.y;
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
   if (row >= scale_nrow || col >= scale_ncol_half) return;
@@ -88,7 +98,7 @@ __global__ void apply_mask_kernel(float* scaled_dirty, const bool* mask, int npi
 namespace fast_deconv::algorithm::wscms::detail {
 
 void make_scales(const core::resources& resources, const core::stream_resources& stream_res,
-                 float* sigmas, int scale_nrow, int scale_ncol_half, int scale_ncol_full,
+                 const float* sigmas, int scale_nrow, int scale_ncol_half, int scale_ncol_full,
                  int n_scales, float* scales)
 {
   dim3 block_dim(16, 16);
@@ -118,8 +128,8 @@ scale_selection_result scale_selection(const core::resources& resources,
   const int mask_stride = per_scale_mask ? npix : 0;
 
   // 1. Apply mask + abs in-place
-  apply_mask_kernel<<<CEIL_DIV(npix, 256), 256, 0, cuda_stream>>>(scaled_dirty, mask, npix,
-                                                                  n_scales, mask_stride, clean_negative);
+  apply_mask_kernel<<<CEIL_DIV(npix, 256), 256, 0, cuda_stream>>>(
+      scaled_dirty, mask, npix, n_scales, mask_stride, clean_negative);
 
   // 2. Build segment offsets [0, npix, 2*npix, ..., n_scales*npix]
   int* d_offsets = resources.alloc_async<int>(n_scales + 1, stream_res);
@@ -156,7 +166,8 @@ scale_selection_result scale_selection(const core::resources& resources,
   int best_scale = -1;
   float best_biased = -INFINITY;
   for (int s = 0; s < n_scales; s++) {
-    if (std::find(retired_scales.begin(), retired_scales.end(), s) != retired_scales.end()) continue;
+    if (std::find(retired_scales.begin(), retired_scales.end(), s) != retired_scales.end())
+      continue;
     float biased = h_peaks[s].value * bias[s];
     if (biased > best_biased) {
       best_biased = biased;
@@ -186,11 +197,33 @@ scale_convole_ctx make_scale_convolve_ctx(int nrow, int ncol, int n_scales, floa
   ctx.freq_ncol = ctx.img_padded_ncol / 2 + 1;
   ctx.n_batches = n_scales;
 
+  // cuFFT plans auto-allocate internal workspace via cudaMalloc at creation time.
+  // Workspace size scales linearly with batch count for out-of-place batched plans.
+  // Use cufftGetSize() to query the actual workspace; cufftSetAutoAllocation(plan, 0)
+  // can be used to disable auto-allocation and share a single user-managed buffer
+  // across plans to reduce peak memory (see cuFFT §2.14 Caller Allocated Work Area).
+
   CUFFT_CALL(cufftPlan2d(&ctx.plan_forward, ctx.img_padded_nrow, ctx.img_padded_ncol, CUFFT_R2C));
+
+  size_t forward_work_size = 0;
+  CUFFT_CALL(cufftGetSize(ctx.plan_forward, &forward_work_size));
+  FD_LOG_INFO("scale_convolve_ctx: forward R2C plan {}x{} — workspace {:.2f} GB",
+              ctx.img_padded_nrow, ctx.img_padded_ncol,
+              static_cast<double>(forward_work_size) / (1024.0 * 1024.0 * 1024.0));
 
   std::array<int, 2> fft_size{ctx.img_padded_nrow, ctx.img_padded_ncol};
   CUFFT_CALL(cufftPlanMany(&ctx.plan_backward, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
                            CUFFT_C2R, n_scales));
+
+  size_t backward_work_size = 0;
+  CUFFT_CALL(cufftGetSize(ctx.plan_backward, &backward_work_size));
+  FD_LOG_INFO("scale_convolve_ctx: backward C2R plan {}x{} x {} batches — workspace {:.2f} GB",
+              ctx.img_padded_nrow, ctx.img_padded_ncol, n_scales,
+              static_cast<double>(backward_work_size) / (1024.0 * 1024.0 * 1024.0));
+
+  FD_LOG_INFO("scale_convolve_ctx: total cuFFT workspace {:.2f} GB",
+              static_cast<double>(forward_work_size + backward_work_size) /
+                  (1024.0 * 1024.0 * 1024.0));
 
   return ctx;
 }
@@ -243,8 +276,8 @@ void scale_convolve(const core::resources& resources, const core::stream_resourc
                                 ctx.padding_ncol, n_scales, cuda_stream);
 
   // we want untouched mean dirty at scale 0
-  cudaMemcpyAsync(out_scaled_dirty, dirty, ctx.img_nrow * ctx.img_ncol * sizeof(float),
-                  cudaMemcpyDeviceToDevice, stream_res.cuda_stream);
+  CHECK_CUDA(cudaMemcpyAsync(out_scaled_dirty, dirty, ctx.img_nrow * ctx.img_ncol * sizeof(float),
+                             cudaMemcpyDeviceToDevice, stream_res.cuda_stream));
 
   // Cleanup
   resources.free_async(dirty_padded, stream_res);
@@ -271,7 +304,8 @@ void copy_scale_slice(const core::stream_resources& stream_res, const float* sca
                       float* out, int best_scale, int npix)
 {
   const float* src = scaled_dirty + best_scale * npix;
-  cudaMemcpyAsync(out, src, npix * sizeof(float), cudaMemcpyDeviceToDevice, stream_res.cuda_stream);
+  CHECK_CUDA(cudaMemcpyAsync(out, src, npix * sizeof(float), cudaMemcpyDeviceToDevice,
+                             stream_res.cuda_stream));
 }
 
 // ================================================================== //
@@ -361,6 +395,10 @@ psf_convolve_ctx make_psf_convolve_ctx(int psf_nrow, int psf_ncol, int nch, floa
   ctx.freq_ncol = ctx.psf_padded_ncol / 2 + 1;
   ctx.n_batch = nch;
 
+  // cuFFT plans auto-allocate internal workspace via cudaMalloc at creation time.
+  // These PSF-sized plans are batched over nch channels; workspace scales with batch count.
+  // See cuFFT §2.14 Caller Allocated Work Area for sharing workspace across plans.
+
   std::array<int, 2> fft_size{ctx.psf_padded_nrow, ctx.psf_padded_ncol};
   CUFFT_CALL(cufftPlanMany(&ctx.plan_forward, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
                            CUFFT_R2C, nch));
@@ -368,6 +406,21 @@ psf_convolve_ctx make_psf_convolve_ctx(int psf_nrow, int psf_ncol, int nch, floa
                            CUFFT_C2R, nch));
   CUFFT_CALL(cufftPlanMany(&ctx.plan_backward_2, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
                            CUFFT_C2R, nch));
+
+  size_t fwd_work = 0, bwd_work = 0, bwd2_work = 0;
+  CUFFT_CALL(cufftGetSize(ctx.plan_forward, &fwd_work));
+  CUFFT_CALL(cufftGetSize(ctx.plan_backward, &bwd_work));
+  CUFFT_CALL(cufftGetSize(ctx.plan_backward_2, &bwd2_work));
+
+  FD_LOG_INFO("psf_convolve_ctx: plans {}x{} x {} batches — workspace fwd {:.2f} GB, "
+              "bwd {:.2f} GB, bwd2 {:.2f} GB, total {:.2f} GB",
+              ctx.psf_padded_nrow, ctx.psf_padded_ncol, nch,
+              static_cast<double>(fwd_work) / (1024.0 * 1024.0 * 1024.0),
+              static_cast<double>(bwd_work) / (1024.0 * 1024.0 * 1024.0),
+              static_cast<double>(bwd2_work) / (1024.0 * 1024.0 * 1024.0),
+              static_cast<double>(fwd_work + bwd_work + bwd2_work) /
+                  (1024.0 * 1024.0 * 1024.0));
+
   return ctx;
 }
 
@@ -385,7 +438,8 @@ psf_convolve_ctx make_psf_convolve_ctx(int psf_nrow, int psf_ncol, int nch, floa
  * @param[in]  stream_res   CUDA stream resources.
  * @param[in]  ctx          PSF convolution context (FFT plans, padding).
  * @param[in]  raw_psfs     Raw PSFs, device, layout (n_facets, nch, npol, psf_h, psf_w).
- * @param[in]  sigma        Gaussian sigma for this scale.
+ * @param[in]  d_sigma      Device pointer to the Gaussian sigma for this scale.
+ * @param[in]  scale_idx    Index of the selected scale (0 = delta / no convolution).
  * @param[in]  weights      Per-channel weights, device, size nch.
  * @param[in]  n_facets     Number of facets.
  * @param[in]  nch          Number of frequency channels.
@@ -395,8 +449,8 @@ psf_convolve_ctx make_psf_convolve_ctx(int psf_nrow, int psf_ncol, int nch, floa
  *                            layout (n_facets, psf_h, psf_w), pre-allocated.
  */
 void convolve_psfs_for_scale(const core::resources& resources,
-                             const core::stream_resources& stream_res,
-                             const psf_convolve_ctx& ctx, const float* raw_psfs, float sigma,
+                             const core::stream_resources& stream_res, const psf_convolve_ctx& ctx,
+                             const float* raw_psfs, const float* d_sigma, int scale_idx,
                              const float* weights, int n_facets, int nch, float* out_conv_psf,
                              float* out_conv2_mean)
 {
@@ -407,9 +461,9 @@ void convolve_psfs_for_scale(const core::resources& resources,
   const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
 
   // Scale 0 fast path: no convolution needed
-  if (sigma == 0.0f) {
-    cudaMemcpyAsync(out_conv_psf, raw_psfs, sizeof(float) * n_facets * facet_stride,
-                    cudaMemcpyDeviceToDevice, cuda_stream);
+  if (scale_idx == 0) {
+    CHECK_CUDA(cudaMemcpyAsync(out_conv_psf, raw_psfs, sizeof(float) * n_facets * facet_stride,
+                               cudaMemcpyDeviceToDevice, cuda_stream));
     for (int f = 0; f < n_facets; f++) {
       weighted_mean_channels_kernel<<<CEIL_DIV(psf_npix, 256), 256, 0, cuda_stream>>>(
           raw_psfs + f * facet_stride, weights, out_conv2_mean + f * psf_npix, psf_npix, nch);
@@ -433,14 +487,9 @@ void convolve_psfs_for_scale(const core::resources& resources,
 
   // Generate Gaussian scale kernel at PSF resolution (single kernel, reused for all facets)
   float* scale_kernel = resources.alloc_async<float>(freq_total, stream_res);
-  float sigma_arr = sigma;
-  float* d_sigma = resources.alloc_async<float>(1, stream_res);
-  CHECK_CUDA(
-      cudaMemcpyAsync(d_sigma, &sigma_arr, sizeof(float), cudaMemcpyHostToDevice, cuda_stream));
   make_scales_kernel_half<<<dim3(CEIL_DIV(ctx.freq_ncol, 16), CEIL_DIV(ctx.freq_nrow, 16)),
-                            dim3(16, 16), 0, cuda_stream>>>(
-      d_sigma, ctx.freq_nrow, ctx.freq_ncol, ctx.psf_padded_ncol, 1, scale_kernel);
-  resources.free_async(d_sigma, stream_res);
+                            dim3(16, 16), 0, cuda_stream>>>(d_sigma, ctx.freq_nrow, ctx.freq_ncol,
+                                                            ctx.psf_padded_ncol, 1, scale_kernel);
 
   const float norm = 1.0f / static_cast<float>(padded_total);
 
@@ -501,8 +550,7 @@ void convolve_psfs_for_scale(const core::resources& resources,
  *          PSF over channels, then takes the max value. The gain is
  *          gamma / max(weighted_mean).
  *
- *          For scale 0 (sigma == 0), the caller should set gains to gamma
- *          directly and skip this function.
+ *          For scale 0 (delta), all gains are set to gamma directly.
  *
  * @param[in]  resources  GPU memory allocator.
  * @param[in]  stream_res CUDA stream resources.
@@ -513,25 +561,32 @@ void convolve_psfs_for_scale(const core::resources& resources,
  * @param[in]  n_facets   Number of facets.
  * @param[in]  nch        Number of frequency channels.
  * @param[in]  psf_npix   Number of spatial pixels per PSF (psf_nrow * psf_ncol).
+ * @param[in]  scale_idx  Index of the selected scale (0 = delta).
  * @param[in]  gamma      CLEAN loop gain parameter.
- * @param[out] out_gains  Output gains, device, size n_facets, pre-allocated.
+ *
+ * @return Per-facet gains, host vector of size n_facets.
  */
-void compute_scale_gains(const core::resources& resources,
-                         const core::stream_resources& stream_res,
-                         const float* conv_psfs, const float* weights,
-                         int n_facets, int nch, int psf_npix,
-                         float gamma, float* out_gains)
+std::vector<float> compute_scale_gains(const core::resources& resources,
+                                       const core::stream_resources& stream_res,
+                                       const float* conv_psfs, const float* weights, int n_facets,
+                                       int nch, int psf_npix, int scale_idx, float gamma)
 {
+  if (scale_idx == 0) {
+    return std::vector<float>(n_facets, gamma);
+  }
+
   const auto cuda_stream = stream_res.cuda_stream;
   const int facet_stride = nch * psf_npix;
 
   // Scratch buffer for the weighted mean PSF of each facet
   float* wmean = resources.alloc_async<float>(psf_npix, stream_res);
 
+  // Per-facet max values on device (bulk-copied to host after the loop)
+  float* d_maxes = resources.alloc_async<float>(n_facets, stream_res);
+
   // CUB DeviceReduce::Max temp storage (query once, reuse across facets)
-  float* d_max = resources.alloc_async<float>(1, stream_res);
   size_t temp_bytes = 0;
-  cub::DeviceReduce::Max(nullptr, temp_bytes, wmean, d_max, psf_npix, cuda_stream);
+  cub::DeviceReduce::Max(nullptr, temp_bytes, wmean, d_maxes, psf_npix, cuda_stream);
   char* d_temp = resources.alloc_async<char>(temp_bytes, stream_res);
 
   for (int f = 0; f < n_facets; f++) {
@@ -539,23 +594,25 @@ void compute_scale_gains(const core::resources& resources,
     weighted_mean_channels_kernel<<<CEIL_DIV(psf_npix, 256), 256, 0, cuda_stream>>>(
         conv_psfs + f * facet_stride, weights, wmean, psf_npix, nch);
 
-    // 2. Max reduction
-    cub::DeviceReduce::Max(d_temp, temp_bytes, wmean, d_max, psf_npix, cuda_stream);
+    // 2. Max reduction -> d_maxes[f]
+    cub::DeviceReduce::Max(d_temp, temp_bytes, wmean, d_maxes + f, psf_npix, cuda_stream);
+  }
 
-    // 3. gain = gamma / max_val
-    float h_max;
-    CHECK_CUDA(cudaMemcpyAsync(&h_max, d_max, sizeof(float),
-                               cudaMemcpyDeviceToHost, cuda_stream));
-    stream_res.sync();
+  // Bulk copy all max values to host and compute gains
+  std::vector<float> gains(n_facets);
+  CHECK_CUDA(cudaMemcpyAsync(gains.data(), d_maxes, sizeof(float) * n_facets,
+                             cudaMemcpyDeviceToHost, cuda_stream));
+  stream_res.sync();
 
-    float gain = gamma / h_max;
-    CHECK_CUDA(cudaMemcpyAsync(out_gains + f, &gain, sizeof(float),
-                               cudaMemcpyHostToDevice, cuda_stream));
+  for (int f = 0; f < n_facets; f++) {
+    gains[f] = gamma / gains[f];
   }
 
   resources.free_async(d_temp, stream_res);
-  resources.free_async(d_max, stream_res);
+  resources.free_async(d_maxes, stream_res);
   resources.free_async(wmean, stream_res);
+
+  return gains;
 }
 
 }  // namespace fast_deconv::algorithm::wscms::detail

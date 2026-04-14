@@ -3,6 +3,7 @@
 
 #include <fast_deconv/algorithm/detail/scale.cuh>
 #include <fast_deconv/core/resources.hpp>
+#include <fast_deconv/util/cuda_macros.hpp>
 #include <filesystem>
 #include <string>
 
@@ -76,16 +77,16 @@ TEST_F(ScaleSelectionTest, MakeScales)
   float* d_sigmas = resources.alloc_async<float>(n_scales, stream_res);
   float* d_scales = resources.alloc_async<float>(half_total * n_scales, stream_res);
 
-  cudaMemcpyAsync(d_sigmas, sigmas_npy.as_float32(), n_scales * sizeof(float),
-                  cudaMemcpyHostToDevice, stream_res.cuda_stream);
+  CHECK_CUDA(cudaMemcpyAsync(d_sigmas, sigmas_npy.as_float32(), n_scales * sizeof(float),
+                             cudaMemcpyHostToDevice, stream_res.cuda_stream));
   stream_res.sync();
 
   fast_deconv::algorithm::wscms::detail::make_scales(resources, stream_res, d_sigmas, freq_nrow,
                                                      freq_ncol, full_ncol, n_scales, d_scales);
 
   std::vector<float> h_scales(half_total * n_scales);
-  cudaMemcpyAsync(h_scales.data(), d_scales, half_total * n_scales * sizeof(float),
-                  cudaMemcpyDeviceToHost, stream_res.cuda_stream);
+  CHECK_CUDA(cudaMemcpyAsync(h_scales.data(), d_scales, half_total * n_scales * sizeof(float),
+                             cudaMemcpyDeviceToHost, stream_res.cuda_stream));
   stream_res.sync();
 
   const float* expected = expected_npy.as_float32();
@@ -121,18 +122,18 @@ TEST_F(ScaleSelectionTest, ScaleConvolve)
   float* d_scales = resources.alloc_async<float>(kernel_total, stream_res);
   float* d_output = resources.alloc_async<float>(npix * n_scales, stream_res);
 
-  cudaMemcpyAsync(d_dirty, dirty_npy.as_float32(), npix * sizeof(float),
-                  cudaMemcpyHostToDevice, stream_res.cuda_stream);
-  cudaMemcpyAsync(d_scales, kernel_npy.as_float32(), kernel_total * sizeof(float),
-                  cudaMemcpyHostToDevice, stream_res.cuda_stream);
+  CHECK_CUDA(cudaMemcpyAsync(d_dirty, dirty_npy.as_float32(), npix * sizeof(float),
+                             cudaMemcpyHostToDevice, stream_res.cuda_stream));
+  CHECK_CUDA(cudaMemcpyAsync(d_scales, kernel_npy.as_float32(), kernel_total * sizeof(float),
+                             cudaMemcpyHostToDevice, stream_res.cuda_stream));
   stream_res.sync();
 
   fast_deconv::algorithm::wscms::detail::scale_convolve(resources, stream_res, ctx, d_dirty,
                                                         d_scales, d_output, n_scales);
 
   std::vector<float> h_output(npix * n_scales);
-  cudaMemcpyAsync(h_output.data(), d_output, npix * n_scales * sizeof(float),
-                  cudaMemcpyDeviceToHost, stream_res.cuda_stream);
+  CHECK_CUDA(cudaMemcpyAsync(h_output.data(), d_output, npix * n_scales * sizeof(float),
+                             cudaMemcpyDeviceToHost, stream_res.cuda_stream));
   stream_res.sync();
 
   // Compare with expected (skip scale 0 - Python resets it to original dirty)
@@ -176,10 +177,11 @@ TEST_F(ScaleSelectionTest, ScaleSelectionResult)
   float* d_scaled_dirty = resources.alloc_async<float>(n_scales * npix, stream_res);
   bool* d_mask = resources.alloc_async<bool>(npix, stream_res);
 
-  cudaMemcpyAsync(d_scaled_dirty, scaled_dirty_npy.as_float32(), n_scales * npix * sizeof(float),
-                  cudaMemcpyHostToDevice, stream_res.cuda_stream);
-  cudaMemcpyAsync(d_mask, mask_npy.as_bool(), npix * sizeof(bool), cudaMemcpyHostToDevice,
-                  stream_res.cuda_stream);
+  CHECK_CUDA(cudaMemcpyAsync(d_scaled_dirty, scaled_dirty_npy.as_float32(),
+                             n_scales * npix * sizeof(float), cudaMemcpyHostToDevice,
+                             stream_res.cuda_stream));
+  CHECK_CUDA(cudaMemcpyAsync(d_mask, mask_npy.as_bool(), npix * sizeof(bool),
+                             cudaMemcpyHostToDevice, stream_res.cuda_stream));
   stream_res.sync();
 
   // Run scale_selection (bias is host pointer)
@@ -217,8 +219,8 @@ TEST_F(ScaleSelectionTest, CopyScaleSlice)
   float* d_src = resources.alloc_async<float>(n_scales * npix, stream_res);
   float* d_dst = resources.alloc_async<float>(npix, stream_res);
 
-  cudaMemcpyAsync(d_src, conv_npy.as_float32(), n_scales * npix * sizeof(float),
-                  cudaMemcpyHostToDevice, stream_res.cuda_stream);
+  CHECK_CUDA(cudaMemcpyAsync(d_src, conv_npy.as_float32(), n_scales * npix * sizeof(float),
+                             cudaMemcpyHostToDevice, stream_res.cuda_stream));
   stream_res.sync();
 
   fast_deconv::algorithm::wscms::detail::copy_scale_slice(stream_res, d_src, d_dst, best_scale,
@@ -226,8 +228,8 @@ TEST_F(ScaleSelectionTest, CopyScaleSlice)
   stream_res.sync();
 
   std::vector<float> h_output(npix);
-  cudaMemcpyAsync(h_output.data(), d_dst, npix * sizeof(float), cudaMemcpyDeviceToHost,
-                  stream_res.cuda_stream);
+  CHECK_CUDA(cudaMemcpyAsync(h_output.data(), d_dst, npix * sizeof(float),
+                             cudaMemcpyDeviceToHost, stream_res.cuda_stream));
   stream_res.sync();
 
   const float* expected = expected_npy.as_float32();
