@@ -213,3 +213,7 @@ AGENTS.md
 
 .claude/
 .ignore
+
+tests/data/
+docs/
+.idea/
