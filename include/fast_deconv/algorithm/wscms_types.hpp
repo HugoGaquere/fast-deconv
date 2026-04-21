@@ -42,6 +42,7 @@ struct scale_convole_ctx {
   int freq_nrow, freq_ncol;              // frequency domain size
   int n_batches;
   cufftHandle plan_forward, plan_backward;  // FFT plans
+  void* work_area = nullptr;                // shared cuFFT workspace (pool-managed)
 
   ~scale_convole_ctx()
   {
@@ -58,6 +59,7 @@ struct psf_convolve_ctx {
   int n_batch;                              // batch size (nch per facet)
   cufftHandle plan_forward, plan_backward;  // batched R2C / C2R plans
   cufftHandle plan_backward_2;              // separate C2R plan for conv2
+  void* work_area = nullptr;                // shared cuFFT workspace (pool-managed)
 
   ~psf_convolve_ctx()
   {

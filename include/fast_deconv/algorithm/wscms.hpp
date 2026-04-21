@@ -16,9 +16,14 @@ wscms_result run_wscms(core::resources& resources, core::device_span4d<float>& d
                        const psf_convolve_ctx& psf_ctx,
                        const bool* mask, WSCMS_params params)
 {
-  log::set_level(spdlog::level::info);
-  FD_LOG_INFO("run_wscms: dirty={} raw_psfs={} n_scales={} max_iter={} peak_factor={}", dirty,
-              wscms_ctx.raw_psfs, params.n_scales, params.max_sub_iteration, params.peak_factor);
+  log::set_level(spdlog::level::debug);
+  FD_LOG_INFO("run_wscms: dirty={} raw_psfs={} n_scales={}, max_iter={}, max_sub_iter={}, peak_factor={}", dirty,
+              wscms_ctx.raw_psfs, params.n_scales, params.max_iteration, params.max_sub_iteration, params.peak_factor);
+  FD_LOG_DEBUG(
+      "run_wscms: jones_norm={} weights_freq_size={} gamma={:.6f} clean_negative={} "
+      "stop_flux={:.8f} divergence_factor={:.4f} stall_threshold={:.8f} forbidden_scales_count={}",
+      jones_norm, weights_freq.size(), params.gamma, params.clean_negative, params.stop_flux,
+      params.divergence_factor, params.stall_threshold, params.forbidden_scales.size());
 
   wscms_result result = detail::wscms_minor_cycles(resources, dirty, jones_norm, weights_freq,
                                                    wscms_ctx, scale_ctx, psf_ctx, mask, params);
@@ -35,7 +40,8 @@ class Wscms {
         const core::host_vect<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet,
         float gamma, int dirty_nrows, int dirty_ncols, float peak_factor,
         bool clean_negative, float fft_padding, int exec_device = 0)
-      : ctx_{raw_psfs, xdes, scale_masks, scale_sigmas, scale_bias, map_pixel_facet},
+      : resources_(exec_device),
+        ctx_{raw_psfs, xdes, scale_masks, scale_sigmas, scale_bias, map_pixel_facet},
         params_{
             .clean_negative = clean_negative,
             .peak_factor = peak_factor,
@@ -44,11 +50,12 @@ class Wscms {
             .n_scales = static_cast<int>(scale_sigmas.size()),
         },
         convolve_ctx_(detail::make_scale_convolve_ctx(
-            dirty_nrows, dirty_ncols, static_cast<int>(scale_sigmas.size()), fft_padding)),
+            resources_, dirty_nrows, dirty_ncols, static_cast<int>(scale_sigmas.size()),
+            fft_padding)),
         psf_convolve_ctx_(detail::make_psf_convolve_ctx(
-            static_cast<int>(raw_psfs.extent(3)), static_cast<int>(raw_psfs.extent(4)),
-            static_cast<int>(raw_psfs.extent(1)), fft_padding)),
-        resources_(exec_device) {};
+            resources_, static_cast<int>(raw_psfs.extent(3)),
+            static_cast<int>(raw_psfs.extent(4)), static_cast<int>(raw_psfs.extent(1)),
+            fft_padding)) {};
 
   wscms_result run(core::device_span4d<float>& dirty,
                    const core::device_span4d<float>& jones_norm,
@@ -75,11 +82,11 @@ class Wscms {
   bool clean_negative() const { return params_.clean_negative; }
 
  private:
+  core::resources resources_;  // constructed first, destroyed last (pool owns workspace)
   WSCMS_ctx ctx_;
   WSCMS_params params_;
   scale_convole_ctx convolve_ctx_;
   psf_convolve_ctx psf_convolve_ctx_;
-  core::resources resources_;
 };
 
 }  // namespace fast_deconv::algorithm::wscms

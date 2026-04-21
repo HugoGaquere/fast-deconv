@@ -44,12 +44,12 @@ class stream_resources {
 
 class stream_resources_pool {
  public:
-  static constexpr std::size_t default_size{8};
-  static constexpr uint default_flag{cudaStreamDefault};
+  static constexpr uint8_t default_size{16};
+  static constexpr uint8_t default_flag{cudaStreamDefault};
 
-  explicit stream_resources_pool(std::size_t pool_size = default_size, uint flag = default_flag)
+  explicit stream_resources_pool(uint8_t pool_size = default_size, uint8_t flag = default_flag)
   {
-    for (std::size_t i = 0; i < pool_size; i++)
+    for (uint8_t i = 0; i < pool_size; i++)
       streams_.push_back(std::make_unique<stream_resources>(flag));
   }
 
@@ -63,16 +63,16 @@ class stream_resources_pool {
     return *streams_[next_stream_.fetch_add(1, std::memory_order_relaxed) % streams_.size()];
   }
 
-  size_t size() const noexcept { return streams_.size(); }
+  uint8_t size() const noexcept { return streams_.size(); }
 
  private:
   std::vector<std::unique_ptr<stream_resources>> streams_;
-  mutable std::atomic_size_t next_stream_{};
+  mutable std::atomic_uint8_t next_stream_{};
 };
 
 class resources {
  public:
-  resources(int device) : device_(device)
+  resources(uint8_t device) : device_(device)
   {
     cudaMemPoolProps pool_props = {};
     pool_props.allocType = cudaMemAllocationTypePinned;    // page-locked GPU memory
@@ -99,11 +99,11 @@ class resources {
   }
 
   template <typename T = void>
-  T* alloc_async(std::size_t n, const stream_resources& stream_r) const
+  T* alloc_async(uint64_t n, const stream_resources& stream_r) const
   {
     if (n == 0) throw std::invalid_argument("alloc_async: n must be > 0");
 
-    std::size_t num_bytes;
+    uint64_t num_bytes;
     if constexpr (std::is_void_v<T>) {
       num_bytes = n;
     } else {
@@ -124,7 +124,7 @@ class resources {
   }
 
  private:
-  int device_;
+  uint8_t device_;
   cudaMemPool_t memory_pool_;
   stream_resources_pool stream_res_pool_;
 };

@@ -321,14 +321,21 @@ __global__ void compute_spectral_matrix_kernel(float* __restrict__ SAX, float* _
   }
 }
 
-// Compute A_pinv = inv(A^T A) @ A^T
-// A: row-major [n_freq, n_order] (device)
-// A_pinv: col-major [n_order, n_freq] output (device), pre-allocated
+// Compute the Moore-Penrose pseudo-inverse of a row-major matrix A [n_freq, n_order].
+// A_pinv: col-major [n_order, n_freq] output (device), pre-allocated.
 //
-// cuBLAS sees row-major A as col-major A_cm = A^T [n_order, n_freq]
-//   Step 1: G     = A_cm @ A_cm^T = A^T A       [n_order, n_order]
-//   Step 2: G_inv = inv(G)                       [n_order, n_order]  (matinvBatched)
-//   Step 3: A_pinv = G_inv @ A_cm = inv(A^T A) @ A^T  [n_order, n_freq]
+// Two code paths depending on shape:
+//   overdetermined (n_freq >= n_order): A_pinv = inv(A^T A) @ A^T
+//       G  = A^T A  [n_order, n_order]
+//       A_pinv = inv(G) @ A^T
+//   underdetermined (n_freq <  n_order): A_pinv = A^T @ inv(A A^T)
+//       G  = A A^T  [n_freq,  n_freq]
+//       A_pinv = A^T @ inv(G)
+// The underdetermined path is required when n_order > n_freq since A^T A is then
+// rank-deficient (rank <= n_freq in an n_order x n_order space) and matinvBatched
+// fails with info != 0.
+//
+// cuBLAS sees row-major A as col-major A_cm = A^T with shape [n_order, n_freq].
 void compute_pseudo_inverse(const core::resources& resources,
                             const core::stream_resources& stream_res, const float* d_A,
                             float* d_Apinv, int n_freq, int n_order)
@@ -337,15 +344,25 @@ void compute_pseudo_inverse(const core::resources& resources,
   const float alpha = 1.0f;
   const float beta = 0.0f;
 
-  float* d_G = resources.alloc_async<float>(n_order * n_order, stream_res);
-  float* d_Ginv = resources.alloc_async<float>(n_order * n_order, stream_res);
+  const bool underdetermined = n_order > n_freq;
+  const int g_dim = underdetermined ? n_freq : n_order;
+
+  float* d_G = resources.alloc_async<float>(g_dim * g_dim, stream_res);
+  float* d_Ginv = resources.alloc_async<float>(g_dim * g_dim, stream_res);
   int* d_info = resources.alloc_async<int>(1, stream_res);
   float** d_G_ptrs = resources.alloc_async<float*>(1, stream_res);
   float** d_Ginv_ptrs = resources.alloc_async<float*>(1, stream_res);
 
-  // Step 1: G = A^T @ A
-  CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, n_order, n_order, n_freq, &alpha, d_A,
-                           n_order, d_A, n_order, &beta, d_G, n_order));
+  // Step 1: G
+  //   overdetermined: G = A_cm @ A_cm^T  (N, T)  -> A^T A   [n_order, n_order]
+  //   underdetermined: G = A_cm^T @ A_cm (T, N)  -> A A^T   [n_freq,  n_freq]
+  if (underdetermined) {
+    CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, n_freq, n_freq, n_order, &alpha,
+                             d_A, n_order, d_A, n_order, &beta, d_G, n_freq));
+  } else {
+    CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T, n_order, n_order, n_freq, &alpha,
+                             d_A, n_order, d_A, n_order, &beta, d_G, n_order));
+  }
 
   // Step 2: G_inv = inv(G)
   // matinvBatched expects device arrays of device pointers;
@@ -355,11 +372,31 @@ void compute_pseudo_inverse(const core::resources& resources,
   CHECK_CUDA(cudaMemcpyAsync(d_Ginv_ptrs, &d_Ginv, sizeof(float*), cudaMemcpyHostToDevice,
                              stream_res.cuda_stream));
   CHECK_CUBLAS(
-      cublasSmatinvBatched(handle, n_order, d_G_ptrs, n_order, d_Ginv_ptrs, n_order, d_info, 1));
+      cublasSmatinvBatched(handle, g_dim, d_G_ptrs, g_dim, d_Ginv_ptrs, g_dim, d_info, 1));
 
-  // Step 3: A_pinv = G_inv @ A^T
-  CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, n_order, n_freq, n_order, &alpha,
-                           d_Ginv, n_order, d_A, n_order, &beta, d_Apinv, n_order));
+#if FD_LOG_ACTIVE_LEVEL <= FD_LOG_LEVEL_DEBUG
+  {
+    int h_info = 0;
+    CHECK_CUDA(cudaMemcpyAsync(&h_info, d_info, sizeof(int), cudaMemcpyDeviceToHost,
+                               stream_res.cuda_stream));
+    stream_res.sync();
+    FD_LOG_DEBUG(
+        "compute_pseudo_inverse: n_freq={} n_order={} mode={} g_dim={} matinvBatched info={} ({})",
+        n_freq, n_order, underdetermined ? "underdetermined" : "overdetermined", g_dim, h_info,
+        h_info == 0 ? "ok" : "singular");
+  }
+#endif
+
+  // Step 3: A_pinv [n_order, n_freq] col-major
+  //   overdetermined: A_pinv_cm = G_inv @ A_cm         -> inv(A^T A) @ A^T
+  //   underdetermined: A_pinv_cm = A_cm  @ G_inv       -> A^T @ inv(A A^T)
+  if (underdetermined) {
+    CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, n_order, n_freq, n_freq, &alpha,
+                             d_A, n_order, d_Ginv, n_freq, &beta, d_Apinv, n_order));
+  } else {
+    CHECK_CUBLAS(cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, n_order, n_freq, n_order, &alpha,
+                             d_Ginv, n_order, d_A, n_order, &beta, d_Apinv, n_order));
+  }
 
   resources.free_async(d_Ginv_ptrs, stream_res);
   resources.free_async(d_G_ptrs, stream_res);
@@ -493,6 +530,11 @@ void subtract_component(const core::resources& resources, const core::stream_res
   // Step 4: subtract PSF from dirty
   overlap_region ovr = compute_overlap_region(peak_row, peak_col, nrow, ncol, psf_nrow, psf_ncol);
   const int total = n_freq * ovr.w * ovr.h;
+  FD_LOG_DEBUG(
+      "subtract_component: peak=({},{}) n_freq={} n_order={} dirty={}x{} psf={}x{} roi={}x{} "
+      "total={} blocks={}",
+      peak_row, peak_col, n_freq, n_order, nrow, ncol, psf_nrow, psf_ncol, ovr.w, ovr.h, total,
+      CEIL_DIV(total, 256));
   spectral_psf_subtract_kernel<<<CEIL_DIV(total, 256), 256, 0, cuda_stream>>>(
       dirty, psf, d_per_chan, ovr, gain, n_freq, nrow * ncol, psf_nrow * psf_ncol);
 
@@ -558,6 +600,10 @@ int wscms_subminor_cycles(const core::resources& resources,
   float* jones_norm_ptr = jones_norm.data_handle();
   float* weights_ptr = weights_freq.data_handle();
 
+  FD_LOG_DEBUG(
+      "subminor: scale_idx={} n_freq={} n_order={} nrow={} ncol={} n={} max_sub_iteration={}",
+      scale_idx, n_freq, n_order, nrow, ncol, n, params.max_sub_iteration);
+
   // Allocate output for DeviceReduce::ArgMax
   using KVPair = cub::KeyValuePair<int, float>;
   KVPair* d_argmax_out = resources.alloc_async<KVPair>(1, stream_res);
@@ -567,6 +613,7 @@ int wscms_subminor_cycles(const core::resources& resources,
   cub::DeviceReduce::ArgMax(nullptr, temp_storage_bytes, mean_residual_ptr, d_argmax_out, n,
                             cuda_stream);
   char* d_temp = resources.alloc_async<char>(temp_storage_bytes, stream_res);
+  FD_LOG_DEBUG("subminor: ArgMax temp_storage_bytes={}", temp_storage_bytes);
 
   // Initial full argmax
   cub::DeviceReduce::ArgMax(d_temp, temp_storage_bytes, mean_residual_ptr, d_argmax_out, n,
@@ -586,6 +633,8 @@ int wscms_subminor_cycles(const core::resources& resources,
 
   FD_LOG_INFO("minor_loop: initial_peak={:.8f} threshold={:.8f} max_iteration={}", h_peak.value,
               threshold, params.max_sub_iteration);
+  FD_LOG_DEBUG("minor_loop: initial_peak at ({},{}) flat_idx={}", h_peak.key / ncol,
+               h_peak.key % ncol, h_peak.key);
 
   int n_iter = 0;
   while (h_peak.value > threshold && n_iter < params.max_sub_iteration) {
@@ -597,6 +646,13 @@ int wscms_subminor_cycles(const core::resources& resources,
     // Stream 1: PSF subtraction from mean dirty
     const float* psf_2_ptr = conv2_psfs + facet_idx * psf_nrow * psf_ncol;
     overlap_region ovr = compute_overlap_region(peak_row, peak_col, nrow, ncol, psf_nrow, psf_ncol);
+
+    FD_LOG_DEBUG(
+        "subminor iter={}: peak=({},{}) value={:.8f} facet={} gain={:.6f} factor={:.6f} "
+        "roi={}x{} coeffs_offset={}",
+        n_iter, peak_row, peak_col, h_peak.value, facet_idx, gain, factor, ovr.w, ovr.h,
+        static_cast<std::size_t>(n_iter) * n_order);
+
     psf_subtract_kernel<<<CEIL_DIV(ovr.w * ovr.h, 256), 256, 0, cuda_stream>>>(
         mean_residual_ptr, psf_2_ptr, ovr, factor);
 

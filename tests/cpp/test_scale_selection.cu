@@ -116,7 +116,7 @@ TEST_F(ScaleSelectionTest, ScaleConvolve)
   const auto& stream_res = resources.get_stream_resources();
 
   auto ctx = fast_deconv::algorithm::wscms::detail::make_scale_convolve_ctx(
-      nrow, ncol, n_scales, padding);
+      resources, nrow, ncol, n_scales, padding);
 
   float* d_dirty = resources.alloc_async<float>(npix, stream_res);
   float* d_scales = resources.alloc_async<float>(kernel_total, stream_res);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <spdlog/spdlog.h>
 
 #include <fast_deconv/core/concepts.hpp>
@@ -32,6 +33,15 @@ struct fmt::formatter<M> {
 //
 // Levels: TRACE=0, DEBUG=1, INFO=2, WARN=3, ERROR=4, CRITICAL=5, OFF=6
 // Default is INFO (trace and debug compiled out).
+
+#define FD_LOG_LEVEL_TRACE SPDLOG_LEVEL_TRACE
+#define FD_LOG_LEVEL_DEBUG SPDLOG_LEVEL_DEBUG
+#define FD_LOG_LEVEL_INFO SPDLOG_LEVEL_INFO
+#define FD_LOG_LEVEL_WARN SPDLOG_LEVEL_WARN
+#define FD_LOG_LEVEL_ERROR SPDLOG_LEVEL_ERROR
+#define FD_LOG_LEVEL_CRITICAL SPDLOG_LEVEL_CRITICAL
+#define FD_LOG_LEVEL_OFF SPDLOG_LEVEL_OFF
+#define FD_LOG_ACTIVE_LEVEL SPDLOG_ACTIVE_LEVEL
 
 #define FD_LOG_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
 #define FD_LOG_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)

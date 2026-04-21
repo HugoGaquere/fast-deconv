@@ -27,11 +27,12 @@ build-backend = "scikit_build_core.build"
 [tool.scikit-build]
 minimum-version = "build-system.requires"
 build-dir = "build/{wheel_tag}"
-# editable.rebuild = true
+editable.rebuild = true
 
 [tool.scikit-build.cmake]
 define = {CMAKE_PROJECT_TOP_LEVEL_INCLUDES = "cmake/conan_provider.cmake"}
-# build-type = "Debug"
+#build-type = "Release"
+#build-type = "Debug"
 
 [tool.pytest.ini_options]
 minversion = "8.0"

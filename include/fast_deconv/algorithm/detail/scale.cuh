@@ -182,7 +182,8 @@ scale_selection_result scale_selection(const core::resources& resources,
   return {best_scale, best_row, best_col, h_peaks[best_scale].value};
 }
 
-scale_convole_ctx make_scale_convolve_ctx(int nrow, int ncol, int n_scales, float padding)
+scale_convole_ctx make_scale_convolve_ctx(const core::resources& resources, int nrow, int ncol,
+                                          int n_scales, float padding)
 {
   const auto [npad_row, npad_col] = linalg::detail::compute_padding(nrow, ncol, padding);
 
@@ -197,60 +198,67 @@ scale_convole_ctx make_scale_convolve_ctx(int nrow, int ncol, int n_scales, floa
   ctx.freq_ncol = ctx.img_padded_ncol / 2 + 1;
   ctx.n_batches = n_scales;
 
-  // cuFFT plans auto-allocate internal workspace via cudaMalloc at creation time.
-  // Workspace size scales linearly with batch count for out-of-place batched plans.
-  // Use cufftGetSize() to query the actual workspace; cufftSetAutoAllocation(plan, 0)
-  // can be used to disable auto-allocation and share a single user-managed buffer
-  // across plans to reduce peak memory (see cuFFT §2.14 Caller Allocated Work Area).
+  // Disable cuFFT auto-allocation so both plans share a single caller-managed workspace.
+  // Plans execute sequentially, so one buffer of max(forward, backward) suffices.
+  // See cuFFT §2.14 Caller Allocated Work Area.
 
-  CUFFT_CALL(cufftPlan2d(&ctx.plan_forward, ctx.img_padded_nrow, ctx.img_padded_ncol, CUFFT_R2C));
-
+  CUFFT_CALL(cufftCreate(&ctx.plan_forward));
+  CUFFT_CALL(cufftSetAutoAllocation(ctx.plan_forward, 0));
   size_t forward_work_size = 0;
-  CUFFT_CALL(cufftGetSize(ctx.plan_forward, &forward_work_size));
+  CUFFT_CALL(cufftMakePlan2d(ctx.plan_forward, ctx.img_padded_nrow, ctx.img_padded_ncol, CUFFT_R2C,
+                             &forward_work_size));
+
+  CUFFT_CALL(cufftCreate(&ctx.plan_backward));
+  CUFFT_CALL(cufftSetAutoAllocation(ctx.plan_backward, 0));
+  size_t backward_work_size = 0;
+  CUFFT_CALL(cufftMakePlan2d(ctx.plan_backward, ctx.img_padded_nrow, ctx.img_padded_ncol, CUFFT_C2R,
+                             &backward_work_size));
+
+  // Allocate single shared workspace from the resource pool
+  const auto& stream_r = resources.get_stream_resources();
+  size_t shared_work_size = std::max(forward_work_size, backward_work_size);
+  ctx.work_area = resources.alloc_async<void>(shared_work_size, stream_r);
+  stream_r.sync();
+  CUFFT_CALL(cufftSetWorkArea(ctx.plan_forward, ctx.work_area));
+  CUFFT_CALL(cufftSetWorkArea(ctx.plan_backward, ctx.work_area));
+
   FD_LOG_INFO("scale_convolve_ctx: forward R2C plan {}x{} — workspace {:.2f} GB",
               ctx.img_padded_nrow, ctx.img_padded_ncol,
               static_cast<double>(forward_work_size) / (1024.0 * 1024.0 * 1024.0));
-
-  std::array<int, 2> fft_size{ctx.img_padded_nrow, ctx.img_padded_ncol};
-  CUFFT_CALL(cufftPlanMany(&ctx.plan_backward, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
-                           CUFFT_C2R, n_scales));
-
-  size_t backward_work_size = 0;
-  CUFFT_CALL(cufftGetSize(ctx.plan_backward, &backward_work_size));
-  FD_LOG_INFO("scale_convolve_ctx: backward C2R plan {}x{} x {} batches — workspace {:.2f} GB",
-              ctx.img_padded_nrow, ctx.img_padded_ncol, n_scales,
+  FD_LOG_INFO("scale_convolve_ctx: backward C2R plan {}x{} (unbatched) — workspace {:.2f} GB",
+              ctx.img_padded_nrow, ctx.img_padded_ncol,
               static_cast<double>(backward_work_size) / (1024.0 * 1024.0 * 1024.0));
-
-  FD_LOG_INFO("scale_convolve_ctx: total cuFFT workspace {:.2f} GB",
+  FD_LOG_INFO("scale_convolve_ctx: shared workspace {:.2f} GB (was {:.2f} GB with {} batches)",
+              static_cast<double>(shared_work_size) / (1024.0 * 1024.0 * 1024.0),
               static_cast<double>(forward_work_size + backward_work_size) /
-                  (1024.0 * 1024.0 * 1024.0));
+                  (1024.0 * 1024.0 * 1024.0),
+              n_scales);
 
   return ctx;
 }
 
 // Convolves a dirty image with Gaussian scale kernels.
 // dirty:            (nrow, ncol) real, device
-// sigmas:           (n_scales,) Gaussian sigmas, device
+// scales:           (n_scales, freq_nrow, freq_ncol) Gaussian kernels in freq domain, device
 // out_scaled_dirty: (n_scales, nrow, ncol) real, device
-// Internally: pad+ifftshift → R2C → multiply with Gaussian scales → C2R → fftshift+crop
+// Internally: pad+ifftshift → R2C (once) → per-scale: multiply → C2R → fftshift+crop
 void scale_convolve(const core::resources& resources, const core::stream_resources& stream_res,
                     const scale_convole_ctx& ctx, float* dirty, float* scales,
                     float* out_scaled_dirty, int n_scales)
 {
   const int img_padded_total = ctx.img_padded_nrow * ctx.img_padded_ncol;
   const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
-  const int freq_scales_total = freq_total * n_scales;
+  const int npix = ctx.img_nrow * ctx.img_ncol;
 
   cudaStream_t cuda_stream = stream_res.cuda_stream;
   CUFFT_CALL(cufftSetStream(ctx.plan_forward, cuda_stream));
   CUFFT_CALL(cufftSetStream(ctx.plan_backward, cuda_stream));
 
-  // Allocate temporaries
+  // Allocate temporaries — O(1) in n_scales
   float* dirty_padded = resources.alloc_async<float>(img_padded_total, stream_res);
   complex_type* dirty_freq = resources.alloc_async<complex_type>(freq_total, stream_res);
-  complex_type* scaled_dirty_freq =
-      resources.alloc_async<complex_type>(freq_scales_total, stream_res);
-  float* scaled_dirty = resources.alloc_async<float>(img_padded_total * n_scales, stream_res);
+  complex_type* scaled_dirty_freq = resources.alloc_async<complex_type>(freq_total, stream_res);
+  float* scaled_dirty = resources.alloc_async<float>(img_padded_total, stream_res);
 
   stream_res.sync();
 
@@ -259,24 +267,24 @@ void scale_convolve(const core::resources& resources, const core::stream_resourc
                                 ctx.img_padded_nrow, ctx.img_padded_ncol, ctx.padding_nrow,
                                 ctx.padding_ncol, cuda_stream);
 
-  // Forward R2C: real (nrow, ncol) -> half-complex (nrow, ncol/2+1)
+  // Forward R2C: real (nrow, ncol) -> half-complex (nrow, ncol/2+1) — once
   CUFFT_CALL(cufftExecR2C(ctx.plan_forward, dirty_padded, dirty_freq));
 
-  // Element-wise multiply with scales + 1/N normalization
+  // Per-scale: multiply → C2R → fftshift+crop
   float norm = 1.0f / static_cast<float>(img_padded_total);
-  multiply_batched_kernel<<<CEIL_DIV(freq_total, 256), 256, 0, cuda_stream>>>(
-      dirty_freq, scales, scaled_dirty_freq, freq_total, n_scales, norm);
+  for (int i = 0; i < n_scales; i++) {
+    multiply_batched_kernel<<<CEIL_DIV(freq_total, 256), 256, 0, cuda_stream>>>(
+        dirty_freq, scales + i * freq_total, scaled_dirty_freq, freq_total, 1, norm);
 
-  // Inverse C2R: half-complex -> real per batch
-  CUFFT_CALL(cufftExecC2R(ctx.plan_backward, scaled_dirty_freq, scaled_dirty));
+    CUFFT_CALL(cufftExecC2R(ctx.plan_backward, scaled_dirty_freq, scaled_dirty));
 
-  // Fftshift + crop back to original size
-  linalg::detail::fftshift_crop(scaled_dirty, out_scaled_dirty, ctx.img_nrow, ctx.img_ncol,
-                                ctx.img_padded_nrow, ctx.img_padded_ncol, ctx.padding_nrow,
-                                ctx.padding_ncol, n_scales, cuda_stream);
+    linalg::detail::fftshift_crop(scaled_dirty, out_scaled_dirty + i * npix, ctx.img_nrow,
+                                  ctx.img_ncol, ctx.img_padded_nrow, ctx.img_padded_ncol,
+                                  ctx.padding_nrow, ctx.padding_ncol, 1, cuda_stream);
+  }
 
   // we want untouched mean dirty at scale 0
-  CHECK_CUDA(cudaMemcpyAsync(out_scaled_dirty, dirty, ctx.img_nrow * ctx.img_ncol * sizeof(float),
+  CHECK_CUDA(cudaMemcpyAsync(out_scaled_dirty, dirty, npix * sizeof(float),
                              cudaMemcpyDeviceToDevice, stream_res.cuda_stream));
 
   // Cleanup
@@ -373,6 +381,7 @@ __global__ void weighted_mean_channels_kernel(const float* __restrict__ input,
 /**
  * @brief   Create a PSF convolution context with FFT plans for batched PSF processing.
  *
+ * @param[in] resources GPU resource pool for workspace allocation.
  * @param[in] psf_nrow Number of rows in the PSF.
  * @param[in] psf_ncol Number of columns in the PSF.
  * @param[in] nch      Batch size (number of frequency channels).
@@ -380,7 +389,8 @@ __global__ void weighted_mean_channels_kernel(const float* __restrict__ input,
  *
  * @return psf_convolve_ctx with initialized FFT plans.
  */
-psf_convolve_ctx make_psf_convolve_ctx(int psf_nrow, int psf_ncol, int nch, float padding)
+psf_convolve_ctx make_psf_convolve_ctx(const core::resources& resources, int psf_nrow, int psf_ncol,
+                                       int nch, float padding)
 {
   const auto [npad_row, npad_col] = linalg::detail::compute_padding(psf_nrow, psf_ncol, padding);
 
@@ -395,31 +405,44 @@ psf_convolve_ctx make_psf_convolve_ctx(int psf_nrow, int psf_ncol, int nch, floa
   ctx.freq_ncol = ctx.psf_padded_ncol / 2 + 1;
   ctx.n_batch = nch;
 
-  // cuFFT plans auto-allocate internal workspace via cudaMalloc at creation time.
-  // These PSF-sized plans are batched over nch channels; workspace scales with batch count.
-  // See cuFFT §2.14 Caller Allocated Work Area for sharing workspace across plans.
+  // Disable cuFFT auto-allocation so all 3 plans share a single caller-managed workspace.
+  // Plans execute sequentially, so one buffer of max(fwd, bwd, bwd2) suffices.
+  // See cuFFT §2.14 Caller Allocated Work Area.
 
   std::array<int, 2> fft_size{ctx.psf_padded_nrow, ctx.psf_padded_ncol};
-  CUFFT_CALL(cufftPlanMany(&ctx.plan_forward, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
-                           CUFFT_R2C, nch));
-  CUFFT_CALL(cufftPlanMany(&ctx.plan_backward, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
-                           CUFFT_C2R, nch));
-  CUFFT_CALL(cufftPlanMany(&ctx.plan_backward_2, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
-                           CUFFT_C2R, nch));
-
   size_t fwd_work = 0, bwd_work = 0, bwd2_work = 0;
-  CUFFT_CALL(cufftGetSize(ctx.plan_forward, &fwd_work));
-  CUFFT_CALL(cufftGetSize(ctx.plan_backward, &bwd_work));
-  CUFFT_CALL(cufftGetSize(ctx.plan_backward_2, &bwd2_work));
+
+  CUFFT_CALL(cufftCreate(&ctx.plan_forward));
+  CUFFT_CALL(cufftSetAutoAllocation(ctx.plan_forward, 0));
+  CUFFT_CALL(cufftMakePlanMany(ctx.plan_forward, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
+                               CUFFT_R2C, nch, &fwd_work));
+
+  CUFFT_CALL(cufftCreate(&ctx.plan_backward));
+  CUFFT_CALL(cufftSetAutoAllocation(ctx.plan_backward, 0));
+  CUFFT_CALL(cufftMakePlanMany(ctx.plan_backward, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0,
+                               CUFFT_C2R, nch, &bwd_work));
+
+  CUFFT_CALL(cufftCreate(&ctx.plan_backward_2));
+  CUFFT_CALL(cufftSetAutoAllocation(ctx.plan_backward_2, 0));
+  CUFFT_CALL(cufftMakePlanMany(ctx.plan_backward_2, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1,
+                               0, CUFFT_C2R, nch, &bwd2_work));
+
+  // Allocate single shared workspace from the resource pool
+  const auto& stream_r = resources.get_stream_resources();
+  size_t shared_work_size = std::max({fwd_work, bwd_work, bwd2_work});
+  ctx.work_area = resources.alloc_async<void>(shared_work_size, stream_r);
+  stream_r.sync();
+  CUFFT_CALL(cufftSetWorkArea(ctx.plan_forward, ctx.work_area));
+  CUFFT_CALL(cufftSetWorkArea(ctx.plan_backward, ctx.work_area));
+  CUFFT_CALL(cufftSetWorkArea(ctx.plan_backward_2, ctx.work_area));
 
   FD_LOG_INFO("psf_convolve_ctx: plans {}x{} x {} batches — workspace fwd {:.2f} GB, "
-              "bwd {:.2f} GB, bwd2 {:.2f} GB, total {:.2f} GB",
+              "bwd {:.2f} GB, bwd2 {:.2f} GB, shared {:.2f} GB",
               ctx.psf_padded_nrow, ctx.psf_padded_ncol, nch,
               static_cast<double>(fwd_work) / (1024.0 * 1024.0 * 1024.0),
               static_cast<double>(bwd_work) / (1024.0 * 1024.0 * 1024.0),
               static_cast<double>(bwd2_work) / (1024.0 * 1024.0 * 1024.0),
-              static_cast<double>(fwd_work + bwd_work + bwd2_work) /
-                  (1024.0 * 1024.0 * 1024.0));
+              static_cast<double>(shared_work_size) / (1024.0 * 1024.0 * 1024.0));
 
   return ctx;
 }
@@ -603,14 +626,13 @@ std::vector<float> compute_scale_gains(const core::resources& resources,
   CHECK_CUDA(cudaMemcpyAsync(gains.data(), d_maxes, sizeof(float) * n_facets,
                              cudaMemcpyDeviceToHost, cuda_stream));
   stream_res.sync();
+  resources.free_async(d_temp, stream_res);
+  resources.free_async(d_maxes, stream_res);
+  resources.free_async(wmean, stream_res);
 
   for (int f = 0; f < n_facets; f++) {
     gains[f] = gamma / gains[f];
   }
-
-  resources.free_async(d_temp, stream_res);
-  resources.free_async(d_maxes, stream_res);
-  resources.free_async(wmean, stream_res);
 
   return gains;
 }
