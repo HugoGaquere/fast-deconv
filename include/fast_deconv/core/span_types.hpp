@@ -1,6 +1,7 @@
 #pragma once
-#include <emu/mdspan.hpp>
 #include <emu/cuda/device/mdspan.hpp>
+#include <emu/cuda/device/span.hpp>
+#include <emu/detail/mdspan_types.hpp>
 
 namespace fast_deconv::core {
 
@@ -117,5 +118,18 @@ using host_span5d_S = h_mdspan_S<T, 5>;
 template <typename T>
 using host_span6d_S = h_mdspan_S<T, 6>;
 
+template <class T>
+device_span3d<T> slice_leading(const device_span4d<T>& src, std::size_t i)
+{
+  return core::device_span3d<T>(src.data_handle() + i * src.stride(0), src.extent(1), src.extent(2),
+                                src.extent(3));
+}
+
+template <class T>
+device_span2d<T> slice_leading(const device_span3d<T>& src, std::size_t i)
+{
+  return core::device_span2d<T>(src.data_handle() + i * src.stride(0), src.extent(1),
+                                src.extent(2));
+}
 
 }  // namespace fast_deconv::core

@@ -71,13 +71,7 @@ __host__ __device__ inline overlap_region compute_overlap_region(int y_center, i
   return overlap_region{a_x0, a_y0, b_x_offset, b_y_offset, w, h, a_width, b_width};
 }
 
-__host__ __device__ inline auto unravel_index_2D(uint flat_index, uint width)
-    -> std::pair<uint, uint>
-{
-  const uint y = flat_index / width;
-  const uint x = flat_index % width;
-  return {y, x};
-}
+
 
 // ================================================================== //
 //              Cooperative-kernel minor cycles
@@ -574,7 +568,7 @@ void subtract_component(const core::resources& resources, const core::stream_res
  *
  * @return Number of components produced.
  */
-int wscms_subminor_cycles(const core::resources& resources,
+  int wscms_subminor_cycles(const core::resources& resources,
                           core::device_span4d<float>& residual, float* mean_residual,
                           const float* conv_psfs, const float* conv2_psfs, int n_facets,
                           int psf_nrow, int psf_ncol,
@@ -616,7 +610,7 @@ int wscms_subminor_cycles(const core::resources& resources,
   FD_LOG_DEBUG("subminor: ArgMax temp_storage_bytes={}", temp_storage_bytes);
 
   // Initial full argmax
-  cub::DeviceReduce::ArgMax(d_temp, temp_storage_bytes, mean_residual_ptr, d_argmax_out, n,
+    cub::DeviceReduce::ArgMax(d_temp, temp_storage_bytes, mean_residual_ptr, d_argmax_out, n,
                             cuda_stream);
 
   KVPair h_peak;
@@ -655,7 +649,6 @@ int wscms_subminor_cycles(const core::resources& resources,
 
     psf_subtract_kernel<<<CEIL_DIV(ovr.w * ovr.h, 256), 256, 0, cuda_stream>>>(
         mean_residual_ptr, psf_2_ptr, ovr, factor);
-
     // Stream 1: Find peak
     cub::DeviceReduce::ArgMax(d_temp, temp_storage_bytes, mean_residual_ptr, d_argmax_out, n,
                               cuda_stream);

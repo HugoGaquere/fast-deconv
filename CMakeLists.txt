@@ -31,13 +31,29 @@ find_package(emu CONFIG REQUIRED)
 #-------------------------------------------------------------------#
 # Core library
 #-------------------------------------------------------------------#
-add_library(fast_deconv INTERFACE)
 
-target_include_directories(fast_deconv INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+add_library(fast_deconv STATIC
+        src/fast_deconv/algorithm/scales.cu
+        src/fast_deconv/algorithm/wscms.cu
+        src/fast_deconv/algorithm/wscms_class.cu
+        src/fast_deconv/common/mask.cu
+        src/fast_deconv/common/gain.cu
+        src/fast_deconv/common/clean.cu
+        src/fast_deconv/common/multi_frequency.cu
+        src/fast_deconv/common/convergence.cpp
+        src/fast_deconv/linalg/fft.cu
+        src/fast_deconv/linalg/linalg.cu
+        src/fast_deconv/linalg/pseudo_inverse.cu
+        src/fast_deconv/matrix/argmax.cu
+        src/fast_deconv/matrix/max.cu
+        src/fast_deconv/matrix/rms.cu
 )
 
-target_link_libraries(fast_deconv INTERFACE
+set_target_properties(fast_deconv PROPERTIES
+    POSITION_INDEPENDENT_CODE ON   # linked into _fast_deconv.so
+)
+
+target_link_libraries(fast_deconv PUBLIC
   fmt::fmt
   spdlog::spdlog
   emu::emu
@@ -45,23 +61,35 @@ target_link_libraries(fast_deconv INTERFACE
   CUDA::cufft
 )
 
-target_compile_definitions(fast_deconv INTERFACE SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF)
+target_include_directories(fast_deconv PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
 
-target_compile_features(fast_deconv INTERFACE cxx_std_20)
+target_compile_features(fast_deconv PUBLIC cxx_std_20)
 
-target_compile_options(fast_deconv INTERFACE
+target_compile_definitions(fast_deconv PUBLIC
+  $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO> # SPDLOG_LEVEL_NONE
+  $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
+)
+
+target_compile_options(fast_deconv PUBLIC
   $<$<COMPILE_LANGUAGE:CUDA>:
   --extended-lambda
   --expt-relaxed-constexpr
   --compiler-options=-Wall
-  $<$<CONFIG:Release>:
-    # --use_fast_math
-    # -dlto
-    --restrict
-    --generate-line-info
-  >
+    $<$<CONFIG:Release>:
+      # --use_fast_math
+      # -dlto
+      --restrict
+      --generate-line-info
+    >
+    $<$<CONFIG:Debug>:
+      -g  # host debug
+      # -G  # device debug
+    >
   >
 )
+
 
 #-------------------------------------------------------------------#
 # Python extension
@@ -99,6 +127,7 @@ endif()
 if (NOT SKBUILD)
   add_executable(fast_deconv_app src/main.cu)
   target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
+
   add_executable(example_wscms src/example_wscms.cu)
   target_link_libraries(example_wscms PRIVATE fast_deconv)
 endif()

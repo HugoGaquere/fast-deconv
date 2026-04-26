@@ -23,7 +23,7 @@ class Recipe(ConanFile):
         self.requires("fmt/11.2.0")
         self.requires("spdlog/1.15.3")
         self.requires(
-            "emu/0.1.0-rc.3",
+            "emu/0.1.0-rc.6",
             options={"python": self.options.python_module, "cuda": True},
         )
         self.requires("gtest/1.15.0")

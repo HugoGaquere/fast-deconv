@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cub/cub.cuh>
-#include <fast_deconv/linalg/detail/fft.cuh>
+#include <fast_deconv/linalg/fft.hpp>
 #include <vector>
 
 #include "fast_deconv/algorithm/wscms_types.hpp"
@@ -108,86 +108,89 @@ void make_scales(const core::resources& resources, const core::stream_resources&
   stream_res.sync();
 }
 
-// Finds the best scale and peak pixel via biased peak-finding.
-// scaled_dirty is modified in-place (mask + abs applied).
-// mask: device, True = masked. Either (npix,) shared or (n_scales, npix) per-scale.
-// bias: (n_scales,) host memory, multiplied with per-scale peaks to select best scale.
-// per_scale_mask: false = shared mask (npix,), true = per-scale masks (n_scales, npix)
-// retired_scales: scale indices to exclude from selection.
-// Returns unbiased peak value and pixel coordinates.
-scale_selection_result scale_selection(const core::resources& resources,
-                                       const core::stream_resources& stream_res,
-                                       float* scaled_dirty, const bool* mask, const float* bias,
-                                       int n_scales, int nrow, int ncol, bool clean_negative,
-                                       bool per_scale_mask,
-                                       const std::vector<int>& retired_scales = {})
+// // Finds the best scale and peak pixel via biased peak-finding.
+// // scaled_dirty is modified in-place (mask + abs applied).
+// // mask: device, True = masked. Either (npix,) shared or (n_scales, npix) per-scale.
+// // bias: (n_scales,) host memory, multiplied with per-scale peaks to select best scale.
+// // per_scale_mask: false = shared mask (npix,), true = per-scale masks (n_scales, npix)
+// // retired_scales: scale indices to exclude from selection.
+// // Returns unbiased peak value and pixel coordinates.
+// scale_selection_result scale_selection(const core::resources& resources,
+//                                        const core::stream_resources& stream_res,
+//                                        float* scaled_dirty, const bool* mask, const float* bias,
+//                                        int n_scales, int nrow, int ncol, bool clean_negative,
+//                                        bool per_scale_mask,
+//                                        const std::vector<int>& retired_scales = {})
+// {
+//   const auto cuda_stream = stream_res.cuda_stream;
+//
+//   const int npix = nrow * ncol;
+//   const int mask_stride = per_scale_mask ? npix : 0;
+//
+//   // 1. Apply mask + abs in-place
+//   apply_mask_kernel<<<CEIL_DIV(npix, 256), 256, 0, cuda_stream>>>(
+//       scaled_dirty, mask, npix, n_scales, mask_stride, clean_negative);
+//
+//   // 2. Build segment offsets [0, npix, 2*npix, ..., n_scales*npix]
+//   int* d_offsets = resources.alloc_async<int>(n_scales + 1, stream_res);
+//   std::vector<int> h_offsets(n_scales + 1);
+//   for (int i = 0; i <= n_scales; i++) h_offsets[i] = i * npix;
+//   CHECK_CUDA(cudaMemcpyAsync(d_offsets, h_offsets.data(), sizeof(int) * (n_scales + 1),
+//                              cudaMemcpyHostToDevice, cuda_stream));
+//
+//   // 3. CUB segmented argmax
+//   using KVPair = cub::KeyValuePair<int, float>;
+//   KVPair* d_peaks = resources.alloc_async<KVPair>(n_scales, stream_res);
+//
+//   size_t temp_bytes = 0;
+//   CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(nullptr, temp_bytes, scaled_dirty, d_peaks,
+//                                                 n_scales, d_offsets, d_offsets + 1,
+//                                                 cuda_stream));
+//
+//   void* d_temp = resources.alloc_async(temp_bytes, stream_res);
+//   CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(d_temp, temp_bytes, scaled_dirty, d_peaks,
+//   n_scales,
+//                                                 d_offsets, d_offsets + 1, cuda_stream));
+//
+//   // 4. Copy per-scale peaks to host
+//   std::vector<KVPair> h_peaks(n_scales);
+//   CHECK_CUDA(cudaMemcpyAsync(h_peaks.data(), d_peaks, sizeof(KVPair) * n_scales,
+//                              cudaMemcpyDeviceToHost, cuda_stream));
+//
+//   stream_res.sync();
+//
+//   // Async cleanup
+//   resources.free_async(d_offsets, stream_res);
+//   resources.free_async(d_peaks, stream_res);
+//   resources.free_async(d_temp, stream_res);
+//
+//   // 5. Biased scale selection on host (skip retired scales)
+//   int best_scale = -1;
+//   float best_biased = -INFINITY;
+//   for (int s = 0; s < n_scales; s++) {
+//     if (std::find(retired_scales.begin(), retired_scales.end(), s) != retired_scales.end())
+//       continue;
+//     float biased = h_peaks[s].value * bias[s];
+//     if (biased > best_biased) {
+//       best_biased = biased;
+//       best_scale = s;
+//     }
+//   }
+//
+//   int best_flat_idx = h_peaks[best_scale].key;
+//   int best_row = best_flat_idx / ncol;
+//   int best_col = best_flat_idx % ncol;
+//
+//   return {best_scale, best_row, best_col, h_peaks[best_scale].value};
+// }
+
+fast_deconv::algorithm::wscms::scale_convolve_ctx make_scale_convolve_ctx(
+    const fast_deconv::core::resources& resources, int nrow, int ncol, int n_scales, float padding)
 {
-  const auto cuda_stream = stream_res.cuda_stream;
+  const auto [npad_row, npad_col] =
+      fast_deconv::linalg::compute_padding(nrow, ncol, padding);
 
-  const int npix = nrow * ncol;
-  const int mask_stride = per_scale_mask ? npix : 0;
-
-  // 1. Apply mask + abs in-place
-  apply_mask_kernel<<<CEIL_DIV(npix, 256), 256, 0, cuda_stream>>>(
-      scaled_dirty, mask, npix, n_scales, mask_stride, clean_negative);
-
-  // 2. Build segment offsets [0, npix, 2*npix, ..., n_scales*npix]
-  int* d_offsets = resources.alloc_async<int>(n_scales + 1, stream_res);
-  std::vector<int> h_offsets(n_scales + 1);
-  for (int i = 0; i <= n_scales; i++) h_offsets[i] = i * npix;
-  CHECK_CUDA(cudaMemcpyAsync(d_offsets, h_offsets.data(), sizeof(int) * (n_scales + 1),
-                             cudaMemcpyHostToDevice, cuda_stream));
-
-  // 3. CUB segmented argmax
-  using KVPair = cub::KeyValuePair<int, float>;
-  KVPair* d_peaks = resources.alloc_async<KVPair>(n_scales, stream_res);
-
-  size_t temp_bytes = 0;
-  CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(nullptr, temp_bytes, scaled_dirty, d_peaks,
-                                                n_scales, d_offsets, d_offsets + 1, cuda_stream));
-
-  void* d_temp = resources.alloc_async(temp_bytes, stream_res);
-  CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(d_temp, temp_bytes, scaled_dirty, d_peaks, n_scales,
-                                                d_offsets, d_offsets + 1, cuda_stream));
-
-  // 4. Copy per-scale peaks to host
-  std::vector<KVPair> h_peaks(n_scales);
-  CHECK_CUDA(cudaMemcpyAsync(h_peaks.data(), d_peaks, sizeof(KVPair) * n_scales,
-                             cudaMemcpyDeviceToHost, cuda_stream));
-
-  stream_res.sync();
-
-  // Async cleanup
-  resources.free_async(d_offsets, stream_res);
-  resources.free_async(d_peaks, stream_res);
-  resources.free_async(d_temp, stream_res);
-
-  // 5. Biased scale selection on host (skip retired scales)
-  int best_scale = -1;
-  float best_biased = -INFINITY;
-  for (int s = 0; s < n_scales; s++) {
-    if (std::find(retired_scales.begin(), retired_scales.end(), s) != retired_scales.end())
-      continue;
-    float biased = h_peaks[s].value * bias[s];
-    if (biased > best_biased) {
-      best_biased = biased;
-      best_scale = s;
-    }
-  }
-
-  int best_flat_idx = h_peaks[best_scale].key;
-  int best_row = best_flat_idx / ncol;
-  int best_col = best_flat_idx % ncol;
-
-  return {best_scale, best_row, best_col, h_peaks[best_scale].value};
-}
-
-scale_convole_ctx make_scale_convolve_ctx(const core::resources& resources, int nrow, int ncol,
-                                          int n_scales, float padding)
-{
-  const auto [npad_row, npad_col] = linalg::detail::compute_padding(nrow, ncol, padding);
-
-  scale_convole_ctx ctx;
+  fast_deconv::algorithm::wscms::scale_convolve_ctx ctx;
   ctx.img_nrow = nrow;
   ctx.img_ncol = ncol;
   ctx.padding_nrow = npad_row;
@@ -228,11 +231,11 @@ scale_convole_ctx make_scale_convolve_ctx(const core::resources& resources, int 
   FD_LOG_INFO("scale_convolve_ctx: backward C2R plan {}x{} (unbatched) — workspace {:.2f} GB",
               ctx.img_padded_nrow, ctx.img_padded_ncol,
               static_cast<double>(backward_work_size) / (1024.0 * 1024.0 * 1024.0));
-  FD_LOG_INFO("scale_convolve_ctx: shared workspace {:.2f} GB (was {:.2f} GB with {} batches)",
-              static_cast<double>(shared_work_size) / (1024.0 * 1024.0 * 1024.0),
-              static_cast<double>(forward_work_size + backward_work_size) /
-                  (1024.0 * 1024.0 * 1024.0),
-              n_scales);
+  FD_LOG_INFO(
+      "scale_convolve_ctx: shared workspace {:.2f} GB (was {:.2f} GB with {} batches)",
+      static_cast<double>(shared_work_size) / (1024.0 * 1024.0 * 1024.0),
+      static_cast<double>(forward_work_size + backward_work_size) / (1024.0 * 1024.0 * 1024.0),
+      n_scales);
 
   return ctx;
 }
@@ -242,9 +245,10 @@ scale_convole_ctx make_scale_convolve_ctx(const core::resources& resources, int 
 // scales:           (n_scales, freq_nrow, freq_ncol) Gaussian kernels in freq domain, device
 // out_scaled_dirty: (n_scales, nrow, ncol) real, device
 // Internally: pad+ifftshift → R2C (once) → per-scale: multiply → C2R → fftshift+crop
-void scale_convolve(const core::resources& resources, const core::stream_resources& stream_res,
-                    const scale_convole_ctx& ctx, float* dirty, float* scales,
-                    float* out_scaled_dirty, int n_scales)
+void scale_convolve(const fast_deconv::core::resources& resources,
+                    const fast_deconv::core::stream_resources& stream_res,
+                    const fast_deconv::algorithm::wscms::scale_convolve_ctx& ctx, float* dirty,
+                    float* scales, float* out_scaled_dirty, int n_scales)
 {
   const int img_padded_total = ctx.img_padded_nrow * ctx.img_padded_ncol;
   const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
@@ -263,7 +267,7 @@ void scale_convolve(const core::resources& resources, const core::stream_resourc
   stream_res.sync();
 
   // Pad + ifftshift dirty image
-  linalg::detail::pad_ifftshift(dirty, dirty_padded, ctx.img_nrow, ctx.img_ncol,
+  fast_deconv::linalg::pad_ifftshift(dirty, dirty_padded, ctx.img_nrow, ctx.img_ncol,
                                 ctx.img_padded_nrow, ctx.img_padded_ncol, ctx.padding_nrow,
                                 ctx.padding_ncol, cuda_stream);
 
@@ -278,9 +282,9 @@ void scale_convolve(const core::resources& resources, const core::stream_resourc
 
     CUFFT_CALL(cufftExecC2R(ctx.plan_backward, scaled_dirty_freq, scaled_dirty));
 
-    linalg::detail::fftshift_crop(scaled_dirty, out_scaled_dirty + i * npix, ctx.img_nrow,
-                                  ctx.img_ncol, ctx.img_padded_nrow, ctx.img_padded_ncol,
-                                  ctx.padding_nrow, ctx.padding_ncol, 1, cuda_stream);
+    fast_deconv::linalg::fftshift_crop(
+        scaled_dirty, out_scaled_dirty + i * npix, ctx.img_nrow, ctx.img_ncol, ctx.img_padded_nrow,
+        ctx.img_padded_ncol, ctx.padding_nrow, ctx.padding_ncol, 1, cuda_stream);
   }
 
   // we want untouched mean dirty at scale 0
@@ -308,8 +312,8 @@ void scale_convolve(const core::resources& resources, const core::stream_resourc
  * @param best_scale    Index of the scale slice to extract.
  * @param npix          Number of pixels per scale (nrow * ncol).
  */
-void copy_scale_slice(const core::stream_resources& stream_res, const float* scaled_dirty,
-                      float* out, int best_scale, int npix)
+void copy_scale_slice(const fast_deconv::core::stream_resources& stream_res,
+                      const float* scaled_dirty, float* out, int best_scale, int npix)
 {
   const float* src = scaled_dirty + best_scale * npix;
   CHECK_CUDA(cudaMemcpyAsync(out, src, npix * sizeof(float), cudaMemcpyDeviceToDevice,
@@ -389,12 +393,14 @@ __global__ void weighted_mean_channels_kernel(const float* __restrict__ input,
  *
  * @return psf_convolve_ctx with initialized FFT plans.
  */
-psf_convolve_ctx make_psf_convolve_ctx(const core::resources& resources, int psf_nrow, int psf_ncol,
-                                       int nch, float padding)
+fast_deconv::algorithm::wscms::psf_convolve_ctx make_psf_convolve_ctx(
+    const fast_deconv::core::resources& resources, int psf_nrow, int psf_ncol, int nch,
+    float padding)
 {
-  const auto [npad_row, npad_col] = linalg::detail::compute_padding(psf_nrow, psf_ncol, padding);
+  const auto [npad_row, npad_col] =
+      fast_deconv::linalg::compute_padding(psf_nrow, psf_ncol, padding);
 
-  psf_convolve_ctx ctx;
+  fast_deconv::algorithm::wscms::psf_convolve_ctx ctx;
   ctx.psf_nrow = psf_nrow;
   ctx.psf_ncol = psf_ncol;
   ctx.padding_nrow = npad_row;
@@ -436,13 +442,14 @@ psf_convolve_ctx make_psf_convolve_ctx(const core::resources& resources, int psf
   CUFFT_CALL(cufftSetWorkArea(ctx.plan_backward, ctx.work_area));
   CUFFT_CALL(cufftSetWorkArea(ctx.plan_backward_2, ctx.work_area));
 
-  FD_LOG_INFO("psf_convolve_ctx: plans {}x{} x {} batches — workspace fwd {:.2f} GB, "
-              "bwd {:.2f} GB, bwd2 {:.2f} GB, shared {:.2f} GB",
-              ctx.psf_padded_nrow, ctx.psf_padded_ncol, nch,
-              static_cast<double>(fwd_work) / (1024.0 * 1024.0 * 1024.0),
-              static_cast<double>(bwd_work) / (1024.0 * 1024.0 * 1024.0),
-              static_cast<double>(bwd2_work) / (1024.0 * 1024.0 * 1024.0),
-              static_cast<double>(shared_work_size) / (1024.0 * 1024.0 * 1024.0));
+  FD_LOG_INFO(
+      "psf_convolve_ctx: plans {}x{} x {} batches — workspace fwd {:.2f} GB, "
+      "bwd {:.2f} GB, bwd2 {:.2f} GB, shared {:.2f} GB",
+      ctx.psf_padded_nrow, ctx.psf_padded_ncol, nch,
+      static_cast<double>(fwd_work) / (1024.0 * 1024.0 * 1024.0),
+      static_cast<double>(bwd_work) / (1024.0 * 1024.0 * 1024.0),
+      static_cast<double>(bwd2_work) / (1024.0 * 1024.0 * 1024.0),
+      static_cast<double>(shared_work_size) / (1024.0 * 1024.0 * 1024.0));
 
   return ctx;
 }
@@ -471,8 +478,9 @@ psf_convolve_ctx make_psf_convolve_ctx(const core::resources& resources, int psf
  * @param[out] out_conv2_mean Output double-convolved weighted mean PSFs, device,
  *                            layout (n_facets, psf_h, psf_w), pre-allocated.
  */
-void convolve_psfs_for_scale(const core::resources& resources,
-                             const core::stream_resources& stream_res, const psf_convolve_ctx& ctx,
+void convolve_psfs_for_scale(const fast_deconv::core::resources& resources,
+                             const fast_deconv::core::stream_resources& stream_res,
+                             const fast_deconv::algorithm::wscms::psf_convolve_ctx& ctx,
                              const float* raw_psfs, const float* d_sigma, int scale_idx,
                              const float* weights, int n_facets, int nch, float* out_conv_psf,
                              float* out_conv2_mean)
@@ -522,9 +530,9 @@ void convolve_psfs_for_scale(const core::resources& resources,
     float* dst_conv2_mean = out_conv2_mean + f * psf_npix;
 
     // 1. Pad + ifftshift (batched over nch)
-    linalg::detail::pad_ifftshift_batched(const_cast<float*>(src), padded_psf, ctx.psf_nrow,
-                                          ctx.psf_ncol, ctx.psf_padded_nrow, ctx.psf_padded_ncol,
-                                          ctx.padding_nrow, ctx.padding_ncol, nch, cuda_stream);
+    fast_deconv::linalg::pad_ifftshift_batched(
+        const_cast<float*>(src), padded_psf, ctx.psf_nrow, ctx.psf_ncol, ctx.psf_padded_nrow,
+        ctx.psf_padded_ncol, ctx.padding_nrow, ctx.padding_ncol, nch, cuda_stream);
 
     // 2. Batched R2C FFT
     CUFFT_CALL(cufftExecR2C(ctx.plan_forward, padded_psf, freq_psf));
@@ -540,14 +548,14 @@ void convolve_psfs_for_scale(const core::resources& resources,
     CUFFT_CALL(cufftExecC2R(ctx.plan_backward_2, freq_conv2, padded_conv2));
 
     // 6. fftshift + crop for conv_psf -> output
-    linalg::detail::fftshift_crop(padded_conv, dst_conv, ctx.psf_nrow, ctx.psf_ncol,
-                                  ctx.psf_padded_nrow, ctx.psf_padded_ncol, ctx.padding_nrow,
-                                  ctx.padding_ncol, nch, cuda_stream);
+    fast_deconv::linalg::fftshift_crop(
+        padded_conv, dst_conv, ctx.psf_nrow, ctx.psf_ncol, ctx.psf_padded_nrow, ctx.psf_padded_ncol,
+        ctx.padding_nrow, ctx.padding_ncol, nch, cuda_stream);
 
     // 7. fftshift + crop for conv2_psf -> temporary
-    linalg::detail::fftshift_crop(padded_conv2, conv2_cropped, ctx.psf_nrow, ctx.psf_ncol,
-                                  ctx.psf_padded_nrow, ctx.psf_padded_ncol, ctx.padding_nrow,
-                                  ctx.padding_ncol, nch, cuda_stream);
+    fast_deconv::linalg::fftshift_crop(
+        padded_conv2, conv2_cropped, ctx.psf_nrow, ctx.psf_ncol, ctx.psf_padded_nrow,
+        ctx.psf_padded_ncol, ctx.padding_nrow, ctx.padding_ncol, nch, cuda_stream);
 
     // 8. Weighted mean over channels -> conv2_mean output
     weighted_mean_channels_kernel<<<CEIL_DIV(psf_npix, 256), 256, 0, cuda_stream>>>(
@@ -589,8 +597,8 @@ void convolve_psfs_for_scale(const core::resources& resources,
  *
  * @return Per-facet gains, host vector of size n_facets.
  */
-std::vector<float> compute_scale_gains(const core::resources& resources,
-                                       const core::stream_resources& stream_res,
+std::vector<float> compute_scale_gains(const fast_deconv::core::resources& resources,
+                                       const fast_deconv::core::stream_resources& stream_res,
                                        const float* conv_psfs, const float* weights, int n_facets,
                                        int nch, int psf_npix, int scale_idx, float gamma)
 {
@@ -636,5 +644,6 @@ std::vector<float> compute_scale_gains(const core::resources& resources,
 
   return gains;
 }
+
 
 }  // namespace fast_deconv::algorithm::wscms::detail

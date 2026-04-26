@@ -44,11 +44,10 @@ namespace fast_deconv::algorithm::wscms::detail {
 int wscms_minor_cycle(const core::resources& resources, core::device_span4d<float>& dirty,
                       float* mean_residual, const core::device_span4d<float>& jones_norm,
                       const core::device_vect<float>& weights_freq, float* scale_kernels,
-                      WSCMS_ctx& wscms_ctx, const scale_convole_ctx& scale_ctx,
+                      WSCMS_ctx& wscms_ctx, const scale_convolve_ctx& scale_ctx,
                       const psf_convolve_ctx& psf_ctx, WSCMS_params params, float* d_coeffs_out,
                       std::vector<component_meta>& metas_out)
 {
-  bool per_scale_mask = false;  // TODO: FIX THAT
   const auto& stream_r = resources.get_stream_resources();
   const int n_scales = params.n_scales;
   const int dirty_nrows = dirty.extent(2);
@@ -60,6 +59,7 @@ int wscms_minor_cycle(const core::resources& resources, core::device_span4d<floa
   const int psf_nrow = psf_ctx.psf_nrow;
   const int psf_ncol = psf_ctx.psf_ncol;
   const int psf_npix = psf_nrow * psf_ncol;
+  const bool per_scale_mask = false;
 
   FD_LOG_DEBUG(
       "wscms_minor_cycle: dirty={}x{} n_freq={} n_facets={} nch={} psf={}x{} psf_npix={} "
@@ -75,7 +75,7 @@ int wscms_minor_cycle(const core::resources& resources, core::device_span4d<floa
 
   // 2. Select the best scale
   scale_selection_result sel =
-      scale_selection(resources, stream_r, scales_x_dirty, wscms_ctx.scale_masks.data_handle(),
+      scale_selection(resources, stream_r, scales_x_dirty, wscms_ctx.scale_mask.data_handle(),
                       wscms_ctx.scale_bias.data_handle(), n_scales, dirty_nrows, dirty_ncols,
                       params.clean_negative, per_scale_mask, params.forbidden_scales);
 
@@ -117,27 +117,11 @@ int wscms_minor_cycle(const core::resources& resources, core::device_span4d<floa
   return n_components;
 }
 
-/**
- * @brief   Run the full minor-cycle loop: repeated scale selection with stall/divergence checks.
- * @details Allocates mean_residual internally and computes it from the dirty image at each
- *          iteration. PSFs are convolved on-the-fly for each selected scale.
- *
- * @param[in]     resources    GPU memory allocator.
- * @param[in,out] dirty        Multi-frequency dirty image (n_freq, n_stokes, nrow, ncol).
- * @param[in]     jones_norm   Jones normalization.
- * @param[in]     weights_freq Per-frequency weights.
- * @param[in,out] wscms_ctx    WSCMS context (raw_psfs, masks, biases, gains, etc.).
- * @param[in]     scale_ctx    Scale convolution context (FFT plans, padding).
- * @param[in]     psf_ctx      PSF convolution context (FFT plans for PSF-sized convolutions).
- * @param[in]     mask         Boolean mask for peak/rms computation, device, size npix.
- * @param[in]     params       Algorithm parameters (including outer-loop params).
- *
- * @return wscms_result with all extracted components, exit reason, and iteration count.
- */
-wscms_result wscms_minor_cycles(const core::resources& resources, core::device_span4d<float>& dirty,
+
+wscms_result_old wscms_minor_cycles(const core::resources& resources, core::device_span4d<float>& dirty,
                                 const core::device_span4d<float>& jones_norm,
                                 const core::device_vect<float>& weights_freq, WSCMS_ctx& wscms_ctx,
-                                const scale_convole_ctx& scale_ctx, const psf_convolve_ctx& psf_ctx,
+                                const scale_convolve_ctx& scale_ctx, const psf_convolve_ctx& psf_ctx,
                                 const bool* mask, WSCMS_params params)
 {
   const auto& stream_r = resources.get_stream_resources();
@@ -193,7 +177,7 @@ wscms_result wscms_minor_cycles(const core::resources& resources, core::device_s
               track_flux, track_rms, params.stop_flux);
 
   // Tracking state
-  wscms_result result;
+  wscms_result_old result;
   int total_iterations = 0;
   int diverged_count = 0;
   std::vector<int> retired_scales(params.forbidden_scales);
