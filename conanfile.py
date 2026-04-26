@@ -4,7 +4,7 @@ from conan.tools.cmake import cmake_layout, CMake, CMakeToolchain
 
 class Recipe(ConanFile):
     name = "fast-deconv"
-    version = "0.1.0"
+    version = "0.2.0"
 
     # Keep as it is
     settings = "os", "compiler", "build_type", "arch"
@@ -23,7 +23,7 @@ class Recipe(ConanFile):
         self.requires("fmt/11.2.0")
         self.requires("spdlog/1.15.3")
         self.requires(
-            "emu/0.1.0-rc.3",
+            "emu/0.1.0-rc.6",
             options={"python": self.options.python_module, "cuda": True},
         )
         self.requires("gtest/1.15.0")

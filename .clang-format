@@ -2,6 +2,6 @@
 BasedOnStyle: Google
 AlignTrailingComments: 'true'
 BreakBeforeBraces: WebKit
-ColumnLimit: '100'
+ColumnLimit: '120'
 
 ...

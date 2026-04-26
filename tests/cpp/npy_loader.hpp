@@ -29,7 +29,9 @@ struct NpyArray {
     size_t ndim() const { return shape.size(); }
 
     bool is_float32() const { return dtype.find("f4") != std::string::npos; }
+    bool is_float64() const { return dtype.find("f8") != std::string::npos; }
     bool is_int32() const { return dtype.find("i4") != std::string::npos; }
+    bool is_int64() const { return dtype.find("i8") != std::string::npos; }
     bool is_bool() const { return dtype.find("b1") != std::string::npos; }
     bool is_complex64() const { return dtype.find("c8") != std::string::npos; }
 
@@ -44,14 +46,29 @@ struct NpyArray {
     }
 
     float* as_float32() { return as<float>(); }
+    double* as_float64() { return as<double>(); }
     int32_t* as_int32() { return as<int32_t>(); }
+    int64_t* as_int64() { return as<int64_t>(); }
     bool* as_bool() { return as<bool>(); }
     std::complex<float>* as_complex64() { return as<std::complex<float>>(); }
 
     const float* as_float32() const { return as<float>(); }
+    const double* as_float64() const { return as<double>(); }
     const int32_t* as_int32() const { return as<int32_t>(); }
+    const int64_t* as_int64() const { return as<int64_t>(); }
     const bool* as_bool() const { return as<bool>(); }
     const std::complex<float>* as_complex64() const { return as<std::complex<float>>(); }
+
+    /// Read a scalar value, casting from the stored dtype to T.
+    template <typename T>
+    T scalar() const {
+        if (is_float64()) return static_cast<T>(*as<double>());
+        if (is_float32()) return static_cast<T>(*as<float>());
+        if (is_int64())   return static_cast<T>(*as<int64_t>());
+        if (is_int32())   return static_cast<T>(*as<int32_t>());
+        if (is_bool())    return static_cast<T>(*as<bool>());
+        throw std::runtime_error("scalar(): unsupported dtype " + dtype);
+    }
 };
 
 inline NpyArray load_npy(const std::string& path) {
@@ -124,10 +141,14 @@ inline NpyArray load_npy(const std::string& path) {
         arr.shape.push_back(1);
     }
 
-    // Determine element size (only float32, int32, bool, complex64)
+    // Determine element size
     size_t elem_size = 0;
-    if (arr.dtype.find("f4") != std::string::npos) {
+    if (arr.dtype.find("f8") != std::string::npos) {
+        elem_size = sizeof(double);
+    } else if (arr.dtype.find("f4") != std::string::npos) {
         elem_size = sizeof(float);
+    } else if (arr.dtype.find("i8") != std::string::npos) {
+        elem_size = sizeof(int64_t);
     } else if (arr.dtype.find("i4") != std::string::npos) {
         elem_size = sizeof(int32_t);
     } else if (arr.dtype.find("b1") != std::string::npos) {
