@@ -1,5 +1,0 @@
-<map id="fast_deconv::algorithm::wscms::detail::psf_subtract_kernel" name="fast_deconv::algorithm::wscms::detail::psf_subtract_kernel">
-<area shape="rect" id="Node000001" title="Subtract PSF scaled by factor from residual on the specified overlap region." alt="" coords="5,5,213,60"/>
-<area shape="rect" id="Node000002" href="$namespacefast__deconv_1_1algorithm_1_1wscms_1_1detail.html#a7fdfde51c07b187558ebffa885072741" title=" " alt="" coords="261,5,432,60"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="214,30,248,30,248,35,214,35"/>
-</map>
