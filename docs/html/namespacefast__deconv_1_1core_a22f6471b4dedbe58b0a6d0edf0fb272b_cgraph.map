@@ -1,9 +1,0 @@
-<map id="fast_deconv::core::determine_policy_mdspan" name="fast_deconv::core::determine_policy_mdspan">
-<area shape="rect" id="Node000001" title=" " alt="" coords="5,69,200,109"/>
-<area shape="rect" id="Node000002" href="$namespacefast__deconv_1_1core.html#ab07b287aaa690115d2f985045bcef08d" title=" " alt="" coords="257,5,401,45"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="174,67,244,47,245,52,175,72"/>
-<area shape="rect" id="Node000003" href="$namespacefast__deconv_1_1core.html#aa06769097e3a38f0218663d9cecbe815" title=" " alt="" coords="257,69,401,109"/>
-<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="200,87,244,87,244,92,200,92"/>
-<area shape="rect" id="Node000004" href="$namespacefast__deconv_1_1core.html#a29d0946a9864d617b83a3c7d747ca22b" title=" " alt="" coords="248,133,411,173"/>
-<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="175,107,245,127,244,132,174,112"/>
-</map>

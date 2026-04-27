@@ -1,9 +1,0 @@
-<map id="include/fast_deconv/core/concepts.hpp" name="include/fast_deconv/core/concepts.hpp">
-<area shape="rect" id="Node000001" title=" " alt="" coords="204,5,356,45"/>
-<area shape="rect" id="Node000002" title=" " alt="" coords="5,93,147,119"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="232,48,120,91,118,86,230,43"/>
-<area shape="rect" id="Node000003" title=" " alt="" coords="171,93,389,119"/>
-<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="283,46,283,79,277,79,277,46"/>
-<area shape="rect" id="Node000004" title=" " alt="" coords="413,93,505,119"/>
-<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="324,43,421,85,419,90,322,48"/>
-</map>
