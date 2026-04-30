@@ -47,6 +47,8 @@ add_library(fast_deconv STATIC
         src/fast_deconv/matrix/argmax.cu
         src/fast_deconv/matrix/max.cu
         src/fast_deconv/matrix/rms.cu
+        src/fast_deconv/morphology/dilation.cu
+        src/fast_deconv/morphology/roi.cu
 )
 
 set_target_properties(fast_deconv PROPERTIES
@@ -144,6 +146,8 @@ if(BUILD_TESTS AND NOT SKBUILD)
   add_executable(fast_deconv_tests
     tests/cpp/test_main.cpp
     tests/cpp/test_scale_selection.cu
+    tests/cpp/morphology.cu
+    tests/cpp/test_mask.cu
   )
 
   target_link_libraries(fast_deconv_tests PRIVATE

@@ -120,14 +120,14 @@ int main(int argc, char** argv)
 
   // ----- Build WSCMS params from scalars -----
   wscms::params params{
-      .max_iteration = 5,  // npy_max_iteration.scalar<int>(),
+      .max_iteration = npy_max_iteration.scalar<int>(),
       .stop_flux_threshold = npy_stop_flux.scalar<float>(),
       .divergence_factor = npy_divergence.scalar<float>(),
-      .scale_stall_threshold = npy_stall.scalar<float>(),
       .clean_negative = npy_clean_negative.scalar<bool>(),
       .peak_factor = npy_peak_factor.scalar<float>(),
       .gamma = npy_gamma.scalar<float>(),
       .max_clean_iteration = npy_max_sub_iter.scalar<int>(),
+      .scale_stall_threshold = npy_stall.scalar<float>(),
   };
 
   // ----- Run WSCMS -----

@@ -4,6 +4,7 @@
 
 #include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/core/span_types.hpp>
+#include <optional>
 #include <vector>
 
 #include "fast_deconv/linalg/fft.hpp"
@@ -65,16 +66,29 @@ struct workspace {
   core::host_span2d<int> map_pixel_facet;
 };
 
-struct params {
-  int max_iteration;            // total minor iterations across all scale selections
-  float stop_flux_threshold;    // stop when peak flux drops below this
-  float divergence_factor;      // flux growth ratio that counts as divergence
-  float scale_stall_threshold;  // RMS change below this counts as a stall
+enum class scale_dependant_masking_threshold_type {
+  peak_value,
+  rms,
+};
 
+struct params {
+  // outer loop params
+  int max_iteration;          // total minor iterations across all scale selections
+  float stop_flux_threshold;  // stop when peak flux drops below this
+  float divergence_factor;    // flux growth ratio that counts as divergence
+
+  // clean loop params
   bool clean_negative;
   float peak_factor;
   float gamma;              // CLEAN loop gain
   int max_clean_iteration;  // sub-minor loop iterations per scale selection
+
+  // scales params
+  float scale_stall_threshold;                                  // RMS change below this counts as a stall
+  bool enable_scale_dependant_masking;                          // master switch for scale-dependent auto-masking
+  bool force_enable_scale_dependant_masking;                    // engage masking unconditionally, bypassing thresholds
+  std::optional<float> scale_dependant_masking_peak_threshold;  // engage when residual peak <= this (absolute flux)
+  std::optional<float> scale_dependant_masking_rms_threshold;   // engage when residual peak <= this * running RMS
 };
 
 struct context {
@@ -145,74 +159,5 @@ struct wscms_result {
     }
   };
 };
-
-/* struct WSCMS_ctx {
-  core::device_span4d<float> raw_psfs;
-  core::device_span2d<float> xdes;
-  core::device_span2d<bool> scale_mask;
-  core::device_vect<float> scale_sigmas;
-  core::host_vect<float> scale_bias;
-  core::host_span2d<int> map_pixel_facet;
-}; */
-
-// struct WSCMS_params {
-//   bool clean_negative;
-//   float peak_factor;
-//   float gamma;            // CLEAN loop gain
-//   int max_sub_iteration;  // sub-minor loop iterations per scale selection
-//   int n_scales;
-
-//   // Outer loop parameters
-//   float stop_flux;                    // stop when peak flux drops below this
-//   int max_iteration;                  // total minor iterations across all scale selections
-//   float divergence_factor;            // flux growth ratio that counts as divergence
-//   float stall_threshold;              // RMS change below this counts as a stall
-//   std::vector<int> forbidden_scales;  // scales excluded from selection
-// };
-
-/* struct wscms_resources {
-  psf_convolve_ctx psf_convolve_ctx;
-  scale_convolve_ctx scale_convolve_ctx;
-} */
-;
-
-/* struct sky_component {
-  int row;
-  int col;
-  int scale_idx;
-  float gain;
-  std::vector<float> coeffs;
-};
-
-/// @brief Host-side metadata for a single sky component (coefficients stored separately on device).
-struct component_meta {
-  int row;
-  int col;
-  int scale_idx;
-  float gain;
-} */
-;
-
-// enum class wscms_exit_reason {
-//   flux_threshold,  // peak flux dropped below stop_flux
-//   diverged,        // flux growth exceeded divergence_factor
-//   stalled,         // all scales stalled (RMS change below threshold)
-//   max_iterations,  // reached max_iteration count
-// };
-
-// struct wscms_result_old {
-//   std::vector<sky_component> components;
-//   float final_flux;
-//   int total_iterations = 0;
-//   wscms_exit_reason exit_reason = wscms_exit_reason::max_iterations;
-// };
-
-/* struct scale_selection_result {
-  int best_scale;
-  int best_row;
-  int best_col;
-  float best_peak;
-};
- */
 
 }  // namespace fast_deconv::algorithm::wscms

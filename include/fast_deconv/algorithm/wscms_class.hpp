@@ -64,6 +64,18 @@ class Wscms {
   float stall_threshold() const { return params_.scale_stall_threshold; }
   void set_stall_threshold(float v) { params_.scale_stall_threshold = v; }
 
+  bool auto_mask() const { return params_.enable_scale_dependant_masking; }
+  void set_auto_mask(bool v) { params_.enable_scale_dependant_masking = v; }
+
+  bool force_auto_mask() const { return params_.force_enable_scale_dependant_masking; }
+  void set_force_auto_mask(bool v) { params_.force_enable_scale_dependant_masking = v; }
+
+  std::optional<float> auto_mask_peak_threshold() const { return params_.scale_dependant_masking_peak_threshold; }
+  void set_auto_mask_peak_threshold(std::optional<float> v) { params_.scale_dependant_masking_peak_threshold = v; }
+
+  std::optional<float> auto_mask_rms_threshold() const { return params_.scale_dependant_masking_rms_threshold; }
+  void set_auto_mask_rms_threshold(std::optional<float> v) { params_.scale_dependant_masking_rms_threshold = v; }
+
  private:
   context ctx_;
   params params_;

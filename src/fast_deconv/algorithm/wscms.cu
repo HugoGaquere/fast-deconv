@@ -36,7 +36,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   const size_t mean_residual_n_items = dirty_npix;
   const int n_order = ws.xdes.extent(1);
   const int n_scales = static_cast<int>(ws.scale_sigmas.size());
-  
+
   FD_LOG_INFO(
       "run_wscms: dirty={}x{} n_freq={} n_facets={} n_scales={} psf={}x{} "
       "max_iter={} max_clean_iter={} gamma={:.4f} peak_factor={:.4f} stop_flux={:.6f} "
@@ -94,20 +94,51 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   int total_iterations = 0;
   wscms_result result{p.max_iteration, n_order};
 
+  // We dont allocate memory for mask_per_scale while we didnt trigger the independant masking
+  bool* mask_per_scale_ptr = nullptr;
+  core::device_span3d<bool> mask_per_scale{mask_per_scale_ptr, n_scales, dirty_nrows, dirty_ncols};
+  bool is_independant_mask_initialized = false;
+
   // Loop over scales
   while (!deconv_convergence.should_stop() && !scale_stall_tracker.all_stalled()) {
     FD_LOG_DEBUG("run_wscms: outer iter start total_iterations={} track_flux={:.8f} track_rms={:.8f}", total_iterations,
                  track_flux, track_rms);
 
+    float scale_dependant_threshold = p.scale_dependant_masking_peak_threshold.value_or(
+        p.scale_dependant_masking_rms_threshold.value_or(0.f) * track_rms);
+
+    bool activate_dependant_masking = (p.enable_scale_dependant_masking && track_flux <= scale_dependant_threshold) |
+                                      p.force_enable_scale_dependant_masking;
+
+    if (activate_dependant_masking && !is_independant_mask_initialized) {
+      FD_LOG_INFO("Start independant scale masking at threshold {}", scale_dependant_threshold);
+      mask_per_scale_ptr = stream_a.alloc_async<bool>(n_scales * dirty_nrows * dirty_ncols);
+      mask_per_scale = core::device_span3d<bool>{mask_per_scale_ptr, n_scales, dirty_nrows, dirty_ncols};
+
+      const int central_facet_idx = ws.map_pixel_facet(dirty_nrows / 2, dirty_ncols / 2);
+      auto central_facet_psfs = core::slice_leading(ws.raw_psfs, central_facet_idx);
+
+      const float fft_padding = static_cast<float>(psf_ctx.padded_nrow) / psf_ctx.input_nrow;
+      common::build_independant_scale_mask(exec_resources, stream_a, result.peak_coords, result.scales,
+                                           central_facet_psfs, weights_freq, ws.scale_sigmas, fft_padding,
+                                           mask_per_scale);
+
+      is_independant_mask_initialized = true;
+    }
+
     scale::convolve_with_scales(exec_resources, stream_a, scale_ctx, mean_residual, scale_kernels, scales_x_dirty);
 
-    common::mask_and_abs_async(stream_a, scales_x_dirty, ws.mask, -std::numeric_limits<float>::infinity(),
-                               p.clean_negative);
+    if (activate_dependant_masking)
+      common::mask_and_abs_async(stream_a, scales_x_dirty, mask_per_scale, -std::numeric_limits<float>::infinity(),
+                                 p.clean_negative);
+    else
+      common::mask_and_abs_async(stream_a, scales_x_dirty, ws.mask, -std::numeric_limits<float>::infinity(),
+                                 p.clean_negative);
 
     int selected_scale_idx = scale::scale_selection(exec_resources, stream_a, scales_x_dirty, ws.scale_bias,
                                                     scale_stall_tracker.get_all_stalled());
 
-    FD_LOG_INFO("run_wscms: selected scale {}", selected_scale_idx);
+    FD_LOG_INFO("run_wscms: selected scale {}, dependant_masking {}", selected_scale_idx, activate_dependant_masking);
 
     mean_residual = core::slice_leading(scales_x_dirty, selected_scale_idx);
 
@@ -130,7 +161,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     auto [peak_value, peak_index] = matrix::argmax(peak_ws, mean_residual.data_handle());
 
     const float threshold = peak_value * p.peak_factor;
-    
+
     common::mask_less_than_threshold(stream_a, mean_residual, threshold, -std::numeric_limits<float>::infinity());
 
     FD_LOG_DEBUG("run_wscms: clean loop start scale={} peak={:.8f} threshold={:.8f} max_clean_iter={}",
@@ -166,6 +197,8 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     stream_a.sync();
     stream_b.sync();
 
+    exec_resources.free_async(coeffs_per_chan_ptr, stream_a);
+
     FD_LOG_INFO("run_wscms: scale {} produced {} clean iterations", selected_scale_idx, n_clean_iter);
 
     if (n_clean_iter == 0) {
@@ -200,8 +233,6 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   stream_a.sync();
   stream_b.sync();
 
-  // TODO cleanup
-
   // TODO: deconv_convergence.status => log string
   FD_LOG_INFO("run_wscms: completed ({} iterations, exit={})", deconv_convergence.iteration(),
               static_cast<int>(deconv_convergence.status()));
@@ -209,6 +240,15 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   result.add_coeffs_from_device(core::device_span2d<float>{d_all_coeffs, total_iterations, n_order});
   result.final_flux = track_flux;
   result.total_iterations = total_iterations;
+
+  exec_resources.free_async(conv2_psfs_ptr, stream_a);
+  exec_resources.free_async(conv_psfs_ptr, stream_a);
+  exec_resources.free_async(scales_x_dirty_ptr, stream_a);
+  exec_resources.free_async(d_all_coeffs, stream_a);
+  exec_resources.free_async(scale_kernels_ptr, stream_a);
+  exec_resources.free_async(mean_residual_ptr, stream_a);
+  if (mask_per_scale_ptr != nullptr) exec_resources.free_async(mask_per_scale_ptr, stream_a);
+
   return result;
 }
 

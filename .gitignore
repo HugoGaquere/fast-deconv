@@ -215,5 +215,8 @@ AGENTS.md
 .ignore
 
 tests/data/
-docs/
+docs/*
 .idea/
+
+compile_commands.json
+.vscode/

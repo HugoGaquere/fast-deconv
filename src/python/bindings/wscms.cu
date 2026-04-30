@@ -48,6 +48,12 @@ void bind_wscms(py::module_& m)
       .def_property("stop_flux", &wscms::Wscms::stop_flux, &wscms::Wscms::set_stop_flux)
       .def_property("max_iteration", &wscms::Wscms::max_iteration, &wscms::Wscms::set_max_iteration)
       .def_property("divergence_factor", &wscms::Wscms::divergence_factor, &wscms::Wscms::set_divergence_factor)
-      .def_property("stall_threshold", &wscms::Wscms::stall_threshold, &wscms::Wscms::set_stall_threshold);
+      .def_property("stall_threshold", &wscms::Wscms::stall_threshold, &wscms::Wscms::set_stall_threshold)
+      .def_property("auto_mask", &wscms::Wscms::auto_mask, &wscms::Wscms::set_auto_mask)
+      .def_property("force_auto_mask", &wscms::Wscms::force_auto_mask, &wscms::Wscms::set_force_auto_mask)
+      .def_property("auto_mask_peak_threshold", &wscms::Wscms::auto_mask_peak_threshold,
+                    &wscms::Wscms::set_auto_mask_peak_threshold)
+      .def_property("auto_mask_rms_threshold", &wscms::Wscms::auto_mask_rms_threshold,
+                    &wscms::Wscms::set_auto_mask_rms_threshold);
 }
 }  // namespace fast_deconv::python
