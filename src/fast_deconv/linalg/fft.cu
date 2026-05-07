@@ -111,20 +111,37 @@ std::pair<int, int> compute_padding(int npix_x, int npix_y, float padding)
           static_cast<int>(ceilf((padding - 1.0f) * npix_y / 2.0f))};
 }
 
-convolve_ctx::convolve_ctx(int input_nrow_, int input_ncol_, int plan_batch, int n_backward_plans,
-                           float padding)
+int next_fast_size(int n)
 {
-  const auto [npad_row, npad_col] = compute_padding(input_nrow_, input_ncol_, padding);
+  static constexpr int radices[] = {2, 3, 5, 7};
+  while (true) {
+    int m = n;
+    for (int r : radices) while (m % r == 0) m /= r;
+    if (m == 1) return n;
+    ++n;
+  }
+}
+
+convolve_ctx::convolve_ctx(int input_nrow_, int input_ncol_, int forward_batch_, int backward_batch_,
+                           int n_backward_plans, float padding)
+{
+  const auto [npad_row_min, npad_col_min] = compute_padding(input_nrow_, input_ncol_, padding);
 
   input_nrow = input_nrow_;
   input_ncol = input_ncol_;
-  padding_nrow = npad_row;
-  padding_ncol = npad_col;
-  padded_nrow = input_nrow_ + 2 * npad_row;
-  padded_ncol = input_ncol_ + 2 * npad_col;
+  // Round padded size up to the next 7-smooth value so cuFFT picks Cooley-Tukey
+  // over Bluestein. When (padded - input) is odd, padding is asymmetric: input
+  // starts at offset `padding_*`; the far side gets one extra zero pixel. Both
+  // pad_ifftshift and fftshift_crop use this offset symmetrically, so the
+  // round-trip is exact.
+  padded_nrow = next_fast_size(input_nrow_ + 2 * npad_row_min);
+  padded_ncol = next_fast_size(input_ncol_ + 2 * npad_col_min);
+  padding_nrow = (padded_nrow - input_nrow_) / 2;
+  padding_ncol = (padded_ncol - input_ncol_) / 2;
   freq_nrow = padded_nrow;
   freq_ncol = padded_ncol / 2 + 1;
-  n_batch = plan_batch;
+  forward_batch = forward_batch_;
+  backward_batch = backward_batch_;
   plans_forward.resize(1);
   plans_backward.resize(n_backward_plans);
 
@@ -132,17 +149,16 @@ convolve_ctx::convolve_ctx(int input_nrow_, int input_ncol_, int plan_batch, int
   // Plans execute sequentially, so one buffer of max(plan_work_sizes) suffices.
   // See cuFFT §2.14 Caller Allocated Work Area.
   std::array<int, 2> fft_size{padded_nrow, padded_ncol};
-  auto make_plan = [&](cufftHandle& plan, cufftType type) {
+  auto make_plan = [&](cufftHandle& plan, cufftType type, int batch) {
     CUFFT_CALL(cufftCreate(&plan));
     CUFFT_CALL(cufftSetAutoAllocation(plan, 0));
     size_t plan_work = 0;
-    CUFFT_CALL(cufftMakePlanMany(plan, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0, type,
-                                 plan_batch, &plan_work));
+    CUFFT_CALL(cufftMakePlanMany(plan, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0, type, batch, &plan_work));
     work_size = std::max(work_size, plan_work);
   };
 
-  make_plan(plans_forward[0], CUFFT_R2C);
-  for (auto& p : plans_backward) make_plan(p, CUFFT_C2R);
+  make_plan(plans_forward[0], CUFFT_R2C, forward_batch);
+  for (auto& p : plans_backward) make_plan(p, CUFFT_C2R, backward_batch);
 }
 
 }  // namespace fast_deconv::linalg

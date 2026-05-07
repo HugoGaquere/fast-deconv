@@ -21,7 +21,7 @@ void mask_less_than_threshold(const core::stream_resources& stream_res, core::de
  * @brief Build a per-scale mask by dilating each scale's peak set by the
  *        FWHM support of the central facet's double-convolved PSF (psf ** g_s ** g_s).
  *
- * Mirrors the `convolve_psfs_with_scale` pipeline, restricted to a single
+ * Mirrors the `convolve_psfs_with_scale_async` pipeline, restricted to a single
  * facet and one scale at a time and producing only the doubly-convolved PSF:
  * the per-frequency PSFs are FFT'd in batch once, then per scale the freq
  * arrays are multiplied by G_s^2, IFFT'd batch-back to space, and finally
@@ -33,6 +33,10 @@ void mask_less_than_threshold(const core::stream_resources& stream_res, core::de
  *   2. Build conv2_psf[s] = mean_c w[c] * ifft( fft(psf[c]) * G_s^2 )
  *   3. FWHM bool mask: conv2_psf[s] > 0.5 * max(conv2_psf[s])
  *   4. Dilate mask_per_scale[s] using the FWHM mask as the structuring element
+ *   5. Negate (so component-neighborhoods are valid=false), OR external_mask in
+ *      (so externally-masked pixels stay masked everywhere).
+ *
+ * Output convention matches `mask_and_abs_async`: true = masked (filled), false = valid.
  *
  * @param[in]    resources           GPU resource pool (for scratch allocations).
  * @param[in]    stream              Stream resources (kernels run on stream.cuda_stream).
@@ -42,12 +46,14 @@ void mask_less_than_threshold(const core::stream_resources& stream_res, core::de
  * @param[in]    weights_freq        Per-channel weights, device, (n_freq,).
  * @param[in]    scale_sigmas        Gaussian sigma per scale, device, (n_scales,).
  * @param[in]    fft_padding         FFT padding factor used to size the conv plans.
+ * @param[in]    external_mask       Externally-supplied 2D mask (true=masked) OR'd into every scale slice.
  * @param[out]   mask_per_scale      (n_scales, dirty_h, dirty_w) bool, written entirely.
  */
 void build_independant_scale_mask(const core::resources& resources, const core::stream_resources& stream,
                                   const std::vector<std::pair<int, int>>& coords, const std::vector<int>& scales,
                                   core::device_span3d<float> central_facet_psfs,
                                   core::device_vect<float> weights_freq, core::device_vect<float> scale_sigmas,
-                                  float fft_padding, core::device_span3d<bool> mask_per_scale);
+                                  float fft_padding, core::device_span2d<bool> external_mask,
+                                  core::device_span3d<bool> mask_per_scale);
 
 }  // namespace fast_deconv::common

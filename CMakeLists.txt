@@ -47,6 +47,7 @@ add_library(fast_deconv STATIC
         src/fast_deconv/matrix/argmax.cu
         src/fast_deconv/matrix/max.cu
         src/fast_deconv/matrix/rms.cu
+        src/fast_deconv/matrix/stats.cu
         src/fast_deconv/morphology/dilation.cu
         src/fast_deconv/morphology/roi.cu
 )
@@ -70,7 +71,7 @@ target_include_directories(fast_deconv PUBLIC
 target_compile_features(fast_deconv PUBLIC cxx_std_20)
 
 target_compile_definitions(fast_deconv PUBLIC
-  $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO> # SPDLOG_LEVEL_NONE
+  $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF> # SPDLOG_LEVEL_INFO
   $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
 )
 
@@ -132,6 +133,12 @@ if (NOT SKBUILD)
 
   add_executable(example_wscms src/example_wscms.cu)
   target_link_libraries(example_wscms PRIVATE fast_deconv)
+
+  add_executable(example_peer_access src/example_peer_access.cu)
+  target_link_libraries(example_peer_access PRIVATE fast_deconv)
+
+  add_executable(probe_fft_workspace src/probe_fft_workspace.cu)
+  target_link_libraries(probe_fft_workspace PRIVATE CUDA::cufft)
 endif()
 
 #-------------------------------------------------------------------#

@@ -28,8 +28,11 @@
 
 namespace fast_deconv::common {
 
-std::vector<float> compute_gain_batched(const core::resources& resources,
-                                        const core::stream_resources& stream_res,
+std::vector<float> compute_gain_batched(const core::resources& resources, const core::stream_resources& stream_res,
                                         const core::device_span4d<float>& psfs,
                                         const core::device_vect<float>& weights_freq, float gamma);
-}  // namespace fast_deconv::gain
+
+std::vector<float> compute_all_gains_batched(const core::resources& resources, const core::stream_resources& stream_res,
+                                             const core::device_span5d<float>& psfs,
+                                             const core::device_vect<float>& weights_freq, float gamma);
+}  // namespace fast_deconv::common

@@ -71,6 +71,19 @@ __global__ void threshold_fwhm_kernel(const float* data, float threshold, bool* 
   out[tid] = data[tid] > threshold;
 }
 
+// Negate each scale slice of mask_per_scale and OR external_mask into it.
+// After this pass: mask_per_scale[s, i] = (!is_near_component[s, i]) || external_mask[i].
+__global__ void finalize_mask_kernel(bool* mask_per_scale, const bool* external_mask, int scale_npix, int n_scales)
+{
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid >= scale_npix) return;
+  const bool ext = external_mask[tid];
+  for (int s = 0; s < n_scales; s++) {
+    bool* slice = mask_per_scale + s * scale_npix;
+    slice[tid] = (!slice[tid]) || ext;
+  }
+}
+
 }  // namespace fast_deconv::kernel
 
 namespace fast_deconv::common {
@@ -125,12 +138,15 @@ void build_independant_scale_mask(const core::resources& resources, const core::
                                   const std::vector<std::pair<int, int>>& coords, const std::vector<int>& scales,
                                   core::device_span3d<float> central_facet_psfs,
                                   core::device_vect<float> weights_freq, core::device_vect<float> scale_sigmas,
-                                  float fft_padding, core::device_span3d<bool> mask_per_scale)
+                                  float fft_padding, core::device_span2d<bool> external_mask,
+                                  core::device_span3d<bool> mask_per_scale)
 {
   assert(mask_per_scale.is_exhaustive());
+  assert(external_mask.is_exhaustive());
   assert(central_facet_psfs.is_exhaustive());
   assert(coords.size() == scales.size());
   assert(static_cast<int>(weights_freq.extent(0)) == static_cast<int>(central_facet_psfs.extent(0)));
+  assert(external_mask.extent(0) == mask_per_scale.extent(1) && external_mask.extent(1) == mask_per_scale.extent(2));
 
   const int n_coords = static_cast<int>(coords.size());
   const int n_scales = static_cast<int>(mask_per_scale.extent(0));
@@ -165,7 +181,8 @@ void build_independant_scale_mask(const core::resources& resources, const core::
   }
 
   // ---- 2. Build a PSF-sized convolve_ctx with batched plans over n_freq (1 R2C + 1 C2R) ----
-  linalg::convolve_ctx ctx(psf_nrow, psf_ncol, /*plan_batch=*/n_freq, /*n_backward_plans=*/1, fft_padding);
+  linalg::convolve_ctx ctx(psf_nrow, psf_ncol, /*forward_batch=*/n_freq, /*backward_batch=*/n_freq,
+                           /*n_backward_plans=*/1, fft_padding);
   void* fft_work = resources.alloc_async<void>(ctx.required_work_size(), stream);
   ctx.set_work_area(fft_work);
   ctx.set_stream(cuda_stream);
@@ -245,7 +262,11 @@ void build_independant_scale_mask(const core::resources& resources, const core::
                                cudaMemcpyDeviceToDevice, cuda_stream));
   }
 
-  // ---- 6. Cleanup ----
+  // ---- 6. Negate to "true=masked" convention and OR external_mask into every scale slice ----
+  kernel::finalize_mask_kernel<<<CEIL_DIV(dirty_npix, 256), 256, 0, cuda_stream>>>(
+      mask_per_scale.data_handle(), external_mask.data_handle(), dirty_npix, n_scales);
+
+  // ---- 7. Cleanup ----
   resources.free_async(dilation_out, stream);
   resources.free_async(fwhm_mask, stream);
   resources.free_async(conv2_psf, stream);

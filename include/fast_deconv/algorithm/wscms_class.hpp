@@ -52,8 +52,20 @@ class Wscms {
   int max_sub_iteration() const { return params_.max_clean_iteration; }
   void set_max_sub_iteration(int v) { params_.max_clean_iteration = v; }
 
-  float stop_flux() const { return params_.stop_flux_threshold; }
-  void set_stop_flux(float v) { params_.stop_flux_threshold = v; }
+  float flux_threshold() const { return params_.flux_threshold; }
+  void set_flux_threshold(float v) { params_.flux_threshold = v; }
+
+  float stop_rms_factor() const { return params_.stop_rms_factor; }
+  void set_stop_rms_factor(float v) { params_.stop_rms_factor = v; }
+
+  float stop_peak_factor() const { return params_.stop_peak_factor; }
+  void set_stop_peak_factor(float v) { params_.stop_peak_factor = v; }
+
+  float stop_cycle_factor() const { return params_.stop_cycle_factor; }
+  void set_stop_cycle_factor(float v) { params_.stop_cycle_factor = v; }
+
+  float stop_sidelobe_level() const { return params_.stop_sidelobe_level; }
+  void set_stop_sidelobe_level(float v) { params_.stop_sidelobe_level = v; }
 
   int max_iteration() const { return params_.max_iteration; }
   void set_max_iteration(int v) { params_.max_iteration = v; }

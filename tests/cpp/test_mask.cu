@@ -14,7 +14,8 @@ namespace common = fast_deconv::common;
 
 // With a delta center_psf and sigma=0 for every scale, conv2_psf is a delta,
 // the FWHM mask is a single pixel and the dilation is the identity — so the
-// final mask matches the per-scale peak premask exactly.
+// final "is-near-component" map matches the per-scale peak premask exactly.
+// After finalize_mask_kernel: mask = (!is_near_component) || external_mask.
 TEST(BuildIndependantScaleMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
 {
   const int n_scales = 3;
@@ -56,26 +57,33 @@ TEST(BuildIndependantScaleMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
   float* d_sigmas = resources.alloc_async<float>(n_scales, sr);
   CHECK_CUDA(cudaMemsetAsync(d_sigmas, 0, n_scales * sizeof(float), sr.cuda_stream));
 
+  // External mask all-false (no extra masking) — so output mask = !is_near_component.
+  bool* d_external = resources.alloc_async<bool>(plane, sr);
+  CHECK_CUDA(cudaMemsetAsync(d_external, 0, plane * sizeof(bool), sr.cuda_stream));
+
   core::device_span3d<bool> mask_view(d_mask, n_scales, nrow, ncol);
   core::device_span3d<float> psf_view(d_psf, n_freq, psf_h, psf_w);
   core::device_vect<float> weights_view(d_weights, n_freq);
   core::device_vect<float> sigma_view(d_sigmas, n_scales);
+  core::device_span2d<bool> external_view(d_external, nrow, ncol);
 
   const float fft_padding = 1.5f;
 
   common::build_independant_scale_mask(resources, sr, coords, scales, psf_view, weights_view, sigma_view, fft_padding,
-                                       mask_view);
+                                       external_view, mask_view);
 
   std::vector<uint8_t> h_bytes(total);
   CHECK_CUDA(cudaMemcpyAsync(h_bytes.data(), d_mask, total * sizeof(bool), cudaMemcpyDeviceToHost, sr.cuda_stream));
   sr.sync();
 
-  std::vector<uint8_t> expected(total, 0);
+  // After finalize: mask = !is_near_component (since external is all-false).
+  // Peak coords are the only "near component" pixels → mask=0 there, mask=1 elsewhere.
+  std::vector<uint8_t> expected(total, 1);
   for (size_t k = 0; k < coords.size(); ++k) {
     const int s = scales[k];
     const int r = coords[k].first;
     const int c = coords[k].second;
-    expected[s * plane + r * ncol + c] = 1;
+    expected[s * plane + r * ncol + c] = 0;
   }
 
   for (int i = 0; i < total; ++i) {
@@ -86,5 +94,6 @@ TEST(BuildIndependantScaleMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
   resources.free_async(d_psf, sr);
   resources.free_async(d_weights, sr);
   resources.free_async(d_sigmas, sr);
+  resources.free_async(d_external, sr);
   sr.sync();
 }

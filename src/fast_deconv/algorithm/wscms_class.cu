@@ -11,8 +11,12 @@ Wscms::Wscms(const core::device_span4d<float>& raw_psfs, const core::device_span
            dirty_nrow, dirty_ncol, n_freq, fft_padding),
       params_{
           .max_iteration = 1000,
-          .stop_flux_threshold = 0.0f,
           .divergence_factor = 2.0f,
+          .flux_threshold = 0.0f,
+          .stop_rms_factor = 0.0f,
+          .stop_peak_factor = 0.0f,
+          .stop_cycle_factor = 0.0f,
+          .stop_sidelobe_level = 0.0f,
           .clean_negative = false,
           .peak_factor = 0.15f,
           .gamma = 0.1f,

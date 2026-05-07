@@ -37,10 +37,13 @@ namespace fast_deconv::linalg {
  */
 struct convolve_ctx {
   int input_nrow = 0, input_ncol = 0;       // unpadded input size
-  int padding_nrow = 0, padding_ncol = 0;   // per-side padding amounts
-  int padded_nrow = 0, padded_ncol = 0;     // padded spatial size
+  int padding_nrow = 0, padding_ncol = 0;   // input start offset within padded buffer
+                                            // (= (padded - input) / 2; far side gets one extra
+                                            // zero pixel when the difference is odd)
+  int padded_nrow = 0, padded_ncol = 0;     // padded spatial size (rounded up to next 7-smooth)
   int freq_nrow = 0, freq_ncol = 0;         // half-complex frequency size
-  int n_batch = 0;                          // batch size used for plan creation
+  int forward_batch = 0;                    // batch size for the R2C plan
+  int backward_batch = 0;                   // batch size for the C2R plan(s)
   std::vector<cufftHandle> plans_forward;   // forward (R2C) plans
   std::vector<cufftHandle> plans_backward;  // backward (C2R) plans
   size_t work_size = 0;                     // max workspace size across all plans (bytes)
@@ -51,18 +54,21 @@ struct convolve_ctx {
   /**
    * @brief Create plans for a padded 2D grid and disable cuFFT auto-allocation.
    *
-   * Plans use @c cufftMakePlanMany with batch=plan_batch (use 1 for an
-   * effectively-unbatched plan). The shared workspace is *not* allocated here;
-   * the caller must allocate @c required_work_size bytes and pass them to
+   * Forward and backward plans can have different batch sizes, e.g. forward=1
+   * to FFT a single image once, backward=N to IFFT N filtered spectra in a
+   * single batched call. The shared workspace is *not* allocated here; the
+   * caller must allocate @c required_work_size bytes and pass them to
    * @ref set_work_area before executing any plan.
    *
    * @param input_nrow        Unpadded input rows.
    * @param input_ncol        Unpadded input cols.
-   * @param plan_batch        Batch size passed to cufftMakePlanMany.
+   * @param forward_batch     Batch size for the R2C plan.
+   * @param backward_batch    Batch size shared by all C2R plans.
    * @param n_backward_plans  Number of C2R plans to create (e.g. 1 for conv, 2 for conv + conv^2).
    * @param padding           FFT padding factor (e.g. 1.5).
    */
-  convolve_ctx(int input_nrow, int input_ncol, int plan_batch, int n_backward_plans, float padding);
+  convolve_ctx(int input_nrow, int input_ncol, int forward_batch, int backward_batch, int n_backward_plans,
+               float padding);
 
   convolve_ctx(const convolve_ctx&) = delete;
   convolve_ctx& operator=(const convolve_ctx&) = delete;
@@ -116,5 +122,10 @@ void fftshift_crop(float* input, float* output, int nx, int ny, int px, int py, 
 
 // Compute padding amounts (rows, cols) for a target padding factor.
 std::pair<int, int> compute_padding(int npix_x, int npix_y, float padding);
+
+// Smallest m >= n whose prime factors are all in {2, 3, 5, 7}. cuFFT runs
+// Cooley-Tukey on these sizes with minimal workspace; non-smooth sizes (e.g.
+// large prime factors) trigger Bluestein, which can blow up workspace by 10x+.
+int next_fast_size(int n);
 
 }  // namespace fast_deconv::linalg
