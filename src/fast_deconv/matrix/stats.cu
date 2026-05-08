@@ -39,10 +39,10 @@ constexpr stats_acc kIdentity = {-FLT_MAX, 0.f, 0.f, 0};
 
 }  // namespace
 
-stats_workspace::stats_workspace(const core::resources& r, const core::stream_resources& sr, size_t n, bool abs_)
-    : resources(r), stream_res(sr), n_elements(n), use_abs(abs_)
+stats_workspace::stats_workspace(const core::stream_resources& sr, size_t n, bool abs_)
+    : stream_res(sr), n_elements(n), use_abs(abs_)
 {
-  d_state = resources.alloc_async<stats_acc>(1, stream_res);
+  d_state = stream_res.alloc_async<stats_acc>(1);
 
   // Query temp-storage bytes against the same iterator/op/state types we will
   // use at call time. The pointers held by the iterator are unused during the
@@ -51,13 +51,13 @@ stats_workspace::stats_workspace(const core::resources& r, const core::stream_re
   CHECK_CUDA(cub::DeviceReduce::Reduce(nullptr, temp_storage_bytes, it_query, d_state, static_cast<int>(n_elements),
                                        stats_combine{}, kIdentity, stream_res.cuda_stream));
 
-  d_temp = resources.alloc_async<char>(temp_storage_bytes, stream_res);
+  d_temp = stream_res.alloc_async<char>(temp_storage_bytes);
 }
 
 stats_workspace::~stats_workspace()
 {
-  if (d_temp) resources.free_async(d_temp, stream_res);
-  if (d_state) resources.free_async(d_state, stream_res);
+  if (d_temp) stream_res.free_async(d_temp);
+  if (d_state) stream_res.free_async(d_state);
 }
 
 void compute_stats_async(stats_workspace& ws, core::device_span2d<float> data, core::device_span2d<bool> mask)

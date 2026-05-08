@@ -69,7 +69,7 @@ TEST(BuildAutoMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
 
   const float fft_padding = 1.5f;
 
-  common::build_auto_mask(resources, sr, coords, scales, psf_view, weights_view, sigma_view, fft_padding,
+  common::build_auto_mask(sr, coords, scales, psf_view, weights_view, sigma_view, fft_padding,
                           external_view, mask_view);
 
   std::vector<uint8_t> h_bytes(total);

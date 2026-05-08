@@ -28,8 +28,7 @@ void make_gaussian_kernels_async(const core::stream_resources& stream_res,
  * @param[out] out_scaled_dirty Per-scale convolved output, device,
  *                              shape (n_scales, nrow, ncol).
  */
-void convolve_with_scales(const core::resources& resources,
-                          const core::stream_resources& stream_res,
+void convolve_with_scales(const core::stream_resources& stream_res,
                           const algorithm::wscms::scale_convolve_ctx& ctx,
                           core::device_span2d<float> dirty,
                           core::device_span3d<float> scales,
@@ -44,7 +43,7 @@ void convolve_with_scales(const core::resources& resources,
  * @return Unbiased peak value and pixel coordinates of the selected scale.
  */
 int scale_selection(
-    const core::resources& resources, const core::stream_resources& stream_res,
+    const core::stream_resources& stream_res,
     core::device_span3d<float> scaled_dirty, core::host_vect<float> bias,
     const std::vector<int>& retired_scales);
 
@@ -68,16 +67,14 @@ int scale_selection(
  * @param[out] out_conv2_mean Double-convolved weighted-mean PSFs, device,
  *                            shape (n_facets, psf_h, psf_w), pre-allocated.
  */
-void convolve_psfs_with_scale_async(const core::resources& resources,
-                                    const core::stream_resources& stream_res,
+void convolve_psfs_with_scale_async(const core::stream_resources& stream_res,
                                     const algorithm::wscms::psf_convolve_ctx& ctx,
                                     core::device_span4d<float> psfs, core::device_vect<float> d_sigma,
                                     int scale_idx, core::device_vect<float> weights,
                                     core::device_span4d<float> out_conv_psf,
                                     core::device_span3d<float> out_conv2_mean);
 
-void convolve_psfs_with_scales_async(const core::resources& resources,
-                                     const core::stream_resources& stream_res,
+void convolve_psfs_with_scales_async(const core::stream_resources& stream_res,
                                      const algorithm::wscms::psf_convolve_ctx& ctx,
                                      core::device_span4d<float> psfs, core::device_vect<float> d_sigmas,
                                      core::device_vect<float> weights,

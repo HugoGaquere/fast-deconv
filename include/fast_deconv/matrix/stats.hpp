@@ -38,7 +38,6 @@ struct stats_result {
 /// the CUB temp-bytes query computed in the constructor stays valid for every
 /// subsequent call.
 struct stats_workspace {
-  const core::resources& resources;
   const core::stream_resources& stream_res;
   size_t n_elements = 0;
   bool use_abs = false;
@@ -49,8 +48,7 @@ struct stats_workspace {
 
   stats_acc h_state{};
 
-  stats_workspace(const core::resources& resources, const core::stream_resources& stream_res, size_t n_elements,
-                  bool use_abs);
+  stats_workspace(const core::stream_resources& stream_res, size_t n_elements, bool use_abs);
   ~stats_workspace();
 
   stats_workspace(const stats_workspace&) = delete;

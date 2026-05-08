@@ -38,8 +38,7 @@ void mask_less_than_threshold(const core::stream_resources& stream_res, core::de
  *
  * Output convention matches `mask_and_abs_async`: true = masked (filled), false = valid.
  *
- * @param[in]    resources           GPU resource pool (for scratch allocations).
- * @param[in]    stream              Stream resources (kernels run on stream.cuda_stream).
+ * @param[in]    stream              Stream resources (kernels run on stream.cuda_stream; also used for scratch allocations).
  * @param[in]    coords              Per-component peak coordinates (row, col).
  * @param[in]    scales              Per-component scale index, same length as coords.
  * @param[in]    central_facet_psfs  Central facet per-frequency PSFs, (n_freq, psf_h, psf_w).
@@ -49,7 +48,7 @@ void mask_less_than_threshold(const core::stream_resources& stream_res, core::de
  * @param[in]    external_mask       Externally-supplied 2D mask (true=masked) OR'd into every scale slice.
  * @param[out]   mask_per_scale      (n_scales, dirty_h, dirty_w) bool, written entirely.
  */
-void build_auto_mask(const core::resources& resources, const core::stream_resources& stream,
+void build_auto_mask(const core::stream_resources& stream,
                      const std::vector<std::pair<int, int>>& coords, const std::vector<int>& scales,
                      core::device_span3d<float> central_facet_psfs,
                      core::device_vect<float> weights_freq, core::device_vect<float> scale_sigmas,

@@ -134,7 +134,7 @@ void mask_less_than_threshold(const core::stream_resources& stream_res, core::de
                                                                                     fill_value, n, 0);
 }
 
-void build_auto_mask(const core::resources& resources, const core::stream_resources& stream,
+void build_auto_mask(const core::stream_resources& stream,
                      const std::vector<std::pair<int, int>>& coords, const std::vector<int>& scales,
                      core::device_span3d<float> central_facet_psfs,
                      core::device_vect<float> weights_freq, core::device_vect<float> scale_sigmas,
@@ -183,7 +183,7 @@ void build_auto_mask(const core::resources& resources, const core::stream_resour
   // ---- 2. Build a PSF-sized convolve_ctx with batched plans over n_freq (1 R2C + 1 C2R) ----
   linalg::convolve_ctx ctx(psf_nrow, psf_ncol, /*forward_batch=*/n_freq, /*backward_batch=*/n_freq,
                            /*n_backward_plans=*/1, fft_padding);
-  void* fft_work = resources.alloc_async<void>(ctx.required_work_size(), stream);
+  void* fft_work = stream.alloc_async<void>(ctx.required_work_size());
   ctx.set_work_area(fft_work);
   ctx.set_stream(cuda_stream);
 
@@ -191,27 +191,27 @@ void build_auto_mask(const core::resources& resources, const core::stream_resour
   const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
 
   // ---- 3. Generate per-scale Gaussian kernels at PSF FFT size ----
-  float* gauss_kernels_ptr = resources.alloc_async<float>(static_cast<uint64_t>(n_scales) * freq_total, stream);
+  float* gauss_kernels_ptr = stream.alloc_async<float>(static_cast<uint64_t>(n_scales) * freq_total);
   core::device_span3d<float> gauss_kernels(gauss_kernels_ptr, n_scales, ctx.freq_nrow, ctx.freq_ncol);
   scale::make_gaussian_kernels_async(stream, scale_sigmas, ctx.padded_ncol, gauss_kernels);
 
   // ---- 4. Batched pad+ifftshift and R2C of all frequency PSFs (once, reused across scales) ----
-  float* padded_psf = resources.alloc_async<float>(static_cast<uint64_t>(n_freq) * padded_total, stream);
-  complex_type* freq_psf = resources.alloc_async<complex_type>(static_cast<uint64_t>(n_freq) * freq_total, stream);
+  float* padded_psf = stream.alloc_async<float>(static_cast<uint64_t>(n_freq) * padded_total);
+  complex_type* freq_psf = stream.alloc_async<complex_type>(static_cast<uint64_t>(n_freq) * freq_total);
 
   linalg::pad_ifftshift_batched(central_facet_psfs.data_handle(), padded_psf, psf_nrow, psf_ncol, ctx.padded_nrow,
                                 ctx.padded_ncol, ctx.padding_nrow, ctx.padding_ncol, n_freq, cuda_stream);
   CUFFT_CALL(cufftExecR2C(ctx.plans_forward[0], padded_psf, freq_psf));
 
   // ---- 5. Per-scale: multiply (batched) -> C2R (batched) -> crop (batched) -> weighted mean -> ... ----
-  complex_type* freq_conv2 = resources.alloc_async<complex_type>(static_cast<uint64_t>(n_freq) * freq_total, stream);
-  float* padded_conv2 = resources.alloc_async<float>(static_cast<uint64_t>(n_freq) * padded_total, stream);
-  float* conv2_cropped_ptr = resources.alloc_async<float>(static_cast<uint64_t>(n_freq) * psf_npix, stream);
+  complex_type* freq_conv2 = stream.alloc_async<complex_type>(static_cast<uint64_t>(n_freq) * freq_total);
+  float* padded_conv2 = stream.alloc_async<float>(static_cast<uint64_t>(n_freq) * padded_total);
+  float* conv2_cropped_ptr = stream.alloc_async<float>(static_cast<uint64_t>(n_freq) * psf_npix);
   core::device_span3d<float> conv2_cropped(conv2_cropped_ptr, n_freq, psf_nrow, psf_ncol);
-  float* conv2_psf = resources.alloc_async<float>(psf_npix, stream);
+  float* conv2_psf = stream.alloc_async<float>(psf_npix);
   core::device_span2d<float> conv2_psf_view(conv2_psf, psf_nrow, psf_ncol);
-  bool* fwhm_mask = resources.alloc_async<bool>(psf_npix, stream);
-  bool* dilation_out = resources.alloc_async<bool>(dirty_npix, stream);
+  bool* fwhm_mask = stream.alloc_async<bool>(psf_npix);
+  bool* dilation_out = stream.alloc_async<bool>(dirty_npix);
 
   const float norm = 1.0f / static_cast<float>(padded_total);
 
@@ -267,15 +267,15 @@ void build_auto_mask(const core::resources& resources, const core::stream_resour
       mask_per_scale.data_handle(), external_mask.data_handle(), dirty_npix, n_scales);
 
   // ---- 7. Cleanup ----
-  resources.free_async(dilation_out, stream);
-  resources.free_async(fwhm_mask, stream);
-  resources.free_async(conv2_psf, stream);
-  resources.free_async(conv2_cropped_ptr, stream);
-  resources.free_async(padded_conv2, stream);
-  resources.free_async(freq_conv2, stream);
-  resources.free_async(freq_psf, stream);
-  resources.free_async(padded_psf, stream);
-  resources.free_async(gauss_kernels_ptr, stream);
-  resources.free_async(fft_work, stream);
+  stream.free_async(dilation_out);
+  stream.free_async(fwhm_mask);
+  stream.free_async(conv2_psf);
+  stream.free_async(conv2_cropped_ptr);
+  stream.free_async(padded_conv2);
+  stream.free_async(freq_conv2);
+  stream.free_async(freq_psf);
+  stream.free_async(padded_psf);
+  stream.free_async(gauss_kernels_ptr);
+  stream.free_async(fft_work);
 }
 }  // namespace fast_deconv::common

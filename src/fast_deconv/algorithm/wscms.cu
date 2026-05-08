@@ -55,7 +55,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
 
   FD_NVTX_MARK("init/initial_stats begin");
   // Fused max + rms reduction: one CUB sweep, one D2H, one sync per call.
-  matrix::stats_workspace stats_ws{exec_resources, stream_a, mean_residual_n_items, p.clean_negative};
+  matrix::stats_workspace stats_ws{stream_a, mean_residual_n_items, p.clean_negative};
 
   // Compute and track initial flux and RMS
   auto [track_flux, track_rms] = matrix::compute_stats(stats_ws, mean_residual, ws.mask);
@@ -88,7 +88,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   float* d_all_coeffs = exec_resources.alloc_async<float>(coeffs_capacity, stream_a);
 
   // Setup workspace for repeated argmax over mean_residual
-  matrix::argmax_workspace peak_ws{exec_resources, stream_a, mean_residual_n_items};
+  matrix::argmax_workspace peak_ws{stream_a, mean_residual_n_items};
 
   const int psf_npix = psf_ctx.input_nrow * psf_ctx.input_ncol;
 
@@ -98,11 +98,11 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   core::device_span5d<float> all_conv_psfs(conv_psfs_ptr, n_scales, n_facets, n_freq, psf_ctx.input_nrow,
                                            psf_ctx.input_ncol);
   core::device_span4d<float> all_conv2_psfs(conv2_psfs_ptr, n_scales, n_facets, psf_ctx.input_nrow, psf_ctx.input_ncol);
-  scale::convolve_psfs_with_scales_async(exec_resources, stream_a, psf_ctx, ws.raw_psfs, ws.scale_sigmas, weights_freq,
-                                         all_conv_psfs, all_conv2_psfs);
+  scale::convolve_psfs_with_scales_async(stream_a, psf_ctx, ws.raw_psfs, ws.scale_sigmas, weights_freq, all_conv_psfs,
+                                         all_conv2_psfs);
   FD_NVTX_MARK("init/precompute_psfs end");
   FD_NVTX_MARK("init/compute_gains begin");
-  auto all_gains = common::compute_all_gains_batched(exec_resources, stream_a, all_conv_psfs, weights_freq, p.gamma);
+  auto all_gains = common::compute_all_gains_batched(stream_a, all_conv_psfs, weights_freq, p.gamma);
   FD_NVTX_MARK("init/compute_gains end");
 
   // Loop-only buffers
@@ -155,14 +155,14 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
       all_scales.insert(all_scales.end(), result.scales.begin(), result.scales.end());
 
       const float fft_padding = static_cast<float>(psf_ctx.padded_nrow) / psf_ctx.input_nrow;
-      common::build_auto_mask(exec_resources, stream_a, all_coords, all_scales, central_facet_psfs,
-                              weights_freq, ws.scale_sigmas, fft_padding, ws.mask, mask_per_scale);
+      common::build_auto_mask(stream_a, all_coords, all_scales, central_facet_psfs, weights_freq, ws.scale_sigmas,
+                              fft_padding, ws.mask, mask_per_scale);
 
       is_auto_mask_initialized = true;
     }
 
     FD_NVTX_MARK("convolve_with_scales");
-    scale::convolve_with_scales(exec_resources, stream_a, scale_ctx, mean_residual, scale_kernels, scales_x_dirty);
+    scale::convolve_with_scales(stream_a, scale_ctx, mean_residual, scale_kernels, scales_x_dirty);
 
     FD_NVTX_MARK("mask_and_abs");
     if (activate_auto_mask)
@@ -173,7 +173,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
                                  p.clean_negative);
 
     FD_NVTX_MARK("scale_selection");
-    int selected_scale_idx = scale::scale_selection(exec_resources, stream_a, scales_x_dirty, ws.scale_bias,
+    int selected_scale_idx = scale::scale_selection(stream_a, scales_x_dirty, ws.scale_bias,
                                                     scale_stall_tracker.get_all_stalled());
 
     FD_LOG_INFO("run_wscms: selected scale {}, auto_mask {}", selected_scale_idx, activate_auto_mask);
@@ -216,7 +216,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
 
       const std::size_t coeffs_offset = (total_iterations + n_clean_iter) * n_order;
       auto spectral_coeffs = core::device_vect<float>(d_all_coeffs + coeffs_offset, n_order);
-      multi_frequency::fit_coefficients(exec_resources, stream_b, dirty, jones_norm, weights_freq, ws.xdes, peak_coords,
+      multi_frequency::fit_coefficients(stream_b, dirty, jones_norm, weights_freq, ws.xdes, peak_coords,
                                         spectral_coeffs, coeffs_per_chan);
 
       common::subtract_component_async(stream_b, dirty, conv_psf, coeffs_per_chan, peak_coords, gain);

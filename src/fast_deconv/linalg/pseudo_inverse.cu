@@ -4,8 +4,7 @@
 
 namespace fast_deconv::linalg {
 
-void compute_pseudo_inverse(const core::resources& resources,
-                            const core::stream_resources& stream_res, const float* d_A,
+void compute_pseudo_inverse(const core::stream_resources& stream_res, const float* d_A,
                             float* d_Apinv, int n_rows, int n_cols)
 {
   const auto handle = stream_res.cublas_handle;
@@ -15,11 +14,11 @@ void compute_pseudo_inverse(const core::resources& resources,
   const bool underdetermined = n_cols > n_rows;
   const int g_dim = underdetermined ? n_rows : n_cols;
 
-  float* d_G = resources.alloc_async<float>(g_dim * g_dim, stream_res);
-  float* d_Ginv = resources.alloc_async<float>(g_dim * g_dim, stream_res);
-  int* d_info = resources.alloc_async<int>(1, stream_res);
-  float** d_G_ptrs = resources.alloc_async<float*>(1, stream_res);
-  float** d_Ginv_ptrs = resources.alloc_async<float*>(1, stream_res);
+  float* d_G = stream_res.alloc_async<float>(g_dim * g_dim);
+  float* d_Ginv = stream_res.alloc_async<float>(g_dim * g_dim);
+  int* d_info = stream_res.alloc_async<int>(1);
+  float** d_G_ptrs = stream_res.alloc_async<float*>(1);
+  float** d_Ginv_ptrs = stream_res.alloc_async<float*>(1);
 
   // Step 1: G
   //   overdetermined: G = A_cm @ A_cm^T  (N, T)  -> A^T A   [n_cols, n_cols]
@@ -66,11 +65,11 @@ void compute_pseudo_inverse(const core::resources& resources,
                              d_Ginv, n_cols, d_A, n_cols, &beta, d_Apinv, n_cols));
   }
 
-  resources.free_async(d_Ginv_ptrs, stream_res);
-  resources.free_async(d_G_ptrs, stream_res);
-  resources.free_async(d_info, stream_res);
-  resources.free_async(d_Ginv, stream_res);
-  resources.free_async(d_G, stream_res);
+  stream_res.free_async(d_Ginv_ptrs);
+  stream_res.free_async(d_G_ptrs);
+  stream_res.free_async(d_info);
+  stream_res.free_async(d_Ginv);
+  stream_res.free_async(d_G);
 }
 
 

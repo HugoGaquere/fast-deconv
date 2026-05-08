@@ -145,7 +145,7 @@ TEST_F(ScaleSelectionTest, ScaleConvolve)
   core::device_span3d<float> scales_view(d_scales, n_scales, freq_nrow, freq_ncol);
   core::device_span3d<float> output_view(d_output, n_scales, nrow, ncol);
 
-  scale::convolve_with_scales(resources, stream_res, ctx, dirty_view, scales_view, output_view);
+  scale::convolve_with_scales(stream_res, ctx, dirty_view, scales_view, output_view);
 
   std::vector<float> h_output(npix * n_scales);
   CHECK_CUDA(cudaMemcpyAsync(h_output.data(), d_output, npix * n_scales * sizeof(float),
@@ -209,11 +209,11 @@ TEST_F(ScaleSelectionTest, ScaleSelectionResult)
                              -std::numeric_limits<float>::infinity(),
                              /*abs=*/true);
 
-  const int best_scale = scale::scale_selection(resources, stream_res, scaled_dirty_view, bias_view,
+  const int best_scale = scale::scale_selection(stream_res, scaled_dirty_view, bias_view,
                                                 /*retired_scales=*/{});
 
   // Recover (row, col) and peak value from the selected slice via argmax
-  matrix::argmax_workspace peak_ws{resources, stream_res, static_cast<size_t>(npix)};
+  matrix::argmax_workspace peak_ws{stream_res, static_cast<size_t>(npix)};
   auto selected_slice = core::slice_leading(scaled_dirty_view, best_scale);
   auto [peak_value, peak_index] = matrix::argmax(peak_ws, selected_slice.data_handle());
   const auto peak_coords = util::unravel_index_2D(peak_index, ncol);
