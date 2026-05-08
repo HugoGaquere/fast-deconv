@@ -22,10 +22,10 @@ Wscms::Wscms(const core::device_span4d<float>& raw_psfs, const core::device_span
           .gamma = 0.1f,
           .max_clean_iteration = 1000,
           .scale_stall_threshold = 1e-6f,
-          .enable_scale_dependant_masking = false,
-          .force_enable_scale_dependant_masking = false,
-          .scale_dependant_masking_peak_threshold = std::nullopt,
-          .scale_dependant_masking_rms_threshold = std::nullopt,
+          .enable_auto_mask = false,
+          .force_enable_auto_mask = false,
+          .auto_mask_peak_threshold = std::nullopt,
+          .auto_mask_rms_threshold = std::nullopt,
       }
 {
 }

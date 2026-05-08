@@ -193,10 +193,10 @@ int main(int argc, char** argv)
       .gamma = npy_gamma.scalar<float>(),
       .max_clean_iteration = npy_max_sub_iter.scalar<int>(),
       .scale_stall_threshold = npy_stall.scalar<float>(),
-      .enable_scale_dependant_masking = true,
-      .force_enable_scale_dependant_masking = npy_force_auto_mask.scalar<bool>(),
-      .scale_dependant_masking_peak_threshold = opt_finite(npy_auto_mask_peak_th.scalar<float>()),
-      .scale_dependant_masking_rms_threshold = opt_finite(npy_auto_mask_rms_th.scalar<float>()),
+      .enable_auto_mask = true,
+      .force_enable_auto_mask = npy_force_auto_mask.scalar<bool>(),
+      .auto_mask_peak_threshold = opt_finite(npy_auto_mask_peak_th.scalar<float>()),
+      .auto_mask_rms_threshold = opt_finite(npy_auto_mask_rms_th.scalar<float>()),
   };
 
   // ----- Run WSCMS -----

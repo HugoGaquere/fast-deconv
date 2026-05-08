@@ -81,13 +81,13 @@ struct workspace {
   core::host_span2d<int> map_pixel_facet;
 
   // Component history accumulated across run_wscms_cycles calls — feeds the
-  // scale-dependent auto-mask so neighborhoods of every previously-cleaned
-  // component (across all major cycles) stay valid.
+  // auto-mask so neighborhoods of every previously-cleaned component
+  // (across all major cycles) stay valid.
   std::vector<std::pair<int, int>> historical_peak_coords;
   std::vector<int> historical_scales;
 };
 
-enum class scale_dependant_masking_threshold_type {
+enum class auto_mask_threshold_type {
   peak_value,
   rms,
 };
@@ -113,11 +113,11 @@ struct params {
   int max_clean_iteration;  // sub-minor loop iterations per scale selection
 
   // scales params
-  float scale_stall_threshold;                                  // RMS change below this counts as a stall
-  bool enable_scale_dependant_masking;                          // master switch for scale-dependent auto-masking
-  bool force_enable_scale_dependant_masking;                    // engage masking unconditionally, bypassing thresholds
-  std::optional<float> scale_dependant_masking_peak_threshold;  // engage when residual peak <= this (absolute flux)
-  std::optional<float> scale_dependant_masking_rms_threshold;   // engage when residual peak <= this * running RMS
+  float scale_stall_threshold;                       // RMS change below this counts as a stall
+  bool enable_auto_mask;                             // master switch for auto-masking
+  bool force_enable_auto_mask;                       // engage masking unconditionally, bypassing thresholds
+  std::optional<float> auto_mask_peak_threshold;     // engage when residual peak <= this (absolute flux)
+  std::optional<float> auto_mask_rms_threshold;      // engage when residual peak <= this * running RMS
 };
 
 struct context {

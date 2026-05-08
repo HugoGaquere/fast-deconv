@@ -16,7 +16,7 @@ namespace common = fast_deconv::common;
 // the FWHM mask is a single pixel and the dilation is the identity — so the
 // final "is-near-component" map matches the per-scale peak premask exactly.
 // After finalize_mask_kernel: mask = (!is_near_component) || external_mask.
-TEST(BuildIndependantScaleMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
+TEST(BuildAutoMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
 {
   const int n_scales = 3;
   const int nrow = 4;
@@ -69,8 +69,8 @@ TEST(BuildIndependantScaleMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
 
   const float fft_padding = 1.5f;
 
-  common::build_independant_scale_mask(resources, sr, coords, scales, psf_view, weights_view, sigma_view, fft_padding,
-                                       external_view, mask_view);
+  common::build_auto_mask(resources, sr, coords, scales, psf_view, weights_view, sigma_view, fft_padding,
+                          external_view, mask_view);
 
   std::vector<uint8_t> h_bytes(total);
   CHECK_CUDA(cudaMemcpyAsync(h_bytes.data(), d_mask, total * sizeof(bool), cudaMemcpyDeviceToHost, sr.cuda_stream));

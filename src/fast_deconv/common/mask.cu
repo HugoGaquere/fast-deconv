@@ -134,12 +134,12 @@ void mask_less_than_threshold(const core::stream_resources& stream_res, core::de
                                                                                     fill_value, n, 0);
 }
 
-void build_independant_scale_mask(const core::resources& resources, const core::stream_resources& stream,
-                                  const std::vector<std::pair<int, int>>& coords, const std::vector<int>& scales,
-                                  core::device_span3d<float> central_facet_psfs,
-                                  core::device_vect<float> weights_freq, core::device_vect<float> scale_sigmas,
-                                  float fft_padding, core::device_span2d<bool> external_mask,
-                                  core::device_span3d<bool> mask_per_scale)
+void build_auto_mask(const core::resources& resources, const core::stream_resources& stream,
+                     const std::vector<std::pair<int, int>>& coords, const std::vector<int>& scales,
+                     core::device_span3d<float> central_facet_psfs,
+                     core::device_vect<float> weights_freq, core::device_vect<float> scale_sigmas,
+                     float fft_padding, core::device_span2d<bool> external_mask,
+                     core::device_span3d<bool> mask_per_scale)
 {
   assert(mask_per_scale.is_exhaustive());
   assert(external_mask.is_exhaustive());

@@ -121,10 +121,10 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   int total_iterations = 0;
   wscms_result result{p.max_iteration, n_order};
 
-  // We dont allocate memory for mask_per_scale while we didnt trigger the independant masking
+  // We dont allocate memory for mask_per_scale while we didnt trigger the auto masking
   bool* mask_per_scale_ptr = nullptr;
   core::device_span3d<bool> mask_per_scale{mask_per_scale_ptr, n_scales, dirty_nrows, dirty_ncols};
-  bool is_independant_mask_initialized = false;
+  bool is_auto_mask_initialized = false;
 
   stream_a.sync();
   // Loop over scales
@@ -133,15 +133,15 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     FD_LOG_DEBUG("run_wscms: outer iter start total_iterations={} track_flux={:.8f} track_rms={:.8f}", total_iterations,
                  track_flux, track_rms);
 
-    float scale_dependant_threshold = p.scale_dependant_masking_peak_threshold.value_or(
-        p.scale_dependant_masking_rms_threshold.value_or(0.f) * track_rms);
+    float auto_mask_threshold = p.auto_mask_peak_threshold.value_or(
+        p.auto_mask_rms_threshold.value_or(0.f) * track_rms);
 
-    bool activate_dependant_masking = (p.enable_scale_dependant_masking && track_flux <= scale_dependant_threshold) |
-                                      p.force_enable_scale_dependant_masking;
+    bool activate_auto_mask = (p.enable_auto_mask && track_flux <= auto_mask_threshold) |
+                              p.force_enable_auto_mask;
 
-    if (activate_dependant_masking && !is_independant_mask_initialized) {
-      FD_NVTX_RANGE("build_independent_mask");
-      FD_LOG_INFO("Start independant scale masking at threshold {}", scale_dependant_threshold);
+    if (activate_auto_mask && !is_auto_mask_initialized) {
+      FD_NVTX_RANGE("build_auto_mask");
+      FD_LOG_INFO("Start auto masking at threshold {}", auto_mask_threshold);
       mask_per_scale_ptr = stream_a.alloc_async<bool>(n_scales * dirty_nrows * dirty_ncols);
       mask_per_scale = core::device_span3d<bool>{mask_per_scale_ptr, n_scales, dirty_nrows, dirty_ncols};
 
@@ -155,17 +155,17 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
       all_scales.insert(all_scales.end(), result.scales.begin(), result.scales.end());
 
       const float fft_padding = static_cast<float>(psf_ctx.padded_nrow) / psf_ctx.input_nrow;
-      common::build_independant_scale_mask(exec_resources, stream_a, all_coords, all_scales, central_facet_psfs,
-                                           weights_freq, ws.scale_sigmas, fft_padding, ws.mask, mask_per_scale);
+      common::build_auto_mask(exec_resources, stream_a, all_coords, all_scales, central_facet_psfs,
+                              weights_freq, ws.scale_sigmas, fft_padding, ws.mask, mask_per_scale);
 
-      is_independant_mask_initialized = true;
+      is_auto_mask_initialized = true;
     }
 
     FD_NVTX_MARK("convolve_with_scales");
     scale::convolve_with_scales(exec_resources, stream_a, scale_ctx, mean_residual, scale_kernels, scales_x_dirty);
 
     FD_NVTX_MARK("mask_and_abs");
-    if (activate_dependant_masking)
+    if (activate_auto_mask)
       common::mask_and_abs_async(stream_a, scales_x_dirty, mask_per_scale, -std::numeric_limits<float>::infinity(),
                                  p.clean_negative);
     else
@@ -176,7 +176,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     int selected_scale_idx = scale::scale_selection(exec_resources, stream_a, scales_x_dirty, ws.scale_bias,
                                                     scale_stall_tracker.get_all_stalled());
 
-    FD_LOG_INFO("run_wscms: selected scale {}, dependant_masking {}", selected_scale_idx, activate_dependant_masking);
+    FD_LOG_INFO("run_wscms: selected scale {}, auto_mask {}", selected_scale_idx, activate_auto_mask);
 
     mean_residual = core::slice_leading(scales_x_dirty, selected_scale_idx);
 
