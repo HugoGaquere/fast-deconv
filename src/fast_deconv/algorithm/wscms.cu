@@ -231,7 +231,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     stream_b.sync();
     FD_NVTX_MARK("clean_loop end");
 
-    exec_resources.free_async(coeffs_per_chan_ptr, stream_a);
+    stream_a.free_async(coeffs_per_chan_ptr);
 
     // FD_LOG_INFO("run_wscms: scale {} produced {} clean iterations", selected_scale_idx, n_clean_iter);
 
@@ -286,13 +286,13 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
                                    result.peak_coords.end());
   ws.historical_scales.insert(ws.historical_scales.end(), result.scales.begin(), result.scales.end());
 
-  exec_resources.free_async(conv2_psfs_ptr, stream_a);
-  exec_resources.free_async(conv_psfs_ptr, stream_a);
-  exec_resources.free_async(scales_x_dirty_ptr, stream_a);
-  exec_resources.free_async(d_all_coeffs, stream_a);
-  exec_resources.free_async(scale_kernels_ptr, stream_a);
-  exec_resources.free_async(mean_residual_ptr, stream_a);
-  if (mask_per_scale_ptr != nullptr) exec_resources.free_async(mask_per_scale_ptr, stream_a);
+  stream_a.free_async(conv2_psfs_ptr);
+  stream_a.free_async(conv_psfs_ptr);
+  stream_a.free_async(scales_x_dirty_ptr);
+  stream_a.free_async(d_all_coeffs);
+  stream_a.free_async(scale_kernels_ptr);
+  stream_a.free_async(mean_residual_ptr);
+  if (mask_per_scale_ptr != nullptr) stream_a.free_async(mask_per_scale_ptr);
 
   // print used memory
   exec_resources.print_memory_usage("End");
