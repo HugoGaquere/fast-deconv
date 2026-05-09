@@ -220,4 +220,6 @@ docs/*
 
 compile_commands.json
 CMakeUserPresets.json
+mutagen.yml
+mutagen.yml.lock
 .vscode/
