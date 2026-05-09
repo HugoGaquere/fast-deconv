@@ -3,9 +3,9 @@ CompileFlags:
   Add:
     - --cuda-path=/usr/local/cuda
     - --cuda-gpu-arch=sm_89
-    - -I/usr/local/cuda/include
-    - -I/usr/local/cuda/targets/x86_64-linux/include
-    - -I/usr/local/cuda/targets/x86_64-linux/include/cccl
+    - -isystem/usr/local/cuda/include
+    - -isystem/usr/local/cuda/targets/x86_64-linux/include
+    - -isystem/usr/local/cuda/targets/x86_64-linux/include/cccl
     - "-xcuda"
     # report all errors
     - "-ferror-limit=0"
@@ -19,22 +19,11 @@ CompileFlags:
     - "-D__CUDA_ARCH__=890"
     - "-D__CUDA_ARCH_FEAT_SM89_ALL"
     - "-Wno-invalid-constexpr"
-    # project specific
-    - -I/home/hugo/Documents/projects/fast-deconv/include/
-    - -I/home/hugo/.conan2/p/b/emu3872caa965fd7/p/include
-    - -I/home/hugo/.conan2/p/b/fmt38c3c49e56d28/p/include
-    - -I/home/hugo/.conan2/p/b/spdloed69124a5c2f7/p/include
-    # conan dependencies
-    - -I/home/hugo/.conan2/p/mdspa3e3244b3b5d53/p/include
-    - -I/home/hugo/.conan2/p/ms-gs000db09c5aa93/p/include
-    - -I/home/hugo/.conan2/p/half36e2dd2c0b9fb/p/include
-    - -I/home/hugo/.conan2/p/b/boost3421a6a3d7e04/p/include
-    - -I/home/hugo/.conan2/p/b/nv-cc42d7b075317da/p/include
-    - -I/home/hugo/.conan2/p/dlpacc49300af55b28/p/include
-    - -I/home/hugo/.conan2/p/tl-ex81ea693a1759d/p/include
-    - -I/home/hugo/.conan2/p/tl-op1a360da40b2ab/p/include
-    - -I/home/hugo/.conan2/p/b/libba2018dc2e908c2/p/include
   Remove:
+    # drop duplicate plain -I for paths we re-add as -isystem above
+    - "-I/usr/local/cuda/include"
+    - "-I/usr/local/cuda/targets/x86_64-linux/include"
+    - "-I/usr/local/cuda/targets/x86_64-linux/include/cccl"
     # strip CUDA fatbin args
     - "-Xfatbin*"
     # strip CUDA arch flags
@@ -50,6 +39,9 @@ CompileFlags:
     - "-Werror=cross-execution-space-call"
     - "--options-file*"
     - "-arch*"
+    - "--restrict"
+    - "--generate-line-info"
+    - "-Xcompiler=-fPIC"
 Hover:
   ShowAKA: No
 InlayHints:
@@ -58,3 +50,4 @@ Diagnostics:
   Suppress:
     - "variadic_device_fn"
     - "attributes_not_allowed"
+    - "deduction_guide_target_attr"

@@ -28,6 +28,22 @@ find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(emu CONFIG REQUIRED)
 
+# Mark third-party imported targets as SYSTEM so their headers come through
+# as -isystem in compile_commands.json. clangd then suppresses diagnostics
+# from these headers while still indexing them for completion/hover.
+foreach(_tp_target IN ITEMS
+    fmt::fmt
+    spdlog::spdlog
+    emu::emu
+    CUDA::cublas
+    CUDA::cufft
+    CUDA::cudart
+    CUDA::cuda_driver)
+  if(TARGET ${_tp_target})
+    set_target_properties(${_tp_target} PROPERTIES SYSTEM TRUE)
+  endif()
+endforeach()
+
 #-------------------------------------------------------------------#
 # Core library
 #-------------------------------------------------------------------#
@@ -71,7 +87,7 @@ target_include_directories(fast_deconv PUBLIC
 target_compile_features(fast_deconv PUBLIC cxx_std_20)
 
 target_compile_definitions(fast_deconv PUBLIC
-  $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_OFF> # SPDLOG_LEVEL_INFO
+  $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO> # SPDLOG_LEVEL_OFF
   $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
 )
 
@@ -149,6 +165,12 @@ option(BUILD_TESTS "Build unit tests" ON)
 if(BUILD_TESTS AND NOT SKBUILD)
   enable_testing()
   find_package(GTest CONFIG REQUIRED)
+
+  foreach(_tp_target IN ITEMS GTest::gtest GTest::gtest_main GTest::gmock GTest::gmock_main)
+    if(TARGET ${_tp_target})
+      set_target_properties(${_tp_target} PROPERTIES SYSTEM TRUE)
+    endif()
+  endforeach()
 
   add_executable(fast_deconv_tests
     tests/cpp/test_main.cpp
