@@ -1,6 +1,6 @@
 [project]
 name = "fast-deconv"
-version = "0.2.0"
+version = "0.3.0"
 description = "GPU-accelerated deconvolution for radio astronomy"
 readme = "README.md"
 authors = [
@@ -31,8 +31,6 @@ editable.rebuild = true
 
 [tool.scikit-build.cmake]
 define = {CMAKE_PROJECT_TOP_LEVEL_INCLUDES = "cmake/conan_provider.cmake"}
-#build-type = "Release"
-#build-type = "Debug"
 
 [tool.pytest.ini_options]
 minversion = "8.0"

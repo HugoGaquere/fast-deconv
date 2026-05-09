@@ -2,8 +2,10 @@
 
 #include <cufft.h>
 
+#include <algorithm>
 #include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/core/span_types.hpp>
+#include <optional>
 #include <vector>
 
 #include "fast_deconv/linalg/fft.hpp"
@@ -12,17 +14,27 @@ namespace fast_deconv::algorithm::wscms {
 
 static constexpr int MAX_SPECTRAL_ORDER = 4;
 
-/// Image-domain scale convolution context: one R2C + one C2R plan over the padded image.
+/// Image-domain scale convolution context: one R2C plan (batch=1, forward FFT
+/// of mean dirty) + one batched C2R plan (batch=backward_batch_size).
+/// `convolve_with_scales` loops over chunks of `backward_batch_size` scales
+/// per IFFT call — pick the batch size to balance throughput vs. memory.
 struct scale_convolve_ctx : public linalg::convolve_ctx {
   scale_convolve_ctx() = default;
 
-  /// Build plans for an unbatched padded image transform and bind a workspace from the pool.
-  scale_convolve_ctx(const core::resources& resources, int nrow, int ncol, float padding)
-      : linalg::convolve_ctx(nrow, ncol, /*plan_batch=*/1, /*n_backward_plans=*/1, padding)
+  /// Build plans for a single forward FFT and a batched backward FFT of
+  /// @p backward_batch_size at a time, then bind a workspace from the pool.
+  /// The caller in `convolve_with_scales` must ensure (n_scales - 1) is a
+  /// multiple of @p backward_batch_size.
+  scale_convolve_ctx(const core::resources& resources, int nrow, int ncol, int backward_batch_size, float padding)
+      : linalg::convolve_ctx(nrow, ncol, /*forward_batch=*/1, /*backward_batch=*/std::max(1, backward_batch_size),
+                             /*n_backward_plans=*/1, padding)
   {
-    const auto& stream_r = resources.get_stream_resources();
-    void* work = resources.alloc_async<void>(work_size, stream_r);
-    stream_r.sync();
+    void* work = nullptr;
+    if (work_size > 0) {
+      const auto& stream_r = resources.get_stream_resources();
+      work = resources.alloc_async<void>(work_size, stream_r);
+      stream_r.sync();
+    }
     set_work_area(work);
   }
 
@@ -38,11 +50,15 @@ struct psf_convolve_ctx : public linalg::convolve_ctx {
 
   /// Build batched plans (over n_freq channels) and bind a workspace from the pool.
   psf_convolve_ctx(const core::resources& resources, int psf_nrow, int psf_ncol, int nch, float padding)
-      : linalg::convolve_ctx(psf_nrow, psf_ncol, /*plan_batch=*/nch, /*n_backward_plans=*/2, padding)
+      : linalg::convolve_ctx(psf_nrow, psf_ncol, /*forward_batch=*/nch, /*backward_batch=*/nch,
+                             /*n_backward_plans=*/2, padding)
   {
-    const auto& stream_r = resources.get_stream_resources();
-    void* work = resources.alloc_async<void>(work_size, stream_r);
-    stream_r.sync();
+    void* work = nullptr;
+    if (work_size > 0) {
+      const auto& stream_r = resources.get_stream_resources();
+      work = resources.alloc_async<void>(work_size, stream_r);
+      stream_r.sync();
+    }
     set_work_area(work);
   }
 
@@ -63,18 +79,45 @@ struct workspace {
   core::device_vect<float> scale_sigmas;
   core::host_vect<float> scale_bias;
   core::host_span2d<int> map_pixel_facet;
+
+  // Component history accumulated across run_wscms_cycles calls — feeds the
+  // auto-mask so neighborhoods of every previously-cleaned component
+  // (across all major cycles) stay valid.
+  std::vector<std::pair<int, int>> historical_peak_coords;
+  std::vector<int> historical_scales;
 };
 
-struct params {
-  int max_iteration;            // total minor iterations across all scale selections
-  float stop_flux_threshold;    // stop when peak flux drops below this
-  float divergence_factor;      // flux growth ratio that counts as divergence
-  float scale_stall_threshold;  // RMS change below this counts as a stall
+enum class auto_mask_threshold_type {
+  peak_value,
+  rms,
+};
 
+
+struct params {
+  // outer loop params
+  int max_iteration;        // total minor iterations across all scale selections
+  float divergence_factor;  // flux growth ratio that counts as divergence
+
+  // stopping criterion: stop_flux = max(flux_threshold, rms_factor*rms, peak_factor*peak, sidelobe_coeff*peak)
+  // computed once per call from the initial peak/RMS of the mean residual
+  float flux_threshold;       // absolute floor below which to stop
+  float stop_rms_factor;      // weights initial RMS in the stop-flux composition
+  float stop_peak_factor;     // weights initial peak in the stop-flux composition
+  float stop_cycle_factor;    // 0 disables the sidelobe contribution
+  float stop_sidelobe_level;  // PSF sidelobe level used in the sidelobe term
+
+  // clean loop params
   bool clean_negative;
-  float peak_factor;
+  float peak_factor;        // sub-clean threshold = peak_value * peak_factor
   float gamma;              // CLEAN loop gain
   int max_clean_iteration;  // sub-minor loop iterations per scale selection
+
+  // scales params
+  float scale_stall_threshold;                       // RMS change below this counts as a stall
+  bool enable_auto_mask;                             // master switch for auto-masking
+  bool force_enable_auto_mask;                       // engage masking unconditionally, bypassing thresholds
+  std::optional<float> auto_mask_peak_threshold;     // engage when residual peak <= this (absolute flux)
+  std::optional<float> auto_mask_rms_threshold;      // engage when residual peak <= this * running RMS
 };
 
 struct context {
@@ -94,9 +137,11 @@ struct context {
           int dirty_ncol, int n_freq, float fft_padding)
       : exec_resources(exec_device),
         workspace{
-            .scale_convolve = scale_convolve_ctx(exec_resources, dirty_nrow, dirty_ncol, fft_padding),
-            .psf_convolve = psf_convolve_ctx(exec_resources, static_cast<int>(raw_psfs.extent(2)),
-                                             static_cast<int>(raw_psfs.extent(3)), n_freq, fft_padding),
+            .scale_convolve = scale_convolve_ctx(exec_resources, dirty_nrow, dirty_ncol,
+                                                 /*backward_batch_size=*/static_cast<int>(scale_sigmas.size()) - 1,
+                                                 fft_padding),
+            .psf_convolve = psf_convolve_ctx(exec_resources, raw_psfs.extent(2),
+                                             raw_psfs.extent(3), n_freq, fft_padding),
             .raw_psfs = raw_psfs,
             .xdes = xdes,
             .mask = mask,
@@ -114,6 +159,7 @@ struct wscms_result {
   std::vector<float> gains;
   std::vector<std::vector<float>> coeffs;
   float final_flux = 0.0f;   // peak flux of the mean residual after the last outer iteration
+  float stop_flux = 0.0f;    // composed stop-flux threshold used for this call (max of the four limits)
   int total_iterations = 0;  // total minor iterations consumed across all outer cycles
 
   wscms_result(int max_iter, int coeff_order)
@@ -145,74 +191,5 @@ struct wscms_result {
     }
   };
 };
-
-/* struct WSCMS_ctx {
-  core::device_span4d<float> raw_psfs;
-  core::device_span2d<float> xdes;
-  core::device_span2d<bool> scale_mask;
-  core::device_vect<float> scale_sigmas;
-  core::host_vect<float> scale_bias;
-  core::host_span2d<int> map_pixel_facet;
-}; */
-
-// struct WSCMS_params {
-//   bool clean_negative;
-//   float peak_factor;
-//   float gamma;            // CLEAN loop gain
-//   int max_sub_iteration;  // sub-minor loop iterations per scale selection
-//   int n_scales;
-
-//   // Outer loop parameters
-//   float stop_flux;                    // stop when peak flux drops below this
-//   int max_iteration;                  // total minor iterations across all scale selections
-//   float divergence_factor;            // flux growth ratio that counts as divergence
-//   float stall_threshold;              // RMS change below this counts as a stall
-//   std::vector<int> forbidden_scales;  // scales excluded from selection
-// };
-
-/* struct wscms_resources {
-  psf_convolve_ctx psf_convolve_ctx;
-  scale_convolve_ctx scale_convolve_ctx;
-} */
-;
-
-/* struct sky_component {
-  int row;
-  int col;
-  int scale_idx;
-  float gain;
-  std::vector<float> coeffs;
-};
-
-/// @brief Host-side metadata for a single sky component (coefficients stored separately on device).
-struct component_meta {
-  int row;
-  int col;
-  int scale_idx;
-  float gain;
-} */
-;
-
-// enum class wscms_exit_reason {
-//   flux_threshold,  // peak flux dropped below stop_flux
-//   diverged,        // flux growth exceeded divergence_factor
-//   stalled,         // all scales stalled (RMS change below threshold)
-//   max_iterations,  // reached max_iteration count
-// };
-
-// struct wscms_result_old {
-//   std::vector<sky_component> components;
-//   float final_flux;
-//   int total_iterations = 0;
-//   wscms_exit_reason exit_reason = wscms_exit_reason::max_iterations;
-// };
-
-/* struct scale_selection_result {
-  int best_scale;
-  int best_row;
-  int best_col;
-  float best_peak;
-};
- */
 
 }  // namespace fast_deconv::algorithm::wscms

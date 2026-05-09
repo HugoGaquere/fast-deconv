@@ -11,8 +11,7 @@
  *
  *          For scale 0 (delta), all gains are set to gamma directly.
  *
- * @param[in]  resources  GPU memory allocator.
- * @param[in]  stream_res CUDA stream resources.
+ * @param[in]  stream_res CUDA stream resources (also used for scratch allocations).
  * @param[in]  conv_psfs  Single-convolved PSFs, device,
  *                        layout (n_facets, nch, psf_npix), pre-computed by
  *                        convolve_psfs_for_scale.
@@ -28,8 +27,11 @@
 
 namespace fast_deconv::common {
 
-std::vector<float> compute_gain_batched(const core::resources& resources,
-                                        const core::stream_resources& stream_res,
+std::vector<float> compute_gain_batched(const core::stream_resources& stream_res,
                                         const core::device_span4d<float>& psfs,
                                         const core::device_vect<float>& weights_freq, float gamma);
-}  // namespace fast_deconv::gain
+
+std::vector<float> compute_all_gains_batched(const core::stream_resources& stream_res,
+                                             const core::device_span5d<float>& psfs,
+                                             const core::device_vect<float>& weights_freq, float gamma);
+}  // namespace fast_deconv::common

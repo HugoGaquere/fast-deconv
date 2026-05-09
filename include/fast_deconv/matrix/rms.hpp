@@ -11,14 +11,13 @@ namespace fast_deconv::matrix {
  *          @p mask is true are excluded. Mirrors Python `cp.std(d_unmasked)`.
  *          Synchronizes the stream before returning. Returns 0 if all pixels are masked.
  *
- * @param[in] resources   GPU memory allocator.
- * @param[in] stream_res  CUDA stream resources.
+ * @param[in] stream_res  CUDA stream resources (also used for scratch allocations).
  * @param[in] data        Input image (must be exhaustive, same extents as @p mask).
  * @param[in] mask        Boolean mask (true = excluded).
  *
  * @return RMS / standard deviation value (on host).
  */
-float rms(const core::resources& resources, const core::stream_resources& stream_res,
-          core::device_span2d<float> data, core::device_span2d<bool> mask);
+float rms(const core::stream_resources& stream_res, core::device_span2d<float> data,
+          core::device_span2d<bool> mask);
 
 }  // namespace fast_deconv::matrix

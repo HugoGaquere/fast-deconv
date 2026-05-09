@@ -30,8 +30,8 @@ struct masked_max_op {
 
 namespace fast_deconv::matrix {
 
-float max(const core::resources& resources, const core::stream_resources& stream_res,
-          core::device_span2d<float> data, core::device_span2d<bool> mask, bool use_abs)
+float max(const core::stream_resources& stream_res, core::device_span2d<float> data,
+          core::device_span2d<bool> mask, bool use_abs)
 {
   assert(data.is_exhaustive() && mask.is_exhaustive());
   assert(data.extent(0) == mask.extent(0) && data.extent(1) == mask.extent(1));
@@ -43,19 +43,19 @@ float max(const core::resources& resources, const core::stream_resources& stream
   auto iter = thrust::make_transform_iterator(
       counting, masked_max_op{data.data_handle(), mask.data_handle(), use_abs});
 
-  float* d_out = resources.alloc_async<float>(1, stream_res);
+  float* d_out = stream_res.alloc_async<float>(1);
 
   size_t temp_bytes = 0;
   cub::DeviceReduce::Max(nullptr, temp_bytes, iter, d_out, n, cuda_stream);
-  char* d_temp = resources.alloc_async<char>(temp_bytes, stream_res);
+  char* d_temp = stream_res.alloc_async<char>(temp_bytes);
   cub::DeviceReduce::Max(d_temp, temp_bytes, iter, d_out, n, cuda_stream);
 
   float h_result;
   CHECK_CUDA(cudaMemcpyAsync(&h_result, d_out, sizeof(float), cudaMemcpyDeviceToHost, cuda_stream));
   stream_res.sync();
 
-  resources.free_async(d_temp, stream_res);
-  resources.free_async(d_out, stream_res);
+  stream_res.free_async(d_temp);
+  stream_res.free_async(d_out);
 
   return h_result;
 }

@@ -51,8 +51,8 @@ struct masked_count_op {
 
 namespace fast_deconv::matrix {
 
-float rms(const core::resources& resources, const core::stream_resources& stream_res,
-          core::device_span2d<float> data, core::device_span2d<bool> mask)
+float rms(const core::stream_resources& stream_res, core::device_span2d<float> data,
+          core::device_span2d<bool> mask)
 {
   assert(data.is_exhaustive() && mask.is_exhaustive());
   assert(data.extent(0) == mask.extent(0) && data.extent(1) == mask.extent(1));
@@ -61,16 +61,16 @@ float rms(const core::resources& resources, const core::stream_resources& stream
   const int n = static_cast<int>(data.size());
   thrust::counting_iterator<int> counting(0);
 
-  float* d_sum = resources.alloc_async<float>(1, stream_res);
-  float* d_sum_sq = resources.alloc_async<float>(1, stream_res);
-  int* d_count = resources.alloc_async<int>(1, stream_res);
+  float* d_sum = stream_res.alloc_async<float>(1);
+  float* d_sum_sq = stream_res.alloc_async<float>(1);
+  int* d_count = stream_res.alloc_async<int>(1);
 
   // Sum of unmasked values
   auto sum_iter = thrust::make_transform_iterator(
       counting, masked_value_op{data.data_handle(), mask.data_handle()});
   size_t temp_bytes_sum = 0;
   cub::DeviceReduce::Sum(nullptr, temp_bytes_sum, sum_iter, d_sum, n, cuda_stream);
-  char* d_temp_sum = resources.alloc_async<char>(temp_bytes_sum, stream_res);
+  char* d_temp_sum = stream_res.alloc_async<char>(temp_bytes_sum);
   cub::DeviceReduce::Sum(d_temp_sum, temp_bytes_sum, sum_iter, d_sum, n, cuda_stream);
 
   // Sum of squared unmasked values
@@ -78,14 +78,14 @@ float rms(const core::resources& resources, const core::stream_resources& stream
       counting, masked_value_sq_op{data.data_handle(), mask.data_handle()});
   size_t temp_bytes_sq = 0;
   cub::DeviceReduce::Sum(nullptr, temp_bytes_sq, sq_iter, d_sum_sq, n, cuda_stream);
-  char* d_temp_sq = resources.alloc_async<char>(temp_bytes_sq, stream_res);
+  char* d_temp_sq = stream_res.alloc_async<char>(temp_bytes_sq);
   cub::DeviceReduce::Sum(d_temp_sq, temp_bytes_sq, sq_iter, d_sum_sq, n, cuda_stream);
 
   // Count of unmasked pixels
   auto count_iter = thrust::make_transform_iterator(counting, masked_count_op{mask.data_handle()});
   size_t temp_bytes_cnt = 0;
   cub::DeviceReduce::Sum(nullptr, temp_bytes_cnt, count_iter, d_count, n, cuda_stream);
-  char* d_temp_cnt = resources.alloc_async<char>(temp_bytes_cnt, stream_res);
+  char* d_temp_cnt = stream_res.alloc_async<char>(temp_bytes_cnt);
   cub::DeviceReduce::Sum(d_temp_cnt, temp_bytes_cnt, count_iter, d_count, n, cuda_stream);
 
   float h_sum, h_sum_sq;
@@ -96,12 +96,12 @@ float rms(const core::resources& resources, const core::stream_resources& stream
   CHECK_CUDA(cudaMemcpyAsync(&h_count, d_count, sizeof(int), cudaMemcpyDeviceToHost, cuda_stream));
   stream_res.sync();
 
-  resources.free_async(d_temp_cnt, stream_res);
-  resources.free_async(d_temp_sq, stream_res);
-  resources.free_async(d_temp_sum, stream_res);
-  resources.free_async(d_count, stream_res);
-  resources.free_async(d_sum_sq, stream_res);
-  resources.free_async(d_sum, stream_res);
+  stream_res.free_async(d_temp_cnt);
+  stream_res.free_async(d_temp_sq);
+  stream_res.free_async(d_temp_sum);
+  stream_res.free_async(d_count);
+  stream_res.free_async(d_sum_sq);
+  stream_res.free_async(d_sum);
 
   if (h_count == 0) return 0.0f;
   float mean = h_sum / static_cast<float>(h_count);

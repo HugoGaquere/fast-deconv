@@ -11,13 +11,21 @@ Wscms::Wscms(const core::device_span4d<float>& raw_psfs, const core::device_span
            dirty_nrow, dirty_ncol, n_freq, fft_padding),
       params_{
           .max_iteration = 1000,
-          .stop_flux_threshold = 0.0f,
           .divergence_factor = 2.0f,
-          .scale_stall_threshold = 1e-6f,
+          .flux_threshold = 0.0f,
+          .stop_rms_factor = 0.0f,
+          .stop_peak_factor = 0.0f,
+          .stop_cycle_factor = 0.0f,
+          .stop_sidelobe_level = 0.0f,
           .clean_negative = false,
           .peak_factor = 0.15f,
           .gamma = 0.1f,
           .max_clean_iteration = 1000,
+          .scale_stall_threshold = 1e-6f,
+          .enable_auto_mask = false,
+          .force_enable_auto_mask = false,
+          .auto_mask_peak_threshold = std::nullopt,
+          .auto_mask_rms_threshold = std::nullopt,
       }
 {
 }

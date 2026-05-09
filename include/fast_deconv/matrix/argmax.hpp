@@ -6,7 +6,6 @@
 namespace fast_deconv::matrix {
 
 struct argmax_workspace {
-  const core::resources& resources;
   const core::stream_resources& stream_res;
   char* d_temp = nullptr;
   size_t temp_storage_bytes = 0;
@@ -16,22 +15,22 @@ struct argmax_workspace {
   int h_peak_index = 0;
   size_t n_elements = 0;
 
-  argmax_workspace(const core::resources& resources, const core::stream_resources& stream_res, size_t n_elements)
-      : resources(resources), stream_res(stream_res), n_elements(n_elements)
+  argmax_workspace(const core::stream_resources& stream_res, size_t n_elements)
+      : stream_res(stream_res), n_elements(n_elements)
   {
-    d_peak_value = resources.alloc_async<float>(1, stream_res);
-    d_peak_index = resources.alloc_async<int>(1, stream_res);
+    d_peak_value = stream_res.alloc_async<float>(1);
+    d_peak_index = stream_res.alloc_async<int>(1);
 
     CHECK_CUDA(cub::DeviceReduce::ArgMax(nullptr, temp_storage_bytes, static_cast<const float*>(nullptr), d_peak_value,
                                          d_peak_index, n_elements, stream_res.cuda_stream));
 
-    d_temp = resources.alloc_async<char>(temp_storage_bytes, stream_res);
+    d_temp = stream_res.alloc_async<char>(temp_storage_bytes);
   }
   ~argmax_workspace()
   {
-    if (d_temp) resources.free_async(d_temp, stream_res);
-    if (d_peak_index) resources.free_async(d_peak_index, stream_res);
-    if (d_peak_value) resources.free_async(d_peak_value, stream_res);
+    if (d_temp) stream_res.free_async(d_temp);
+    if (d_peak_index) stream_res.free_async(d_peak_index);
+    if (d_peak_value) stream_res.free_async(d_peak_value);
   }
 
   argmax_workspace(const argmax_workspace&) = delete;

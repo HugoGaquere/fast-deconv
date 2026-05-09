@@ -28,6 +28,22 @@ find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(emu CONFIG REQUIRED)
 
+# Mark third-party imported targets as SYSTEM so their headers come through
+# as -isystem in compile_commands.json. clangd then suppresses diagnostics
+# from these headers while still indexing them for completion/hover.
+foreach(_tp_target IN ITEMS
+    fmt::fmt
+    spdlog::spdlog
+    emu::emu
+    CUDA::cublas
+    CUDA::cufft
+    CUDA::cudart
+    CUDA::cuda_driver)
+  if(TARGET ${_tp_target})
+    set_target_properties(${_tp_target} PROPERTIES SYSTEM TRUE)
+  endif()
+endforeach()
+
 #-------------------------------------------------------------------#
 # Core library
 #-------------------------------------------------------------------#
@@ -47,6 +63,9 @@ add_library(fast_deconv STATIC
         src/fast_deconv/matrix/argmax.cu
         src/fast_deconv/matrix/max.cu
         src/fast_deconv/matrix/rms.cu
+        src/fast_deconv/matrix/stats.cu
+        src/fast_deconv/morphology/dilation.cu
+        src/fast_deconv/morphology/roi.cu
 )
 
 set_target_properties(fast_deconv PROPERTIES
@@ -68,7 +87,7 @@ target_include_directories(fast_deconv PUBLIC
 target_compile_features(fast_deconv PUBLIC cxx_std_20)
 
 target_compile_definitions(fast_deconv PUBLIC
-  $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO> # SPDLOG_LEVEL_NONE
+  $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO> # SPDLOG_LEVEL_OFF
   $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
 )
 
@@ -130,6 +149,12 @@ if (NOT SKBUILD)
 
   add_executable(example_wscms src/example_wscms.cu)
   target_link_libraries(example_wscms PRIVATE fast_deconv)
+
+  add_executable(example_peer_access src/example_peer_access.cu)
+  target_link_libraries(example_peer_access PRIVATE fast_deconv)
+
+  add_executable(probe_fft_workspace src/probe_fft_workspace.cu)
+  target_link_libraries(probe_fft_workspace PRIVATE CUDA::cufft)
 endif()
 
 #-------------------------------------------------------------------#
@@ -141,9 +166,17 @@ if(BUILD_TESTS AND NOT SKBUILD)
   enable_testing()
   find_package(GTest CONFIG REQUIRED)
 
+  foreach(_tp_target IN ITEMS GTest::gtest GTest::gtest_main GTest::gmock GTest::gmock_main)
+    if(TARGET ${_tp_target})
+      set_target_properties(${_tp_target} PROPERTIES SYSTEM TRUE)
+    endif()
+  endforeach()
+
   add_executable(fast_deconv_tests
     tests/cpp/test_main.cpp
     tests/cpp/test_scale_selection.cu
+    tests/cpp/morphology.cu
+    tests/cpp/test_mask.cu
   )
 
   target_link_libraries(fast_deconv_tests PRIVATE

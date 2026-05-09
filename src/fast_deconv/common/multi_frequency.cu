@@ -79,7 +79,7 @@ __global__ void compute_spectral_coeffs_kernel(float* compact_out, float* per_ch
 
 namespace fast_deconv::multi_frequency {
 
-void fit_coefficients(const core::resources& resources, const core::stream_resources& stream_res,
+void fit_coefficients(const core::stream_resources& stream_res,
                       const core::device_span3d<float> residual,
                       const core::device_span3d<float> jones_norm,
                       const core::device_vect<float> weights_freq,
@@ -91,9 +91,9 @@ void fit_coefficients(const core::resources& resources, const core::stream_resou
   const int n_order = xdes.extent(1);
   const auto [peak_row, peak_col] = peak_coords;
 
-  float* d_SAX = resources.alloc_async<float>(n_freq * n_order, stream_res);
-  float* d_A = resources.alloc_async<float>(n_freq * n_order, stream_res);
-  float* d_A_pinv = resources.alloc_async<float>(n_order * n_freq, stream_res);
+  float* d_SAX = stream_res.alloc_async<float>(n_freq * n_order);
+  float* d_A = stream_res.alloc_async<float>(n_freq * n_order);
+  float* d_A_pinv = stream_res.alloc_async<float>(n_order * n_freq);
 
   //   1. SAX = sqrt(jones_norm[f, peak]) * xdes[f, o],  A = sqrt(w[f]) * SAX
   const int jn_freq_stride = jones_norm.extent(1) * jones_norm.extent(2);
@@ -103,7 +103,7 @@ void fit_coefficients(const core::resources& resources, const core::stream_resou
       n_order, jn_freq_stride, jn_peak_offset);
 
   //   2. A_pinv = inv(A^T A) @ A^T
-  linalg::compute_pseudo_inverse(resources, stream_res, d_A, d_A_pinv, n_freq, n_order);
+  linalg::compute_pseudo_inverse(stream_res, d_A, d_A_pinv, n_freq, n_order);
 
   //   3. wy = sqrt_w * dirty[f, peak]  →  compact = A_pinv @ wy  →  per_chan = SAX @ compact
   const int dirty_freq_stride = residual.extent(1) * residual.extent(2);
@@ -115,22 +115,9 @@ void fit_coefficients(const core::resources& resources, const core::stream_resou
       weights_freq.data_handle(), d_A_pinv, d_SAX, n_freq, n_order, dirty_freq_stride,
       dirty_peak_offset);
 
-
-  // Step 4: subtract PSF from dirty
-  // overlap_region ovr = compute_overlap_region(peak_row, peak_col, nrow, ncol, psf_nrow,
-  // psf_ncol); const int total = n_freq * ovr.w * ovr.h; FD_LOG_DEBUG(
-  //     "subtract_component: peak=({},{}) n_freq={} n_order={} dirty={}x{} psf={}x{} roi={}x{} "
-  //     "total={} blocks={}",
-  //     peak_row, peak_col, n_freq, n_order, nrow, ncol, psf_nrow, psf_ncol, ovr.w, ovr.h, total,
-  //     CEIL_DIV(total, 256));
-  // spectral_psf_subtract_kernel<<<CEIL_DIV(total, 256), 256, 0, cuda_stream>>>(
-  //     dirty, psf, d_per_chan, ovr, gain, n_freq, nrow * ncol, psf_nrow * psf_ncol);
-
-  // Free temporaries
-  // resources.free_async(d_per_chan, stream_res);
-  resources.free_async(d_A_pinv, stream_res);
-  resources.free_async(d_A, stream_res);
-  resources.free_async(d_SAX, stream_res);
+  stream_res.free_async(d_A_pinv);
+  stream_res.free_async(d_A);
+  stream_res.free_async(d_SAX);
 }
 
 }  // namespace fast_deconv::multi_frequency
