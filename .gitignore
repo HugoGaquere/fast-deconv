@@ -219,4 +219,5 @@ docs/*
 .idea/
 
 compile_commands.json
+CMakeUserPresets.json
 .vscode/
