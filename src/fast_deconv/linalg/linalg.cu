@@ -31,7 +31,7 @@ void weighted_sum_async(const core::stream_resources& stream_res,
   //     A.data_handle(), weights.data_handle(), out.data_handle(), weights.size(), n);
 
   const int w = static_cast<int>(weights.size());
-  const int n = static_cast<int>(A.extent(1) * A.extent(2));
+  const int n = static_cast<int>(static_cast<std::int64_t>(A.extent(1)) * A.extent(2));
 
   const float alpha = 1.0f;
   const float beta = 0.0f;

@@ -1,13 +1,14 @@
 #pragma once
+#include <cstdint>
 #include <emu/cuda/device/mdspan.hpp>
 #include <emu/cuda/device/span.hpp>
 #include <emu/detail/mdspan_types.hpp>
 
 namespace fast_deconv::core {
-  
+
 
 template <std::size_t N>
-using dims = emu::dextents<std::size_t, N>;
+using dims = emu::dextents<std::int32_t, N>;
 
 // ================================================================== //
 //                     Device MDSpan

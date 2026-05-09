@@ -105,8 +105,8 @@ void mask_and_abs_async(const core::stream_resources& stream_res, core::device_s
   assert(data.is_exhaustive() && mask.is_exhaustive());
   assert(data.extent(1) == mask.extent(0) && data.extent(2) == mask.extent(1));
   const int n_per_batch = static_cast<int>(mask.size());
-  const int nbatch = static_cast<int>(data.extent(0));
-  const int batch_stride = static_cast<int>(data.stride(0));
+  const int nbatch = data.extent(0);
+  const int batch_stride = data.stride(0);
   dim3 grid(CEIL_DIV(n_per_batch, 256), nbatch);
   kernel::mask_and_abs_kernel<<<grid, 256, 0, stream_res.cuda_stream>>>(data.data_handle(), mask.data_handle(),
                                                                         fill_value, abs, n_per_batch, batch_stride, 0);
@@ -118,8 +118,8 @@ void mask_and_abs_async(const core::stream_resources& stream_res, core::device_s
   assert(data.is_exhaustive() && mask.is_exhaustive());
   assert(data.extents() == mask.extents());
   const int n_per_batch = static_cast<int>(mask.size());
-  const int nbatch = static_cast<int>(data.extent(0));
-  const int batch_stride = static_cast<int>(data.stride(0));
+  const int nbatch = data.extent(0);
+  const int batch_stride = data.stride(0);
   dim3 grid(CEIL_DIV(n_per_batch, 256), nbatch);
   kernel::mask_and_abs_kernel<<<grid, 256, 0, stream_res.cuda_stream>>>(
       data.data_handle(), mask.data_handle(), fill_value, abs, n_per_batch, batch_stride, batch_stride);
@@ -145,17 +145,17 @@ void build_auto_mask(const core::stream_resources& stream,
   assert(external_mask.is_exhaustive());
   assert(central_facet_psfs.is_exhaustive());
   assert(coords.size() == scales.size());
-  assert(static_cast<int>(weights_freq.extent(0)) == static_cast<int>(central_facet_psfs.extent(0)));
+  assert(weights_freq.extent(0) == central_facet_psfs.extent(0));
   assert(external_mask.extent(0) == mask_per_scale.extent(1) && external_mask.extent(1) == mask_per_scale.extent(2));
 
   const int n_coords = static_cast<int>(coords.size());
-  const int n_scales = static_cast<int>(mask_per_scale.extent(0));
-  const int dirty_nrow = static_cast<int>(mask_per_scale.extent(1));
-  const int dirty_ncol = static_cast<int>(mask_per_scale.extent(2));
+  const int n_scales = mask_per_scale.extent(0);
+  const int dirty_nrow = mask_per_scale.extent(1);
+  const int dirty_ncol = mask_per_scale.extent(2);
   const int dirty_npix = dirty_nrow * dirty_ncol;
-  const int n_freq = static_cast<int>(central_facet_psfs.extent(0));
-  const int psf_nrow = static_cast<int>(central_facet_psfs.extent(1));
-  const int psf_ncol = static_cast<int>(central_facet_psfs.extent(2));
+  const int n_freq = central_facet_psfs.extent(0);
+  const int psf_nrow = central_facet_psfs.extent(1);
+  const int psf_ncol = central_facet_psfs.extent(2);
   const int psf_npix = psf_nrow * psf_ncol;
   const cudaStream_t cuda_stream = stream.cuda_stream;
 

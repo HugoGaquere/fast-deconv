@@ -29,7 +29,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
 
   const auto& stream_a = exec_resources.get_stream_resources();
   const auto& stream_b = exec_resources.get_stream_resources();
-  
+
   const uint32_t n_freq = dirty.extent(0);
   const uint32_t n_facets = ws.raw_psfs.extent(0);
   const size_t dirty_nrows = dirty.extent(1);
@@ -72,10 +72,10 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   const float stop_flux = std::max({p.flux_threshold, fluxlimit_rms, fluxlimit_peak, fluxlimit_sidelobe});
 
   FD_LOG_INFO(
-      "run_wscms: initial peak_flux={:.8f} rms={:.8f} stop_flux={:.8f} "
+      "run_wscms: initial pak_flux={:.8f} rms={:.8f} stop_flux={:.8f} "
       "(rms_lim={:.8f} peak_lim={:.8f} sidelobe_lim={:.8f} floor={:.8f})",
       track_flux, track_rms, stop_flux, fluxlimit_rms, fluxlimit_peak, fluxlimit_sidelobe, p.flux_threshold);
-  
+
   // Init convergence and scales watchers
   common::convergence deconv_convergence{p.max_iteration, stop_flux, 5, p.divergence_factor};
   common::scale_stall_tracker scale_stall_tracker{n_scales, 5, p.scale_stall_threshold};
@@ -126,6 +126,8 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   core::device_span3d<bool> mask_per_scale{mask_per_scale_ptr, n_scales, dirty_nrows, dirty_ncols};
   bool is_auto_mask_initialized = false;
 
+  int last_selected_scale = -1;
+
   stream_a.sync();
   // Loop over scales
   while (!deconv_convergence.should_stop() && !scale_stall_tracker.all_stalled()) {
@@ -133,11 +135,10 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     FD_LOG_DEBUG("run_wscms: outer iter start total_iterations={} track_flux={:.8f} track_rms={:.8f}", total_iterations,
                  track_flux, track_rms);
 
-    float auto_mask_threshold = p.auto_mask_peak_threshold.value_or(
-        p.auto_mask_rms_threshold.value_or(0.f) * track_rms);
+    float auto_mask_threshold =
+        p.auto_mask_peak_threshold.value_or(p.auto_mask_rms_threshold.value_or(0.f) * track_rms);
 
-    bool activate_auto_mask = (p.enable_auto_mask && track_flux <= auto_mask_threshold) |
-                              p.force_enable_auto_mask;
+    bool activate_auto_mask = (p.enable_auto_mask && track_flux <= auto_mask_threshold) | p.force_enable_auto_mask;
 
     if (activate_auto_mask && !is_auto_mask_initialized) {
       FD_NVTX_RANGE("build_auto_mask");
@@ -173,10 +174,10 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
                                  p.clean_negative);
 
     FD_NVTX_MARK("scale_selection");
-    int selected_scale_idx = scale::scale_selection(stream_a, scales_x_dirty, ws.scale_bias,
-                                                    scale_stall_tracker.get_all_stalled());
+    int selected_scale_idx =
+        scale::scale_selection(stream_a, scales_x_dirty, ws.scale_bias, scale_stall_tracker.get_all_stalled());
 
-    FD_LOG_INFO("run_wscms: selected scale {}, auto_mask {}", selected_scale_idx, activate_auto_mask);
+    // FD_LOG_INFO("run_wscms: selected scale {}, auto_mask {}", selected_scale_idx, activate_auto_mask);
 
     mean_residual = core::slice_leading(scales_x_dirty, selected_scale_idx);
 
@@ -232,7 +233,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
 
     exec_resources.free_async(coeffs_per_chan_ptr, stream_a);
 
-    FD_LOG_INFO("run_wscms: scale {} produced {} clean iterations", selected_scale_idx, n_clean_iter);
+    // FD_LOG_INFO("run_wscms: scale {} produced {} clean iterations", selected_scale_idx, n_clean_iter);
 
     if (n_clean_iter == 0) {
       FD_LOG_INFO("wscms_minor_cycles: no components found, stopping");
@@ -249,7 +250,11 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     auto [this_flux, this_rms] = matrix::compute_stats(stats_ws, mean_residual, ws.mask);
     FD_NVTX_MARK("post_iter_stats end");
 
-    FD_LOG_INFO("run_wscms: [iter={}] peak_flux={:.8f} rms={:.8f}", total_iterations, this_flux, this_rms);
+    if (last_selected_scale != selected_scale_idx) {
+      const float flux_to_go = this_flux - stop_flux;
+      FD_LOG_INFO("run_wscms: [iter={}] scale={} peak_flux={:.8f} rms={:.8f} flux_to_go={:.8f}", total_iterations, selected_scale_idx, this_flux, this_rms, flux_to_go);
+      last_selected_scale = selected_scale_idx;
+    }
 
     deconv_convergence.track_flux(this_flux, n_clean_iter);
     scale_stall_tracker.update(selected_scale_idx, this_rms);
@@ -288,6 +293,9 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   exec_resources.free_async(scale_kernels_ptr, stream_a);
   exec_resources.free_async(mean_residual_ptr, stream_a);
   if (mask_per_scale_ptr != nullptr) exec_resources.free_async(mask_per_scale_ptr, stream_a);
+
+  // print used memory
+  exec_resources.print_memory_usage("End");
 
   return result;
 }
