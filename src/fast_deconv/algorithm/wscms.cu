@@ -15,6 +15,43 @@
 
 namespace fast_deconv::algorithm::wscms {
 
+namespace {
+
+inline std::string fmt_optional(const std::optional<float>& v)
+{
+  return v.has_value() ? fmt::format("{:.6f}", *v) : std::string{"unset"};
+}
+
+std::string format_run_banner(const params& p, std::size_t dirty_nrows, std::size_t dirty_ncols,
+                              uint32_t n_freq, uint32_t n_facets, int n_scales, int psf_nrow, int psf_ncol)
+{
+  constexpr const char* sep =
+      "------------------------------------------------------------------------";
+  return fmt::format(
+      "run_wscms: launching deconvolution\n"
+      "  {}\n"
+      "  image      | dirty={}x{}  n_freq={}  n_facets={}  psf={}x{}\n"
+      "  scales     | n_scales={}  stall_threshold={:.6f}\n"
+      "  outer loop | max_iteration={}  divergence_factor={:.4f}\n"
+      "  stop crit  | flux_threshold={:.6e}  rms_factor={:.4f}  peak_factor={:.4f}\n"
+      "             | cycle_factor={:.4f}  sidelobe_level={:.4f}\n"
+      "  clean loop | max_clean_iteration={}  peak_factor={:.4f}  gamma={:.4f}  clean_negative={}\n"
+      "  auto mask  | enable={}  force={}  peak_threshold={}  rms_threshold={}\n"
+      "  {}",
+      sep,
+      dirty_nrows, dirty_ncols, n_freq, n_facets, psf_nrow, psf_ncol,
+      n_scales, p.scale_stall_threshold,
+      p.max_iteration, p.divergence_factor,
+      p.flux_threshold, p.stop_rms_factor, p.stop_peak_factor,
+      p.stop_cycle_factor, p.stop_sidelobe_level,
+      p.max_clean_iteration, p.peak_factor, p.gamma, p.clean_negative,
+      p.enable_auto_mask, p.force_enable_auto_mask,
+      fmt_optional(p.auto_mask_peak_threshold), fmt_optional(p.auto_mask_rms_threshold),
+      sep);
+}
+
+}  // namespace
+
 wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d<float>& dirty,
                               const core::device_span3d<float>& jones_norm,
                               const core::device_vect<float>& weights_freq)
@@ -39,13 +76,8 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   const int n_order = ws.xdes.extent(1);
   const int n_scales = static_cast<int>(ws.scale_sigmas.size());
 
-  FD_LOG_INFO(
-      "run_wscms: dirty={}x{} n_freq={} n_facets={} n_scales={} psf={}x{} "
-      "max_iter={} max_clean_iter={} gamma={:.4f} peak_factor={:.4f} flux_threshold={:.6f} "
-      "clean_negative={} divergence={:.4f} stall={:.6f}",
-      dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_ctx.input_nrow, psf_ctx.input_ncol, p.max_iteration,
-      p.max_clean_iteration, p.gamma, p.peak_factor, p.flux_threshold, p.clean_negative, p.divergence_factor,
-      p.scale_stall_threshold);
+  FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales,
+                                      psf_ctx.input_nrow, psf_ctx.input_ncol));
 
   FD_NVTX_MARK("init/queue_residual_and_kernels");
   // Initial mean residual
@@ -231,7 +263,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     stream_b.sync();
     FD_NVTX_MARK("clean_loop end");
 
-    exec_resources.free_async(coeffs_per_chan_ptr, stream_a);
+    stream_a.free_async(coeffs_per_chan_ptr);
 
     // FD_LOG_INFO("run_wscms: scale {} produced {} clean iterations", selected_scale_idx, n_clean_iter);
 
@@ -286,13 +318,13 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
                                    result.peak_coords.end());
   ws.historical_scales.insert(ws.historical_scales.end(), result.scales.begin(), result.scales.end());
 
-  exec_resources.free_async(conv2_psfs_ptr, stream_a);
-  exec_resources.free_async(conv_psfs_ptr, stream_a);
-  exec_resources.free_async(scales_x_dirty_ptr, stream_a);
-  exec_resources.free_async(d_all_coeffs, stream_a);
-  exec_resources.free_async(scale_kernels_ptr, stream_a);
-  exec_resources.free_async(mean_residual_ptr, stream_a);
-  if (mask_per_scale_ptr != nullptr) exec_resources.free_async(mask_per_scale_ptr, stream_a);
+  stream_a.free_async(conv2_psfs_ptr);
+  stream_a.free_async(conv_psfs_ptr);
+  stream_a.free_async(scales_x_dirty_ptr);
+  stream_a.free_async(d_all_coeffs);
+  stream_a.free_async(scale_kernels_ptr);
+  stream_a.free_async(mean_residual_ptr);
+  if (mask_per_scale_ptr != nullptr) stream_a.free_async(mask_per_scale_ptr);
 
   // print used memory
   exec_resources.print_memory_usage("End");
