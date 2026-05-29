@@ -117,7 +117,7 @@ void mask_and_abs_async(const core::stream_resources& stream_res, core::device_s
 {
   assert(data.is_exhaustive() && mask.is_exhaustive());
   assert(data.extents() == mask.extents());
-  const int n_per_batch = static_cast<int>(mask.size());
+  const int n_per_batch = static_cast<int>(data.extent(1)*data.extent(2));
   const int nbatch = data.extent(0);
   const int batch_stride = data.stride(0);
   dim3 grid(CEIL_DIV(n_per_batch, 256), nbatch);
