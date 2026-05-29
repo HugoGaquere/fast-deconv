@@ -10,6 +10,7 @@
 #include <fast_deconv/morphology/dilation.hpp>
 #include <fast_deconv/morphology/roi.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
+#include <fast_deconv/util/dump.hpp>
 #include <limits>
 #include <vector>
 
@@ -181,11 +182,10 @@ void build_auto_mask(const core::stream_resources& stream,
   }
 
   // ---- 2. Build a PSF-sized convolve_ctx with batched plans over n_freq (1 R2C + 1 C2R) ----
-  linalg::convolve_ctx ctx(psf_nrow, psf_ncol, /*forward_batch=*/n_freq, /*backward_batch=*/n_freq,
+  // ctx allocates its work area on `stream`, runs its plans on stream.cuda_stream
+  // (== cuda_stream below), and frees the work area at destruction.
+  linalg::convolve_ctx ctx(stream, psf_nrow, psf_ncol, /*forward_batch=*/n_freq, /*backward_batch=*/n_freq,
                            /*n_backward_plans=*/1, fft_padding);
-  void* fft_work = stream.alloc_async<void>(ctx.required_work_size());
-  ctx.set_work_area(fft_work);
-  ctx.set_stream(cuda_stream);
 
   const int padded_total = ctx.padded_nrow * ctx.padded_ncol;
   const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
@@ -276,6 +276,6 @@ void build_auto_mask(const core::stream_resources& stream,
   stream.free_async(freq_psf);
   stream.free_async(padded_psf);
   stream.free_async(gauss_kernels_ptr);
-  stream.free_async(fft_work);
+  // fft work area is owned by `ctx` and freed in its destructor.
 }
 }  // namespace fast_deconv::common

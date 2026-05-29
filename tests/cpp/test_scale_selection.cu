@@ -129,7 +129,7 @@ TEST_F(ScaleSelectionTest, ScaleConvolve)
   core::resources resources(0);
   const auto& stream_res = resources.get_stream_resources();
 
-  fast_deconv::algorithm::wscms::scale_convolve_ctx ctx(resources, nrow, ncol, /*backward_batch_size=*/1, padding);
+  fast_deconv::algorithm::wscms::scale_convolve_ctx ctx(stream_res, nrow, ncol, /*backward_batch_size=*/1, padding);
 
   float* d_dirty = resources.alloc_async<float>(npix, stream_res);
   float* d_scales = resources.alloc_async<float>(kernel_total, stream_res);
@@ -145,7 +145,7 @@ TEST_F(ScaleSelectionTest, ScaleConvolve)
   core::device_span3d<float> scales_view(d_scales, n_scales, freq_nrow, freq_ncol);
   core::device_span3d<float> output_view(d_output, n_scales, nrow, ncol);
 
-  scale::convolve_with_scales(stream_res, ctx, dirty_view, scales_view, output_view);
+  scale::convolve_with_scales(ctx, dirty_view, scales_view, output_view);
 
   std::vector<float> h_output(npix * n_scales);
   CHECK_CUDA(cudaMemcpyAsync(h_output.data(), d_output, npix * n_scales * sizeof(float),
