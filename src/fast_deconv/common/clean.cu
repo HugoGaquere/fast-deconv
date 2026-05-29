@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstdint>
 #include <fast_deconv/common/clean.hpp>
 
 namespace {
@@ -34,8 +35,10 @@ __global__ void subtract_component_kernel(float* residual, const float* psf, con
   const int f = blockIdx.z;
   if (tix >= ovr.w || tiy >= ovr.h) return;
 
-  const int r_offset = f * dirty_freq_stride + (ovr.ay0 + tiy) * ovr.lda + (ovr.ax0 + tix);
-  const int p_offset = f * psf_freq_stride + (ovr.by0 + tiy) * ovr.ldb + (ovr.bx0 + tix);
+  const std::int64_t r_offset =
+      static_cast<std::int64_t>(f) * dirty_freq_stride + (ovr.ay0 + tiy) * ovr.lda + (ovr.ax0 + tix);
+  const std::int64_t p_offset =
+      static_cast<std::int64_t>(f) * psf_freq_stride + (ovr.by0 + tiy) * ovr.ldb + (ovr.bx0 + tix);
 
   residual[r_offset] -= per_chan[f] * gain * psf[p_offset];
 }

@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <fast_deconv/common/multi_frequency.hpp>
 
 #include "fast_deconv/linalg/pseudo_inverse.hpp"
@@ -17,7 +18,7 @@ __global__ void compute_spectral_matrix_kernel(float* SAX, float* A, const float
   const int n = n_freq * n_order;
   for (int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < n; idx += blockDim.x * gridDim.x) {
     const int f = idx / n_order;
-    float sqrt_jn = sqrtf(jones_norm[f * jn_freq_stride + jn_peak_offset]);
+    float sqrt_jn = sqrtf(jones_norm[static_cast<std::int64_t>(f) * jn_freq_stride + jn_peak_offset]);
     float sax = xdes[idx] * sqrt_jn;
     SAX[idx] = sax;
     A[idx] = sax * sqrtf(weights[f]);
@@ -46,7 +47,7 @@ __global__ void compute_spectral_coeffs_kernel(float* compact_out, float* per_ch
 
   // Step 1: build weighted vector at peak pixel
   for (int f = tid; f < n_freq; f += SPECTRAL_BLOCK_SIZE) {
-    s_wy[f] = sqrtf(weights[f]) * dirty[f * dirty_freq_stride + dirty_peak_offset];
+    s_wy[f] = sqrtf(weights[f]) * dirty[static_cast<std::int64_t>(f) * dirty_freq_stride + dirty_peak_offset];
   }
   __syncthreads();
 

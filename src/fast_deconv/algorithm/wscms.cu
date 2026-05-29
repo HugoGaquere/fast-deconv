@@ -125,8 +125,10 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   const int psf_npix = psf_ctx.input_nrow * psf_ctx.input_ncol;
 
   FD_NVTX_MARK("init/precompute_psfs begin");
-  float* conv2_psfs_ptr = exec_resources.alloc_async<float>(n_scales * n_facets * psf_npix, stream_a);
-  float* conv_psfs_ptr = exec_resources.alloc_async<float>(n_scales * n_facets * n_freq * psf_npix, stream_a);
+  float* conv2_psfs_ptr =
+      exec_resources.alloc_async<float>(static_cast<std::size_t>(n_scales) * n_facets * psf_npix, stream_a);
+  float* conv_psfs_ptr = exec_resources.alloc_async<float>(
+      static_cast<std::size_t>(n_scales) * n_facets * n_freq * psf_npix, stream_a);
   core::device_span5d<float> all_conv_psfs(conv_psfs_ptr, n_scales, n_facets, n_freq, psf_ctx.input_nrow,
                                            psf_ctx.input_ncol);
   core::device_span4d<float> all_conv2_psfs(conv2_psfs_ptr, n_scales, n_facets, psf_ctx.input_nrow, psf_ctx.input_ncol);
