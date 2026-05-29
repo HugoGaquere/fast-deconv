@@ -9,6 +9,10 @@ project(fast_deconv LANGUAGES CXX CUDA)
 
 find_package(CUDAToolkit REQUIRED)
 
+# Build all objects as PIC so executables link cleanly on toolchains that
+# default to PIE (conda-forge, recent Debian/Ubuntu/Fedora).
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(
@@ -66,10 +70,6 @@ add_library(fast_deconv STATIC
         src/fast_deconv/matrix/stats.cu
         src/fast_deconv/morphology/dilation.cu
         src/fast_deconv/morphology/roi.cu
-)
-
-set_target_properties(fast_deconv PROPERTIES
-    POSITION_INDEPENDENT_CODE ON   # linked into _fast_deconv.so
 )
 
 target_link_libraries(fast_deconv PUBLIC
