@@ -150,6 +150,9 @@ if (NOT SKBUILD)
   add_executable(example_wscms src/example_wscms.cu)
   target_link_libraries(example_wscms PRIVATE fast_deconv)
 
+  add_executable(bench_wscms src/bench_wscms.cu)
+  target_link_libraries(bench_wscms PRIVATE fast_deconv)
+
   add_executable(example_peer_access src/example_peer_access.cu)
   target_link_libraries(example_peer_access PRIVATE fast_deconv)
 

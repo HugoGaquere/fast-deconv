@@ -1,0 +1,84 @@
+Workaround for nvcc 12.x rejecting concept-constrained sibling
+specializations of fmt::formatter<T> in emu/0.1.0-rc.7.
+
+nvcc 12.x flattens C++20 concept constraints before handing template
+specializations to the host compiler, so two partial specializations
+that differ only in their constraint look identical and trigger
+"redefinition" errors. nvcc 13.x handles this correctly.
+
+This patch merges each conflicting pair (formatter, is_range) into a
+single specialization with a disjunctive concept. Behavior is
+preserved: both original branches had identical bodies, and both
+is_range branches were std::false_type.
+
+Apply against the emu source root (the directory containing
+emu/pybind11/format.hpp), e.g.:
+
+    patch -p1 -d /home/hugog/.conan2/p/b/<emu-pkg-id>/p/include \
+        < scripts/emu-format-nvcc12.patch
+
+Re-apply after any `conan remove emu` or cache wipe. Remove once
+upgrading to nvcc 13.x or once emu ships an upstream fix.
+
+--- a/emu/pybind11/format.hpp
++++ b/emu/pybind11/format.hpp
+@@ -14,8 +14,11 @@
+ namespace fmt
+ {
+
+-template <emu::pybind11::cpts::derived_from_handle T>
+-struct formatter<T> : fmt::formatter<std::string> {
++// nvcc 12.x cannot disambiguate two sibling concept-constrained partial
++// specializations of the same template; merge into one disjunctive form.
++template <typename T>
++    requires emu::pybind11::cpts::derived_from_handle<T>
++          || emu::pybind11::cpts::accessor<T>
++struct formatter<T> : fmt::formatter<std::string> {
+     using base = fmt::formatter<std::string>;
+
+     std::string_view format_spec = "{}";
+@@ -42,40 +45,11 @@ struct formatter<T> : fmt::formatter<std::string> {
+     }
+ };
+
+-template <emu::pybind11::cpts::accessor Accessor>
+-struct formatter<Accessor> : fmt::formatter<std::string> {
+-    using base = fmt::formatter<std::string>;
+-
+-    std::string_view format_spec = "{}";
+-
+-    constexpr auto parse(format_parse_context& ctx) {
+-        auto it = ctx.begin(), end = ctx.end();
+-
+-        // If spec is empty, return directly.
+-        if (it == end or *it == '}') return it;
+-
+-        format_spec = std::string_view(it - 2, (end - it + 2));
+-
+-        // Advance iterator to the end.
+-        for(;it != end and *it != '}'; it++);
+-
+-        return it;
+-    }
+-
+-    template <typename FormatContext>
+-    auto format(const Accessor& obj, FormatContext& ctx) const {
+-        auto formatted_string = pybind11::str(format_spec.data(), format_spec.size()).format(obj);
+-
+-        return base::format(static_cast<std::string>(formatted_string), ctx);
+-    }
+-};
+-
+-
+-
+     // Specialization for nanobind python based type to never be treated as a range by fmt.
+-    template <emu::pybind11::cpts::derived_from_handle T, typename Char>
+-    struct is_range<T, Char>: std::false_type{};
+-
+-    template <emu::pybind11::cpts::accessor T, typename Char>
++    template <typename T, typename Char>
++        requires emu::pybind11::cpts::derived_from_handle<T>
++              || emu::pybind11::cpts::accessor<T>
+     struct is_range<T, Char>: std::false_type{};
+
+ } // namespace fmt
