@@ -535,7 +535,8 @@ static config_result run_config(const bench_config& c, const bench_options& opt,
   out.cfg = c;
 
   // OOM pre-check against current free memory. The estimate already carries a
-  // 1.15 safety factor, so skip only when it genuinely exceeds free memory.
+  // small rounding allowance (see estimate_bytes), so skip only when it
+  // genuinely exceeds free memory.
   size_t free_b = 0, total_b = 0;
   BENCH_CHECK_CUDA(cudaMemGetInfo(&free_b, &total_b));
   if (estimate_bytes(c) > free_b) {
@@ -724,11 +725,17 @@ static void print_gpu_info(int device)
   cudaRuntimeGetVersion(&runtime_v);
   const double gib = 1024.0 * 1024.0 * 1024.0;
 
+  // clockRate / memoryClockRate were removed from cudaDeviceProp in CUDA 13;
+  // query them via cudaDeviceGetAttribute, which works on both 12 and 13.
+  int core_khz = 0, mem_khz = 0;
+  cudaDeviceGetAttribute(&core_khz, cudaDevAttrClockRate, device);
+  cudaDeviceGetAttribute(&mem_khz, cudaDevAttrMemoryClockRate, device);
+
   printf("==================== GPU ====================\n");
   printf("  device %d        : %s (sm_%d%d)\n", device, p.name, p.major, p.minor);
   printf("  multiprocessors : %d SMs\n", p.multiProcessorCount);
-  printf("  clocks          : core %.0f MHz  mem %.0f MHz (%d-bit bus)\n", p.clockRate / 1000.0,
-         p.memoryClockRate / 1000.0, p.memoryBusWidth);
+  printf("  clocks          : core %.0f MHz  mem %.0f MHz (%d-bit bus)\n", core_khz / 1000.0,
+         mem_khz / 1000.0, p.memoryBusWidth);
   printf("  global memory   : %.2f GiB total, %.2f GiB free\n", p.totalGlobalMem / gib,
          free_b / gib);
   printf("  L2 cache        : %.2f MiB\n", p.l2CacheSize / (1024.0 * 1024.0));
@@ -814,9 +821,9 @@ int main(int argc, char** argv)
     // Hold every axis at its median, then vary one axis at a time across its
     // list -- each sweep crossed with the full --sizes range (the plotter puts
     // image size on the x-axis, so each marginal line needs the whole sweep).
-    const int b_nf = median_value(opt.nfreqs);
+    const int b_nf = 2;  // pinned to match MEDIAN_OVERRIDE n_freq=2 in plot_bench.py
     const int b_ns = 5;  // pinned to match MEDIAN_OVERRIDE n_scales=5 in plot_bench.py
-    const int b_nfac = median_value(opt.nfacets);
+    const int b_nfac = 100;  // pinned to match MEDIAN_OVERRIDE n_facet=100 in plot_bench.py
     const int b_no = median_value(opt.norders);
     const double b_pf = median_value(opt.psf_fracs);
     const int b_K = median_value(opt.Ks);
