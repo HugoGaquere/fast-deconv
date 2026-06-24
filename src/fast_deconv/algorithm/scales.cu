@@ -181,42 +181,39 @@ int scale_selection(const core::stream_resources& stream_res,
   const int ncol = scaled_dirty.extent(2);
   const int npix = nrow * ncol;
 
-  // 2. Build segment offsets [0, npix, 2*npix, ..., n_scales*npix]
-  int* d_offsets = stream_res.alloc_async<int>(n_scales + 1);
-  std::vector<int> h_offsets(n_scales + 1);
-  for (int i = 0; i <= n_scales; i++) h_offsets[i] = i * npix;
-  CHECK_CUDA(
-      cudaMemcpyAsync(d_offsets, h_offsets.data(), sizeof(int) * (n_scales + 1), cudaMemcpyHostToDevice, cuda_stream));
-
-  // 3. CUB segmented argmax
-  using KVPair = cub::KeyValuePair<int, float>;
-  KVPair* d_peaks = stream_res.alloc_async<KVPair>(n_scales);
+  // Per-scale peak via a loop of full-image Max reductions. CUB's
+  // DeviceSegmentedReduce parallelizes ACROSS segments, so with only n_scales
+  // (~5) huge segments it leaves the GPU almost idle. A DeviceReduce::Max per
+  // scale saturates the GPU on every segment instead. We only need the peak
+  // VALUE per scale (the argmax index is never used downstream), so Max — not
+  // ArgMax — suffices. Masked-out pixels are already -inf, so they never win.
+  float* d_maxes = stream_res.alloc_async<float>(n_scales);
 
   size_t temp_bytes = 0;
-  CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(nullptr, temp_bytes, scaled_dirty.data_handle(), d_peaks, n_scales,
-                                                d_offsets, d_offsets + 1, cuda_stream));
-
+  CHECK_CUDA(cub::DeviceReduce::Max(nullptr, temp_bytes, scaled_dirty.data_handle(), d_maxes, npix, cuda_stream));
   void* d_temp = stream_res.alloc_async(temp_bytes);
-  CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(d_temp, temp_bytes, scaled_dirty.data_handle(), d_peaks, n_scales,
-                                                d_offsets, d_offsets + 1, cuda_stream));
 
-  // 4. Copy per-scale peaks to host
-  std::vector<KVPair> h_peaks(n_scales);
-  CHECK_CUDA(cudaMemcpyAsync(h_peaks.data(), d_peaks, sizeof(KVPair) * n_scales, cudaMemcpyDeviceToHost, cuda_stream));
+  for (int s = 0; s < n_scales; s++) {
+    CHECK_CUDA(cub::DeviceReduce::Max(d_temp, temp_bytes, scaled_dirty.data_handle() + static_cast<size_t>(s) * npix,
+                                      d_maxes + s, npix, cuda_stream));
+  }
+
+  // Copy per-scale peaks to host
+  std::vector<float> h_maxes(n_scales);
+  CHECK_CUDA(cudaMemcpyAsync(h_maxes.data(), d_maxes, sizeof(float) * n_scales, cudaMemcpyDeviceToHost, cuda_stream));
 
   stream_res.sync();
 
   // Async cleanup
-  stream_res.free_async(d_offsets);
-  stream_res.free_async(d_peaks);
+  stream_res.free_async(d_maxes);
   stream_res.free_async(d_temp);
 
-  // 5. Biased scale selection on host (skip retired scales)
+  // Biased scale selection on host (skip retired scales)
   int best_scale = 0;
   float best_biased = -std::numeric_limits<float>::infinity();
   for (int s = 0; s < n_scales; s++) {
     if (std::find(retired_scales.begin(), retired_scales.end(), s) != retired_scales.end()) continue;
-    float biased = h_peaks[s].value * bias[s];
+    float biased = h_maxes[s] * bias[s];
     if (biased > best_biased) {
       best_biased = biased;
       best_scale = s;
