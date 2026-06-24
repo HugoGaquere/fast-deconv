@@ -14,6 +14,14 @@
 /// core::resources, which binds its stream pool to that device.
 /// `--csv` writes per-cycle stats (timing, component count, etc.) to a CSV
 /// file. Use scripts/plot_cycle_timing.py to chart the output.
+/// `--force-auto-mask-last` forces auto-masking on the last cycle of the set,
+/// overriding that cycle's dumped `force_auto_mask` flag. Earlier cycles keep
+/// their dumped value.
+/// `--max-iter=N` / `--max-clean-iter=N` override the dumped iteration caps:
+/// total minor iterations (hence the number of outer scale selections) and
+/// inner clean iterations per scale selection, respectively. Used to bound a
+/// profiling run (nsys/ncu) to a short, deterministic slice of the cycle; omit
+/// them to run the dump's full schedule.
 ///
 /// The dump directory must contain `init/` and `cycle_<N>/` subdirectories
 /// produced by FastDDFacet's dump_ref utility (set DUMP_REF=<dir> when
@@ -33,8 +41,11 @@
 #include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/util/dump.hpp>
+#include <filesystem>
 #include <fstream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -44,13 +55,15 @@ namespace core = fast_deconv::core;
 namespace scale = fast_deconv::scale;
 namespace wscms = fast_deconv::algorithm::wscms;
 
-/// Helper: allocate device memory and copy host data into it.
+/// Helper: allocate device memory and copy host data into it. Exits with a
+/// diagnostic on failure -- a silent OOM here would feed garbage pointers into
+/// the run and corrupt the timings/results downstream.
 template <typename T>
 T* device_upload(const T* host_ptr, std::size_t count)
 {
   T* ptr = nullptr;
-  cudaMalloc(reinterpret_cast<void**>(&ptr), count * sizeof(T));
-  cudaMemcpy(ptr, host_ptr, count * sizeof(T), cudaMemcpyHostToDevice);
+  CHECK_CUDA(cudaMalloc(reinterpret_cast<void**>(&ptr), count * sizeof(T)));
+  CHECK_CUDA(cudaMemcpy(ptr, host_ptr, count * sizeof(T), cudaMemcpyHostToDevice));
   return ptr;
 }
 
@@ -100,17 +113,26 @@ struct cycle_stat {
 int main(int argc, char** argv)
 {
   auto usage = [&]() {
-    fprintf(stderr, "Usage: %s <dump_dir> [--cycles=LIST] [--device=N] [--history=DIR] [--csv=PATH]\n", argv[0]);
+    fprintf(stderr,
+            "Usage: %s <dump_dir> [--cycles=LIST] [--device=N] [--history=DIR] [--csv=PATH] "
+            "[--dump-result=DIR] [--force-auto-mask-last] [--max-iter=N] [--max-clean-iter=N]\n",
+            argv[0]);
   };
 
   std::string dir;
   std::string history_dir;
   std::string csv_path;
+  std::string dump_result_dir;
   std::string cycles_spec = "1";
   int device_id = 0;
+  bool force_auto_mask_last = false;
+  int max_iter_override = -1;        // <0: keep the dumped max_iteration
+  int max_clean_iter_override = -1;  // <0: keep the dumped max_clean_iteration
   for (int i = 1; i < argc; ++i) {
     std::string a(argv[i]);
-    if (a.rfind("--cycles=", 0) == 0) {
+    if (a == "--force-auto-mask-last") {
+      force_auto_mask_last = true;
+    } else if (a.rfind("--cycles=", 0) == 0) {
       cycles_spec = a.substr(9);
     } else if (a.rfind("--cycle=", 0) == 0) {
       // Back-compat: singular flag accepted as a single-cycle spec.
@@ -121,6 +143,12 @@ int main(int argc, char** argv)
       history_dir = a.substr(10);
     } else if (a.rfind("--csv=", 0) == 0) {
       csv_path = a.substr(6);
+    } else if (a.rfind("--dump-result=", 0) == 0) {
+      dump_result_dir = a.substr(14);
+    } else if (a.rfind("--max-iter=", 0) == 0) {
+      max_iter_override = std::atoi(a.c_str() + 11);
+    } else if (a.rfind("--max-clean-iter=", 0) == 0) {
+      max_clean_iter_override = std::atoi(a.c_str() + 17);
     } else if (!a.empty() && a[0] != '-' && dir.empty()) {
       dir = a;
     } else {
@@ -306,6 +334,12 @@ int main(int argc, char** argv)
     // Hot-swap the mask for this cycle.
     ctx.workspace.mask = mask_cycle;
 
+    // --force-auto-mask-last forces auto-masking on the final cycle of the
+    // set regardless of the dump's per-cycle force_auto_mask flag.
+    const bool is_last_cycle = idx + 1 == cycle_ids.size();
+    const bool force_auto_mask =
+        npy_force_auto_mask.scalar<bool>() || (force_auto_mask_last && is_last_cycle);
+
     wscms::params params{
         .max_iteration = npy_max_iteration.scalar<int>(),
         .divergence_factor = npy_divergence.scalar<float>(),
@@ -320,17 +354,30 @@ int main(int argc, char** argv)
         .max_clean_iteration = npy_max_sub_iter.scalar<int>(),
         .scale_stall_threshold = npy_stall.scalar<float>(),
         .enable_auto_mask = true,
-        .force_enable_auto_mask = npy_force_auto_mask.scalar<bool>(),
+        .force_enable_auto_mask = force_auto_mask,
         .auto_mask_peak_threshold = opt_finite(npy_auto_mask_peak_th.scalar<float>()),
         .auto_mask_rms_threshold = opt_finite(npy_auto_mask_rms_th.scalar<float>()),
     };
+
+    // Profiling/debug overrides: bound the work so a profiler sees a short,
+    // deterministic slice. max_clean_iteration caps inner (minor) iterations
+    // per scale selection; max_iteration caps total minor iterations, hence the
+    // number of outer scale selections. Real stop thresholds may still end the
+    // cycle earlier -- these only ever shorten it.
+    if (max_iter_override > 0) params.max_iteration = max_iter_override;
+    if (max_clean_iter_override > 0) params.max_clean_iteration = max_clean_iter_override;
+    if (max_iter_override > 0 || max_clean_iter_override > 0)
+      printf("  iteration overrides: max_iteration=%d max_clean_iteration=%d\n", params.max_iteration,
+             params.max_clean_iteration);
 
     printf("Running WSCMS on %dx%d image, mask: %dx%d, %d scales, %d freq, %d facets...\n", nrow, ncol, mask_nrow,
            mask_ncol, n_scales, n_freq, n_facet);
 
     const auto t_start = std::chrono::steady_clock::now();
     wscms::wscms_result result = wscms::run_wscms_cycles(ctx, params, dirty, jones_norm, weights_freq);
-    cudaDeviceSynchronize();
+    // Checked sync: an async kernel failure must not be recorded as a valid
+    // (and absurdly fast) cycle timing.
+    CHECK_CUDA(cudaDeviceSynchronize());
     const auto t_end = std::chrono::steady_clock::now();
     const double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
     stats.push_back({cid, elapsed_ms, result.peak_coords.size(), result.total_iterations, result.final_flux,
@@ -349,6 +396,39 @@ int main(int argc, char** argv)
         printf("%s%.6f", k == 0 ? "" : ", ", result.coeffs[i][k]);
       }
       printf("]\n");
+    }
+
+    // Optional result dump for the fidelity comparison: the mutated dirty is
+    // the per-frequency residual after this cycle; components go to a CSV in
+    // the same format the DDFacet reference exports are expected to use.
+    // Dump failures (disk full, bad path) only warn: the timings collected so
+    // far are the primary product and must still reach the --csv output.
+    if (!dump_result_dir.empty()) {
+      try {
+        const std::string cycle_dir = dump_result_dir + "/cycle_" + std::to_string(cid);
+        std::filesystem::create_directories(cycle_dir);
+        fast_deconv::util::dump_npy(cycle_dir + "/residual.npy", dirty);
+        std::ofstream comp(cycle_dir + "/components.csv");
+        if (!comp) throw std::runtime_error("cannot open " + cycle_dir + "/components.csv");
+        const std::size_t comp_n_order =
+            result.coeffs.empty() ? 0 : result.coeffs.front().size();
+        comp << "row,col,scale,gain";
+        for (std::size_t k = 0; k < comp_n_order; ++k) comp << ",coeff" << k;
+        comp << '\n';
+        for (std::size_t i = 0; i < result.peak_coords.size(); ++i) {
+          comp << result.peak_coords.at(i).first << ',' << result.peak_coords.at(i).second << ','
+               << result.scales.at(i) << ',' << result.gains.at(i);
+          // coeffs are filled by a separate path than the component lists and
+          // may legitimately be shorter; emit only what exists for this row.
+          if (i < result.coeffs.size())
+            for (float cval : result.coeffs.at(i)) comp << ',' << cval;
+          comp << '\n';
+        }
+        printf("Dumped residual + %zu components to %s\n", result.peak_coords.size(),
+               cycle_dir.c_str());
+      } catch (const std::exception& e) {
+        fprintf(stderr, "Warning: --dump-result failed for cycle %d: %s\n", cid, e.what());
+      }
     }
 
     cudaFree(d_dirty);
