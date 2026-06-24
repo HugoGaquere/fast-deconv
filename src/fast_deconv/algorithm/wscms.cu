@@ -11,6 +11,7 @@
 #include <fast_deconv/linalg/linalg.hpp>
 #include <fast_deconv/matrix/argmax.hpp>
 #include <fast_deconv/matrix/stats.hpp>
+#include <fast_deconv/matrix/tiled_argmax.hpp>
 #include <fast_deconv/util/dump.hpp>
 #include <fast_deconv/util/utils.hpp>
 
@@ -135,6 +136,15 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   matrix::argmax_workspace peak_ws{stream_a, mean_residual_n_items};
   // exec_resources.print_memory_usage("init/after peak_ws");
 
+  // Tiled argmax workspace for the clean loop: after a clean subtraction only the
+  // conv2_psf footprint is dirtied, so we recompute just the touched tiles instead
+  // of rescanning all of mean_residual. Re-seeded with a full pass each outer iter.
+  matrix::tiled_argmax_workspace tiled_ws{stream_a};
+  tiled_ws.image_width = dirty_ncols;
+  tiled_ws.image_height = dirty_nrows;
+  tiled_ws.tile_width = 64;
+  tiled_ws.tile_height = 64;
+
   const int psf_npix = psf_ctx.input_nrow * psf_ctx.input_ncol;
 
   FD_NVTX_MARK("init/precompute_psfs begin");
@@ -253,6 +263,11 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
 
     common::mask_less_than_threshold(stream_a, mean_residual, threshold, -std::numeric_limits<float>::infinity());
 
+    // Seed the tile cache against the masked buffer for this scale. The peak is
+    // unchanged by masking (it only removes sub-threshold values), so we keep the
+    // peak_value/peak_index from the argmax above and use this purely to seed.
+    matrix::argmax(tiled_ws, mean_residual.data_handle());
+
     FD_LOG_DEBUG("run_wscms: clean loop start scale={} peak={:.8f} threshold={:.8f} max_clean_iter={}",
                  selected_scale_idx, peak_value, threshold, p.max_clean_iteration);
 
@@ -280,7 +295,11 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
 
       common::subtract_component_async(stream_b, dirty, conv_psf, coeffs_per_chan, peak_coords, gain);
       common::subtract_component_async(stream_a, mean_residual, conv2_psf, peak_coords, peak_value * gain);
-      std::tie(peak_value, peak_index) = matrix::argmax(peak_ws, mean_residual.data_handle());
+      // Only the conv2_psf footprint centered on peak_coords was dirtied; refresh
+      // just the touched tiles and re-combine against the cached ones.
+      std::tie(peak_value, peak_index) = matrix::argmax_incremental(
+          tiled_ws, mean_residual.data_handle(), peak_coords.first, peak_coords.second,
+          conv2_psf.extent(0), conv2_psf.extent(1));
 
       n_clean_iter++;
     }

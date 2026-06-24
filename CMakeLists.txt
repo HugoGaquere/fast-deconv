@@ -65,6 +65,7 @@ add_library(fast_deconv STATIC
         src/fast_deconv/linalg/linalg.cu
         src/fast_deconv/linalg/pseudo_inverse.cu
         src/fast_deconv/matrix/argmax.cu
+        src/fast_deconv/matrix/tiled_argmax.cu
         src/fast_deconv/matrix/max.cu
         src/fast_deconv/matrix/rms.cu
         src/fast_deconv/matrix/stats.cu
@@ -153,6 +154,9 @@ if (NOT SKBUILD)
   add_executable(bench_wscms src/bench_wscms.cu)
   target_link_libraries(bench_wscms PRIVATE fast_deconv)
 
+  add_executable(bench_tiled_argmax src/bench_tiled_argmax.cu)
+  target_link_libraries(bench_tiled_argmax PRIVATE fast_deconv)
+
   add_executable(example_peer_access src/example_peer_access.cu)
   target_link_libraries(example_peer_access PRIVATE fast_deconv)
 
@@ -180,6 +184,7 @@ if(BUILD_TESTS AND NOT SKBUILD)
     tests/cpp/test_scale_selection.cu
     tests/cpp/morphology.cu
     tests/cpp/test_mask.cu
+    tests/cpp/test_tiled_argmax.cu
   )
 
   target_link_libraries(fast_deconv_tests PRIVATE
