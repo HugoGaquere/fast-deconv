@@ -47,6 +47,14 @@ bench_results/
 tests/data/
 docs/*
 
+# Profiler reports
+*.ncu-rep
+*.nsys-rep
+*.sqlite
+
+# Paper raw run data (large; regenerated from scripts/paper)
+paper_data/
+
 # CMake / IDE-generated
 compile_commands.json
 CMakeUserPresets.json
