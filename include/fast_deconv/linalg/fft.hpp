@@ -50,8 +50,7 @@ struct convolve_ctx {
   size_t work_size = 0;                     // max workspace size across all plans (bytes)
   void* work_area = nullptr;                // shared cuFFT workspace, owned and freed here
 
-  // Stream the plans run on; also used to alloc/free work_area. Bound at
-  // construction and must outlive this context.
+  // Stream the plans run on
   const core::stream_resources& stream_res;
 
   /**
@@ -78,16 +77,13 @@ struct convolve_ctx {
 
   convolve_ctx(const convolve_ctx&) = delete;
   convolve_ctx& operator=(const convolve_ctx&) = delete;
-  convolve_ctx(convolve_ctx&&) noexcept = default;
-  convolve_ctx& operator=(convolve_ctx&&) = delete;  // reference member can't be reseated
+  convolve_ctx(convolve_ctx&&) = delete;
+  convolve_ctx& operator=(convolve_ctx&&) = delete;
 
   ~convolve_ctx()
   {
     for (auto p : plans_forward) CUFFT_CALL(cufftDestroy(p));
     for (auto p : plans_backward) CUFFT_CALL(cufftDestroy(p));
-    // Enqueue the free on the owning stream; it completes at the stream's next
-    // sync (e.g. stream/pool teardown), and cudaMemPoolDestroy defers reclaim
-    // until outstanding async frees finish. No explicit sync needed here.
     if (work_area != nullptr) stream_res.free_async(work_area);
   }
 
@@ -118,9 +114,7 @@ void fftshift_crop(float* input, float* output, int nx, int ny, int px, int py, 
 // Compute padding amounts (rows, cols) for a target padding factor.
 std::pair<int, int> compute_padding(int npix_x, int npix_y, float padding);
 
-// Smallest m >= n whose prime factors are all in {2, 3, 5, 7}. cuFFT runs
-// Cooley-Tukey on these sizes with minimal workspace; non-smooth sizes (e.g.
-// large prime factors) trigger Bluestein, which can blow up workspace by 10x+.
+// Smallest m >= n whose prime factors are all in {2, 3, 5, 7}.
 int next_fast_size(int n);
 
 }  // namespace fast_deconv::linalg
