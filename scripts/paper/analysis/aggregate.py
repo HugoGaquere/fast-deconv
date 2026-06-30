@@ -10,7 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from harness import read_csv_rows, read_json, to_num
-from stages.scaling import METRIC_ROWS, baseline_curve
+from stages.scaling import (AXES, METRIC_ROWS, axis_baselines, baseline_curve,
+                            select)
 
 
 def _load_bundle(path: Path) -> dict:
@@ -27,6 +28,7 @@ def _load_bundle(path: Path) -> dict:
         rows = [{k: to_num(v) for k, v in r.items()}
                 for r in read_csv_rows(scaling_csv)]
         b["baseline"] = baseline_curve(rows)
+        b["rows"] = [r for r in rows if r["status"] == "ok"]
     return b
 
 
@@ -41,12 +43,24 @@ def run(bundle_paths, outdir) -> dict:
     outdir.mkdir(parents=True, exist_ok=True)
     bundles = [_load_bundle(Path(p)) for p in bundle_paths]
 
-    # ----- cross-GPU scaling overlay (baseline curve per bundle) -----
+    # ----- cross-GPU scaling: two standalone figures -----
+    # The portability headline (baseline wall-time and throughput overlaid across
+    # GPUs) and the per-GPU OFAT parameter sweep used to read different things, so
+    # they are now separate figures rather than stacked rows of one grid. K is held
+    # at baseline, not shown (its sweep mirrors M under the fixed K*M synthetic
+    # work), matching the per-bundle panels.
     with_scaling = [b for b in bundles if b.get("baseline")]
+    sweep = [b for b in bundles if b.get("rows")]
+
+    # -- overlay headline: wall time and throughput across GPUs, standalone --
     if with_scaling:
-        sizes = sorted({r["nrow"] for b in with_scaling for r in b["baseline"]})
-        fig, axes = plt.subplots(2, 2, figsize=(8.0, 6.0), sharex=True)
-        for (metric, label, scale, guide), ax in zip(METRIC_ROWS, axes.flat):
+        overlay_sizes = sorted({r["nrow"] for b in with_scaling
+                                for r in b["baseline"]})
+        fig, axes = plt.subplots(1, 2, figsize=(3.4 * 2, 3.1))
+        titles = ["Wall time", "Pixel throughput"]
+        for mi, ((metric, label, scale, guide), title) in enumerate(zip(
+                (METRIC_ROWS[0], METRIC_ROWS[2]), titles)):  # wall time, throughput
+            ax = axes[mi]
             panel_max = None  # (y, x) of the highest plotted point
             for b in with_scaling:
                 curve = b["baseline"]
@@ -57,21 +71,78 @@ def run(bundle_paths, outdir) -> dict:
                     if y > 0 and (panel_max is None or y > panel_max[0]):
                         panel_max = (y, x)
             if panel_max is not None:
-                plots.annotate_max(ax, panel_max[1], panel_max[0], sizes,
-                                   plots.unit_of(label))
-            if guide and with_scaling[0]["baseline"]:
+                plots.annotate_max(ax, panel_max[1], panel_max[0],
+                                   overlay_sizes, plots.unit_of(label))
+            if guide:
                 anchor = max((b["baseline"][-1] for b in with_scaling),
                              key=lambda r: r["nrow"])
-                ax.plot(sizes, [anchor[metric] * scale * (x / anchor["nrow"]) ** 2
-                                for x in sizes], ls="--", lw=1, color="gray",
-                        label="$N^2$")
+                ax.plot(overlay_sizes,
+                        [anchor[metric] * scale * (x / anchor["nrow"]) ** 2
+                         for x in overlay_sizes], ls="--", lw=1,
+                        color="gray", label="$N^2$")
             ax.set_xscale("log")
             ax.set_yscale("log")
-            plots.scaling_axes(ax, sizes)
+            plots.scaling_axes(ax, overlay_sizes)
             ax.set_ylabel(label)
-        for ax in axes[1]:
             ax.set_xlabel("image side N [px]")
-        axes[0][0].legend(fontsize=7)
+            ax.set_title(title)
+        # one shared legend above both panels (the GPU colours and N^2 guide are
+        # common to the pair), so each panel keeps its full plotting area.
+        handles, labels_ = axes[0].get_legend_handles_labels()
+        leg = fig.legend(handles, labels_, loc="outside upper center",
+                         ncol=len(handles), fontsize=7)
+        plots.save_fig(fig, outdir / "cross_gpu_scaling_overlay",
+                       extra_artists=[leg])
+
+    # -- per-GPU OFAT wall-time sweep, standalone grid --
+    if sweep:
+        all_ok = [r for b in sweep for r in b["rows"]]
+        cols = [ax for ax in AXES
+                if ax != "K" and len({r[ax] for r in all_ok}) > 1] or [AXES[0]]
+        sweep_sizes = sorted({r["nrow"] for r in all_ok})
+        metric, mlabel, mscale, mguide = METRIC_ROWS[0]  # wall time [s]
+
+        fig, axes2d = plt.subplots(len(sweep), len(cols),
+                                   figsize=(3.4 * len(cols), 2.7 * len(sweep)),
+                                   squeeze=False, sharex=True)
+        for bi, b in enumerate(sweep):
+            ok = b["rows"]
+            base = axis_baselines(ok)
+            baseline = select(ok, base)
+            for ci, ax_name in enumerate(cols):
+                cell = axes2d[bi][ci]
+                panel_max = None  # (y, x) of the highest plotted point
+                for v in sorted({r[ax_name] for r in ok}):
+                    fixed = {a: base[a] for a in AXES if a != ax_name}
+                    fixed[ax_name] = v
+                    rows_v = select(ok, fixed)
+                    if not rows_v:
+                        continue
+                    xs = [r["nrow"] for r in rows_v]
+                    ys = [r[metric] * mscale for r in rows_v]
+                    cell.plot(xs, ys, marker="o", ms=3, lw=1.2,
+                              label=f"{ax_name}={v}")
+                    for x, y in zip(xs, ys):
+                        if y > 0 and (panel_max is None or y > panel_max[0]):
+                            panel_max = (y, x)
+                if panel_max is not None:
+                    plots.annotate_max(cell, panel_max[1], panel_max[0],
+                                       sweep_sizes, plots.unit_of(mlabel))
+                if mguide and len(baseline) >= 2:
+                    x0, y0 = baseline[-1]["nrow"], baseline[-1][metric] * mscale
+                    xg = sorted({r["nrow"] for r in ok})
+                    cell.plot(xg, [y0 * (x / x0) ** 2 for x in xg],
+                              ls="--", lw=1, color="gray", label="$N^2$")
+                cell.set_xscale("log")
+                cell.set_yscale("log")
+                plots.scaling_axes(cell, sweep_sizes)
+                if bi == 0:
+                    cell.set_title(ax_name)
+                    cell.legend()
+                if bi == len(sweep) - 1:
+                    cell.set_xlabel("image side N [px]")
+                if ci == 0:
+                    cell.set_ylabel(f"{b['label']}\n{mlabel}")
         plots.save_fig(fig, outdir / "cross_gpu_scaling")
 
     # ----- cross-GPU near-roof comparison (ncu) -----
@@ -235,6 +306,9 @@ def run(bundle_paths, outdir) -> dict:
 
     rt = [(b, _cycles(b)) for b in bundles]
     rt = [(b, c) for b, c in rt if c]
+    # longest-running GPU first, so each group's bars descend left-to-right
+    # (and the legend follows the same order).
+    rt.sort(key=lambda bc: sum(r["elapsed_ms"] for r in bc[1]), reverse=True)
     if rt:
         cmap = plt.get_cmap("tab10")
         cycle_ids = sorted({r["cycle_id"] for _, c in rt for r in c})
@@ -243,11 +317,14 @@ def run(bundle_paths, outdir) -> dict:
         ymax = max(r["elapsed_ms"] / 1e3 for _, c in rt for r in c)
         fig, ax = plt.subplots(figsize=(7.0, 4.0))
         ax.set_axisbelow(True)  # grid behind the bars
+        # colour keyed to the bundle's original position so each GPU keeps the
+        # same colour as in the other cross-GPU figures, independent of bar order.
+        color_of = {id(b): i for i, b in enumerate(bundles)}
         for i, (b, c) in enumerate(rt):
             by_cycle = {r["cycle_id"]: r["elapsed_ms"] / 1e3 for r in c}
             vals = [by_cycle.get(cid, 0.0) for cid in cycle_ids]
             ax.bar(x + (i - (len(rt) - 1) / 2) * bw, vals, width=bw,
-                   color=cmap(i % 10), label=b["label"])
+                   color=cmap(color_of[id(b)] % 10), label=b["label"])
         # iteration count per cycle (work is data-fixed, ~equal across cards): annotate
         # once above each group from the first bundle that has the cycle.
         iters = {}
