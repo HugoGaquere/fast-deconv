@@ -304,7 +304,7 @@ static std::vector<float> gen_dirty(int n_freq, int nrow, int ncol, uint64_t see
 // ------------------------------------------------------------------------- //
 
 // Pin every data-dependent early-exit so the loop runs exactly K*M minor
-// iterations. See the loop guards in wscms.cu / clean_minor_loop.cuh.
+// iterations. See the loop guards in wscms.cu.
 static wscms::params make_fixed_params(const bench_config& c)
 {
   wscms::params p{};
