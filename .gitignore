@@ -55,6 +55,9 @@ docs/*
 # Paper raw run data (large; regenerated from scripts/paper)
 paper_data/
 
+# Paper figures (regenerated from paper_data via scripts/paper/paper.py)
+paper_figures/
+
 # CMake / IDE-generated
 compile_commands.json
 CMakeUserPresets.json
