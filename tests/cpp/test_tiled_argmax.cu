@@ -1,0 +1,235 @@
+#include <cuda_runtime.h>
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <fast_deconv/core/resources.hpp>
+#include <fast_deconv/matrix/tiled_argmax.hpp>
+#include <fast_deconv/util/cuda_macros.hpp>
+#include <random>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+namespace core = fast_deconv::core;
+namespace matrix = fast_deconv::matrix;
+
+namespace {
+
+// Row-major flat index used everywhere: row * width + col.
+inline int flat(int r, int c, int w) { return r * w + c; }
+
+// Reference argmax on the host: first-seen max (strict >), matching a
+// deterministic device implementation that tie-breaks on the smaller index.
+std::pair<float, int> cpu_argmax(const std::vector<float>& img)
+{
+  int best = 0;
+  for (int i = 1; i < static_cast<int>(img.size()); ++i)
+    if (img.at(i) > img.at(best)) best = i;
+  return {img.at(best), best};
+}
+
+// Upload @p img, run matrix::argmax over a fresh workspace, free, return result.
+std::tuple<float, int> run_once(core::resources& res, const core::stream_resources& sr, const std::vector<float>& img,
+                                int w, int h, int tile_w, int tile_h)
+{
+  float* d = res.alloc_async<float>(img.size(), sr);
+  CHECK_CUDA(cudaMemcpyAsync(d, img.data(), img.size() * sizeof(float), cudaMemcpyHostToDevice, sr.cuda_stream));
+
+  matrix::tiled_argmax_workspace ws{sr};
+  ws.image_width = w;
+  ws.image_height = h;
+  ws.tile_width = tile_w;
+  ws.tile_height = tile_h;
+
+  auto out = matrix::argmax(ws, d);
+  sr.sync();
+
+  res.free_async(d, sr);  // ws frees its own device buffers in its destructor
+  sr.sync();
+  return out;
+}
+
+}  // namespace
+
+// A single planted peak in an otherwise-zero image. Smallest sanity check:
+// does the block reduce find the value and carry the right flat index?
+TEST(TiledArgmax, SingleKnownPeak)
+{
+  const int w = 64, h = 64;
+  std::vector<float> img(w * h, 0.0f);
+  const int pr = 40, pc = 50;
+  img.at(flat(pr, pc, w)) = 5.0f;
+
+  core::resources res(0);
+  const auto& sr = res.get_stream_resources();
+
+  auto [val, idx] = run_once(res, sr, img, w, h, 32, 32);
+  EXPECT_FLOAT_EQ(val, 5.0f);
+  EXPECT_EQ(idx, flat(pr, pc, w));
+}
+
+// Ragged geometry: 130x70 with 32x32 tiles -> partial edge tiles on both axes.
+// Random data, so we only assert on the VALUE (tie-safe) against the CPU max.
+TEST(TiledArgmax, RandomRaggedMatchesCpuValue)
+{
+  const int w = 130, h = 70;
+  std::mt19937 rng(1234);
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  std::vector<float> img(w * h);
+  for (auto& v : img) v = dist(rng);
+
+  core::resources res(0);
+  const auto& sr = res.get_stream_resources();
+
+  auto [val, idx] = run_once(res, sr, img, w, h, 32, 32);
+  auto [ref_val, ref_idx] = cpu_argmax(img);
+
+  EXPECT_FLOAT_EQ(val, ref_val);
+  // Value at the returned index must equal the reported value (index sanity).
+  ASSERT_GE(idx, 0);
+  ASSERT_LT(idx, static_cast<int>(img.size()));
+  EXPECT_FLOAT_EQ(img.at(idx), val);
+}
+
+// Unique global peak planted in a far, ragged corner tile. Checks BOTH value
+// and index across many tiles + a partial edge tile.
+TEST(TiledArgmax, UniquePeakIndexAcrossTiles)
+{
+  const int w = 200, h = 200;  // 32-tiles -> 7x7 grid, last tiles are 8 wide/tall
+  std::mt19937 rng(7);
+  std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+  std::vector<float> img(w * h);
+  for (auto& v : img) v = dist(rng);
+
+  const int pr = 177, pc = 183;  // inside the ragged bottom-right region
+  img.at(flat(pr, pc, w)) = 9.0f;  // strictly above everything in [0,1)
+
+  core::resources res(0);
+  const auto& sr = res.get_stream_resources();
+
+  auto [val, idx] = run_once(res, sr, img, w, h, 32, 32);
+  EXPECT_FLOAT_EQ(val, 9.0f);
+  EXPECT_EQ(idx, flat(pr, pc, w));
+}
+
+// All-negative image. Catches the classic bug of initialising the running max
+// to 0.0f / data[0] instead of -FLT_MAX: a buggy kernel reports 0 at a bogus
+// index here. The planted -0.5 is the unique (least-negative) maximum.
+TEST(TiledArgmax, AllNegativeInitialisesToNegInf)
+{
+  const int w = 96, h = 96;
+  std::mt19937 rng(99);
+  std::uniform_real_distribution<float> dist(-2.0f, -1.0f);
+  std::vector<float> img(w * h);
+  for (auto& v : img) v = dist(rng);
+
+  const int pr = 70, pc = 11;
+  img.at(flat(pr, pc, w)) = -0.5f;  // unique max, still negative
+
+  core::resources res(0);
+  const auto& sr = res.get_stream_resources();
+
+  auto [val, idx] = run_once(res, sr, img, w, h, 32, 32);
+  EXPECT_FLOAT_EQ(val, -0.5f);
+  EXPECT_EQ(idx, flat(pr, pc, w));
+}
+
+// Reuse one workspace across two calls (the tiles_initialized path), mimicking
+// the clean loop: peak moves between cycles, the second full pass must find it.
+// (The incremental dirty-footprint path is covered by IncrementalRefreshesDirtyFootprint.)
+TEST(TiledArgmax, WorkspaceReuseAcrossCalls)
+{
+  const int w = 64, h = 64;
+  core::resources res(0);
+  const auto& sr = res.get_stream_resources();
+
+  float* d = res.alloc_async<float>(w * h, sr);
+  matrix::tiled_argmax_workspace ws{sr};
+  ws.image_width = w;
+  ws.image_height = h;
+  ws.tile_width = 32;
+  ws.tile_height = 32;
+
+  // Cycle 1: peak A.
+  std::vector<float> img(w * h, 0.0f);
+  const int ar = 10, ac = 12;
+  img.at(flat(ar, ac, w)) = 5.0f;
+  CHECK_CUDA(cudaMemcpyAsync(d, img.data(), img.size() * sizeof(float), cudaMemcpyHostToDevice, sr.cuda_stream));
+  auto [v1, i1] = matrix::argmax(ws, d);
+  sr.sync();
+  EXPECT_FLOAT_EQ(v1, 5.0f);
+  EXPECT_EQ(i1, flat(ar, ac, w));
+
+  // Cycle 2: clear A, plant a larger peak B elsewhere; reuse the same workspace.
+  img.at(flat(ar, ac, w)) = 0.0f;
+  const int br = 55, bc = 60;
+  img.at(flat(br, bc, w)) = 7.0f;
+  CHECK_CUDA(cudaMemcpyAsync(d, img.data(), img.size() * sizeof(float), cudaMemcpyHostToDevice, sr.cuda_stream));
+  auto [v2, i2] = matrix::argmax(ws, d);
+  sr.sync();
+  EXPECT_FLOAT_EQ(v2, 7.0f);
+  EXPECT_EQ(i2, flat(br, bc, w));
+
+  res.free_async(d, sr);
+  sr.sync();
+}
+
+// Incremental path: seed every tile with a full pass, then dirty only a footprint
+// (as a clean subtraction would) and refresh via argmax_incremental. The new peak
+// planted inside the footprint must win; the untouched cached tiles must survive.
+TEST(TiledArgmax, IncrementalRefreshesDirtyFootprint)
+{
+  const int w = 200, h = 200;  // 32-tiles -> 7x7 grid (ragged edges)
+  std::mt19937 rng(2024);
+  std::uniform_real_distribution<float> dist(0.0f, 1.0f);  // background in [0,1)
+  std::vector<float> img(w * h);
+  for (auto& v : img) v = dist(rng);
+
+  // Initial global peak A, away from where we'll clean.
+  const int ar = 30, ac = 40;
+  img.at(flat(ar, ac, w)) = 5.0f;
+
+  core::resources res(0);
+  const auto& sr = res.get_stream_resources();
+
+  float* d = res.alloc_async<float>(img.size(), sr);
+  CHECK_CUDA(cudaMemcpyAsync(d, img.data(), img.size() * sizeof(float), cudaMemcpyHostToDevice, sr.cuda_stream));
+
+  matrix::tiled_argmax_workspace ws{sr};
+  ws.image_width = w;
+  ws.image_height = h;
+  ws.tile_width = 32;
+  ws.tile_height = 32;
+
+  // Full pass seeds all tiles; global max is A.
+  auto [v0, i0] = matrix::argmax(ws, d);
+  sr.sync();
+  EXPECT_FLOAT_EQ(v0, 5.0f);
+  EXPECT_EQ(i0, flat(ar, ac, w));
+
+  // "Clean" a footprint centered at (pr, pc): plant a bigger peak B inside it and
+  // push only those pixels to the device (everything else is unchanged).
+  const int pr = 120, pc = 110, foot = 64;  // footprint [88,152) x [78,142)
+  const int br = 125, bc = 118;             // inside the footprint
+  img.at(flat(br, bc, w)) = 7.0f;
+  CHECK_CUDA(cudaMemcpyAsync(d + flat(br, bc, w), &img.at(flat(br, bc, w)), sizeof(float),
+                             cudaMemcpyHostToDevice, sr.cuda_stream));
+
+  auto [v1, i1] = matrix::argmax_incremental(ws, d, pr, pc, foot, foot);
+  sr.sync();
+  EXPECT_FLOAT_EQ(v1, 7.0f);
+  EXPECT_EQ(i1, flat(br, bc, w));
+
+  // A sat in an untouched tile: its cached maximum must still be combined in. Drop
+  // B back below A and refresh the same footprint; A must re-emerge as the winner.
+  img.at(flat(br, bc, w)) = 0.0f;
+  CHECK_CUDA(cudaMemcpyAsync(d + flat(br, bc, w), &img.at(flat(br, bc, w)), sizeof(float),
+                             cudaMemcpyHostToDevice, sr.cuda_stream));
+  auto [v2, i2] = matrix::argmax_incremental(ws, d, pr, pc, foot, foot);
+  sr.sync();
+  EXPECT_FLOAT_EQ(v2, 5.0f);
+  EXPECT_EQ(i2, flat(ar, ac, w));
+
+  res.free_async(d, sr);
+  sr.sync();
+}

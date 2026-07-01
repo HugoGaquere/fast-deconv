@@ -99,10 +99,10 @@ void make_gaussian_kernels_async(const core::stream_resources& stream_res, core:
       sigmas.data_handle(), scale_nrow, scale_ncol_half, scale_ncol_full, n_scales, scales.data_handle());
 }
 
-void convolve_with_scales(const core::stream_resources& stream_res,
-                          const algorithm::wscms::scale_convolve_ctx& ctx, core::device_span2d<float> dirty,
+void convolve_with_scales(const algorithm::wscms::scale_convolve_ctx& ctx, core::device_span2d<float> dirty,
                           core::device_span3d<float> scales, core::device_span3d<float> out_scaled_dirty)
 {
+  const core::stream_resources& stream_res = ctx.stream_res;  // plans run on this stream
   const int n_scales = out_scaled_dirty.extent(0);
   const int img_padded_total = ctx.padded_nrow * ctx.padded_ncol;
   const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
@@ -129,8 +129,8 @@ void convolve_with_scales(const core::stream_resources& stream_res,
     throw std::invalid_argument("convolve_with_scales: (n_scales - 1) must be a multiple of backward_batch_size");
   }
 
-  ctx.set_stream(cuda_stream);
-
+  // Plans were bound to their stream at construction; the caller must pass the
+  // matching stream_res (the context's exec_stream).
   float* dirty_padded = stream_res.alloc_async<float>(img_padded_total);
   complex_type* dirty_freq = stream_res.alloc_async<complex_type>(freq_total);
   complex_type* scaled_dirty_freq =
@@ -181,42 +181,39 @@ int scale_selection(const core::stream_resources& stream_res,
   const int ncol = scaled_dirty.extent(2);
   const int npix = nrow * ncol;
 
-  // 2. Build segment offsets [0, npix, 2*npix, ..., n_scales*npix]
-  int* d_offsets = stream_res.alloc_async<int>(n_scales + 1);
-  std::vector<int> h_offsets(n_scales + 1);
-  for (int i = 0; i <= n_scales; i++) h_offsets[i] = i * npix;
-  CHECK_CUDA(
-      cudaMemcpyAsync(d_offsets, h_offsets.data(), sizeof(int) * (n_scales + 1), cudaMemcpyHostToDevice, cuda_stream));
-
-  // 3. CUB segmented argmax
-  using KVPair = cub::KeyValuePair<int, float>;
-  KVPair* d_peaks = stream_res.alloc_async<KVPair>(n_scales);
+  // Per-scale peak via a loop of full-image Max reductions. CUB's
+  // DeviceSegmentedReduce parallelizes ACROSS segments, so with only n_scales
+  // (~5) huge segments it leaves the GPU almost idle. A DeviceReduce::Max per
+  // scale saturates the GPU on every segment instead. We only need the peak
+  // VALUE per scale (the argmax index is never used downstream), so Max — not
+  // ArgMax — suffices. Masked-out pixels are already -inf, so they never win.
+  float* d_maxes = stream_res.alloc_async<float>(n_scales);
 
   size_t temp_bytes = 0;
-  CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(nullptr, temp_bytes, scaled_dirty.data_handle(), d_peaks, n_scales,
-                                                d_offsets, d_offsets + 1, cuda_stream));
-
+  CHECK_CUDA(cub::DeviceReduce::Max(nullptr, temp_bytes, scaled_dirty.data_handle(), d_maxes, npix, cuda_stream));
   void* d_temp = stream_res.alloc_async(temp_bytes);
-  CHECK_CUDA(cub::DeviceSegmentedReduce::ArgMax(d_temp, temp_bytes, scaled_dirty.data_handle(), d_peaks, n_scales,
-                                                d_offsets, d_offsets + 1, cuda_stream));
 
-  // 4. Copy per-scale peaks to host
-  std::vector<KVPair> h_peaks(n_scales);
-  CHECK_CUDA(cudaMemcpyAsync(h_peaks.data(), d_peaks, sizeof(KVPair) * n_scales, cudaMemcpyDeviceToHost, cuda_stream));
+  for (int s = 0; s < n_scales; s++) {
+    CHECK_CUDA(cub::DeviceReduce::Max(d_temp, temp_bytes, scaled_dirty.data_handle() + static_cast<size_t>(s) * npix,
+                                      d_maxes + s, npix, cuda_stream));
+  }
+
+  // Copy per-scale peaks to host
+  std::vector<float> h_maxes(n_scales);
+  CHECK_CUDA(cudaMemcpyAsync(h_maxes.data(), d_maxes, sizeof(float) * n_scales, cudaMemcpyDeviceToHost, cuda_stream));
 
   stream_res.sync();
 
   // Async cleanup
-  stream_res.free_async(d_offsets);
-  stream_res.free_async(d_peaks);
+  stream_res.free_async(d_maxes);
   stream_res.free_async(d_temp);
 
-  // 5. Biased scale selection on host (skip retired scales)
+  // Biased scale selection on host (skip retired scales)
   int best_scale = 0;
   float best_biased = -std::numeric_limits<float>::infinity();
   for (int s = 0; s < n_scales; s++) {
     if (std::find(retired_scales.begin(), retired_scales.end(), s) != retired_scales.end()) continue;
-    float biased = h_peaks[s].value * bias[s];
+    float biased = h_maxes[s] * bias[s];
     if (biased > best_biased) {
       best_biased = biased;
       best_scale = s;
@@ -226,12 +223,12 @@ int scale_selection(const core::stream_resources& stream_res,
   return best_scale;
 }
 
-void convolve_psfs_with_scale_async(const core::stream_resources& stream_res,
-                                    const algorithm::wscms::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
+void convolve_psfs_with_scale_async(const algorithm::wscms::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
                                     core::device_vect<float> d_sigma, int scale_idx,
                                     core::device_vect<float> weights, core::device_span4d<float> out_conv_psf,
                                     core::device_span3d<float> out_conv2_mean)
 {
+  const core::stream_resources& stream_res = ctx.stream_res;  // plans run on this stream
   const int n_facets = psfs.extent(0);
   const int n_freq = psfs.extent(1);
   const int psf_npix = ctx.input_nrow * ctx.input_ncol;
@@ -251,7 +248,6 @@ void convolve_psfs_with_scale_async(const core::stream_resources& stream_res,
   }
 
   const auto cuda_stream = stream_res.cuda_stream;
-  ctx.set_stream(cuda_stream);
 
   // Allocate temporaries
   float* padded_psf = stream_res.alloc_async<float>(n_freq * padded_total);
@@ -316,8 +312,7 @@ void convolve_psfs_with_scale_async(const core::stream_resources& stream_res,
   stream_res.free_async(scale_kernel_ptr);
 }
 
-void convolve_psfs_with_scales_async(const core::stream_resources& stream_res,
-                                     const algorithm::wscms::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
+void convolve_psfs_with_scales_async(const algorithm::wscms::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
                                      core::device_vect<float> d_sigmas, core::device_vect<float> weights,
                                      core::device_span5d<float> out_conv_psf, core::device_span4d<float> out_conv2_mean)
 {
@@ -326,8 +321,7 @@ void convolve_psfs_with_scales_async(const core::stream_resources& stream_res,
     core::device_vect<float> sigma_view(d_sigmas.data_handle() + i, 1);
     auto current_conv_psf = core::slice_leading(out_conv_psf, i);
     auto current_conv2_psf = core::slice_leading(out_conv2_mean, i);
-    convolve_psfs_with_scale_async(stream_res, ctx, psfs, sigma_view, i, weights, current_conv_psf,
-                                   current_conv2_psf);
+    convolve_psfs_with_scale_async(ctx, psfs, sigma_view, i, weights, current_conv_psf, current_conv2_psf);
   }
 }
 

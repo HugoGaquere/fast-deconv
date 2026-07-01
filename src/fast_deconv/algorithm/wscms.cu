@@ -11,6 +11,8 @@
 #include <fast_deconv/linalg/linalg.hpp>
 #include <fast_deconv/matrix/argmax.hpp>
 #include <fast_deconv/matrix/stats.hpp>
+#include <fast_deconv/matrix/tiled_argmax.hpp>
+#include <fast_deconv/util/dump.hpp>
 #include <fast_deconv/util/utils.hpp>
 
 namespace fast_deconv::algorithm::wscms {
@@ -57,14 +59,18 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
                               const core::device_vect<float>& weights_freq)
 {
   FD_NVTX_RANGE_FN();
-  log::set_level(spdlog::level::debug);
+  // log::set_level(spdlog::level::debug);  // disabled for benchmarking
 
   auto& exec_resources = ctx.exec_resources;
   auto& ws = ctx.workspace;
   auto& scale_ctx = ws.scale_convolve;
   auto& psf_ctx = ws.psf_convolve;
 
-  const auto& stream_a = exec_resources.get_stream_resources();
+  // stream_a must be the stream the FFT plans were built on (the context's
+  // dedicated convolution stream), so the convolutions and the surrounding
+  // kernels share one stream. stream_b is a second stream for the clean-loop
+  // per-channel subtract.
+  const auto& stream_a = ctx.exec_stream;
   const auto& stream_b = exec_resources.get_stream_resources();
 
   const uint32_t n_freq = dirty.extent(0);
@@ -79,9 +85,13 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales,
                                       psf_ctx.input_nrow, psf_ctx.input_ncol));
 
+  // exec_resources.print_memory_usage("init/entry");
+
   FD_NVTX_MARK("init/queue_residual_and_kernels");
   // Initial mean residual
+  // exec_resources.print_memory_usage("init/before mean_residual");
   float* mean_residual_ptr = exec_resources.alloc_async<float>(mean_residual_n_items, stream_a);
+  // exec_resources.print_memory_usage("init/after mean_residual");
   core::device_span2d<float> mean_residual(mean_residual_ptr, dirty_nrows, dirty_ncols);
   linalg::weighted_sum_async(stream_a, dirty, weights_freq, mean_residual);
 
@@ -117,36 +127,62 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
 
   // Shared device buffer for all component coefficients across all outer iterations.
   const std::size_t coeffs_capacity = static_cast<std::size_t>(p.max_iteration + p.max_clean_iteration) * n_order;
+  // exec_resources.print_memory_usage("init/before d_all_coeffs");
   float* d_all_coeffs = exec_resources.alloc_async<float>(coeffs_capacity, stream_a);
+  // exec_resources.print_memory_usage("init/after d_all_coeffs");
 
   // Setup workspace for repeated argmax over mean_residual
+  // exec_resources.print_memory_usage("init/before peak_ws");
   matrix::argmax_workspace peak_ws{stream_a, mean_residual_n_items};
+  // exec_resources.print_memory_usage("init/after peak_ws");
+
+  // Tiled argmax workspace for the clean loop: after a clean subtraction only the
+  // conv2_psf footprint is dirtied, so we recompute just the touched tiles instead
+  // of rescanning all of mean_residual. Re-seeded with a full pass each outer iter.
+  matrix::tiled_argmax_workspace tiled_ws{stream_a};
+  tiled_ws.image_width = dirty_ncols;
+  tiled_ws.image_height = dirty_nrows;
+  tiled_ws.tile_width = 64;
+  tiled_ws.tile_height = 64;
 
   const int psf_npix = psf_ctx.input_nrow * psf_ctx.input_ncol;
 
   FD_NVTX_MARK("init/precompute_psfs begin");
-  float* conv2_psfs_ptr = exec_resources.alloc_async<float>(n_scales * n_facets * psf_npix, stream_a);
-  float* conv_psfs_ptr = exec_resources.alloc_async<float>(n_scales * n_facets * n_freq * psf_npix, stream_a);
+  // exec_resources.print_memory_usage("init/before conv2_psfs");
+  float* conv2_psfs_ptr =
+      exec_resources.alloc_async<float>(static_cast<std::size_t>(n_scales) * n_facets * psf_npix, stream_a);
+  // exec_resources.print_memory_usage("init/after conv2_psfs");
+  // exec_resources.print_memory_usage("init/before conv_psfs");
+  float* conv_psfs_ptr = exec_resources.alloc_async<float>(
+      static_cast<std::size_t>(n_scales) * n_facets * n_freq * psf_npix, stream_a);
+  // exec_resources.print_memory_usage("init/after conv_psfs");
   core::device_span5d<float> all_conv_psfs(conv_psfs_ptr, n_scales, n_facets, n_freq, psf_ctx.input_nrow,
                                            psf_ctx.input_ncol);
   core::device_span4d<float> all_conv2_psfs(conv2_psfs_ptr, n_scales, n_facets, psf_ctx.input_nrow, psf_ctx.input_ncol);
-  scale::convolve_psfs_with_scales_async(stream_a, psf_ctx, ws.raw_psfs, ws.scale_sigmas, weights_freq, all_conv_psfs,
+  scale::convolve_psfs_with_scales_async(psf_ctx, ws.raw_psfs, ws.scale_sigmas, weights_freq, all_conv_psfs,
                                          all_conv2_psfs);
+  // exec_resources.print_memory_usage("init/after convolve_psfs_with_scales");
   FD_NVTX_MARK("init/precompute_psfs end");
   FD_NVTX_MARK("init/compute_gains begin");
   auto all_gains = common::compute_all_gains_batched(stream_a, all_conv_psfs, weights_freq, p.gamma);
+  // exec_resources.print_memory_usage("init/after compute_all_gains_batched");
   FD_NVTX_MARK("init/compute_gains end");
 
   // Loop-only buffers
   const uint64_t freq_scales_total = static_cast<int64_t>(scale_ctx.freq_nrow) * scale_ctx.freq_ncol * n_scales;
+  // exec_resources.print_memory_usage("init/before scale_kernels");
   float* scale_kernels_ptr = exec_resources.alloc_async<float>(freq_scales_total, stream_a);
+  // exec_resources.print_memory_usage("init/after scale_kernels");
   core::device_span3d<float> scale_kernels(scale_kernels_ptr, n_scales, scale_ctx.freq_nrow, scale_ctx.freq_ncol);
   scale::make_gaussian_kernels_async(stream_a, ws.scale_sigmas, scale_ctx.padded_ncol, scale_kernels);
+  // exec_resources.print_memory_usage("init/after make_gaussian_kernels");
 
   FD_LOG_DEBUG("run_wscms: built {} scale kernels in freq domain ({}x{}, {} floats total)", n_scales,
                scale_ctx.freq_nrow, scale_ctx.freq_ncol, freq_scales_total);
 
+  // exec_resources.print_memory_usage("init/before scales_x_dirty");
   float* scales_x_dirty_ptr = exec_resources.alloc_async<float>(dirty_npix * n_scales, stream_a);
+  // exec_resources.print_memory_usage("init/after scales_x_dirty");
   core::device_span3d<float> scales_x_dirty(scales_x_dirty_ptr, n_scales, dirty_nrows, dirty_ncols);
 
   // TODO: fix that
@@ -195,7 +231,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     }
 
     FD_NVTX_MARK("convolve_with_scales");
-    scale::convolve_with_scales(stream_a, scale_ctx, mean_residual, scale_kernels, scales_x_dirty);
+    scale::convolve_with_scales(scale_ctx, mean_residual, scale_kernels, scales_x_dirty);
 
     FD_NVTX_MARK("mask_and_abs");
     if (activate_auto_mask)
@@ -227,6 +263,11 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
 
     common::mask_less_than_threshold(stream_a, mean_residual, threshold, -std::numeric_limits<float>::infinity());
 
+    // Seed the tile cache against the masked buffer for this scale. The peak is
+    // unchanged by masking (it only removes sub-threshold values), so we keep the
+    // peak_value/peak_index from the argmax above and use this purely to seed.
+    matrix::argmax(tiled_ws, mean_residual.data_handle());
+
     FD_LOG_DEBUG("run_wscms: clean loop start scale={} peak={:.8f} threshold={:.8f} max_clean_iter={}",
                  selected_scale_idx, peak_value, threshold, p.max_clean_iteration);
 
@@ -254,7 +295,11 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
 
       common::subtract_component_async(stream_b, dirty, conv_psf, coeffs_per_chan, peak_coords, gain);
       common::subtract_component_async(stream_a, mean_residual, conv2_psf, peak_coords, peak_value * gain);
-      std::tie(peak_value, peak_index) = matrix::argmax(peak_ws, mean_residual.data_handle());
+      // Only the conv2_psf footprint centered on peak_coords was dirtied; refresh
+      // just the touched tiles and re-combine against the cached ones.
+      std::tie(peak_value, peak_index) = matrix::argmax_incremental(
+          tiled_ws, mean_residual.data_handle(), peak_coords.first, peak_coords.second,
+          conv2_psf.extent(0), conv2_psf.extent(1));
 
       n_clean_iter++;
     }
@@ -327,7 +372,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   if (mask_per_scale_ptr != nullptr) stream_a.free_async(mask_per_scale_ptr);
 
   // print used memory
-  exec_resources.print_memory_usage("End");
+  // exec_resources.print_memory_usage("End");
 
   return result;
 }

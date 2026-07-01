@@ -19,23 +19,16 @@ static constexpr int MAX_SPECTRAL_ORDER = 4;
 /// `convolve_with_scales` loops over chunks of `backward_batch_size` scales
 /// per IFFT call — pick the batch size to balance throughput vs. memory.
 struct scale_convolve_ctx : public linalg::convolve_ctx {
-  scale_convolve_ctx() = default;
-
   /// Build plans for a single forward FFT and a batched backward FFT of
-  /// @p backward_batch_size at a time, then bind a workspace from the pool.
-  /// The caller in `convolve_with_scales` must ensure (n_scales - 1) is a
+  /// @p backward_batch_size at a time. The base allocates the workspace on
+  /// @p stream_res and the plans run on it; `convolve_with_scales` must drive
+  /// the convolution on that same stream and ensure (n_scales - 1) is a
   /// multiple of @p backward_batch_size.
-  scale_convolve_ctx(const core::resources& resources, int nrow, int ncol, int backward_batch_size, float padding)
-      : linalg::convolve_ctx(nrow, ncol, /*forward_batch=*/1, /*backward_batch=*/std::max(1, backward_batch_size),
-                             /*n_backward_plans=*/1, padding)
+  scale_convolve_ctx(const core::stream_resources& stream_res, int nrow, int ncol, int backward_batch_size,
+                     float padding)
+      : linalg::convolve_ctx(stream_res, nrow, ncol, /*forward_batch=*/1,
+                             /*backward_batch=*/std::max(1, backward_batch_size), /*n_backward_plans=*/1, padding)
   {
-    void* work = nullptr;
-    if (work_size > 0) {
-      const auto& stream_r = resources.get_stream_resources();
-      work = resources.alloc_async<void>(work_size, stream_r);
-      stream_r.sync();
-    }
-    set_work_area(work);
   }
 
   cufftHandle& plan_forward() { return plans_forward[0]; }
@@ -46,20 +39,12 @@ struct scale_convolve_ctx : public linalg::convolve_ctx {
 
 /// PSF-domain convolution context: batched R2C + two C2R plans (one for conv, one for conv^2).
 struct psf_convolve_ctx : public linalg::convolve_ctx {
-  psf_convolve_ctx() = default;
-
-  /// Build batched plans (over n_freq channels) and bind a workspace from the pool.
-  psf_convolve_ctx(const core::resources& resources, int psf_nrow, int psf_ncol, int nch, float padding)
-      : linalg::convolve_ctx(psf_nrow, psf_ncol, /*forward_batch=*/nch, /*backward_batch=*/nch,
+  /// Build batched plans (over n_freq channels). The base allocates the
+  /// workspace on @p stream_res and the plans run on it.
+  psf_convolve_ctx(const core::stream_resources& stream_res, int psf_nrow, int psf_ncol, int nch, float padding)
+      : linalg::convolve_ctx(stream_res, psf_nrow, psf_ncol, /*forward_batch=*/nch, /*backward_batch=*/nch,
                              /*n_backward_plans=*/2, padding)
   {
-    void* work = nullptr;
-    if (work_size > 0) {
-      const auto& stream_r = resources.get_stream_resources();
-      work = resources.alloc_async<void>(work_size, stream_r);
-      stream_r.sync();
-    }
-    set_work_area(work);
   }
 
   cufftHandle& plan_forward() { return plans_forward[0]; }
@@ -122,6 +107,10 @@ struct params {
 
 struct context {
   core::resources exec_resources;
+  // Dedicated stream for the whole convolution path: both FFT contexts build
+  // their plans on it, and run_wscms_cycles uses it as its main stream so the
+  // plans execute on the same stream that drives the surrounding kernels.
+  const core::stream_resources& exec_stream;
   wscms::workspace workspace;
 
   /**
@@ -136,11 +125,12 @@ struct context {
           const core::host_vect<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
           int dirty_ncol, int n_freq, float fft_padding)
       : exec_resources(exec_device),
+        exec_stream(exec_resources.get_stream_resources()),
         workspace{
-            .scale_convolve = scale_convolve_ctx(exec_resources, dirty_nrow, dirty_ncol,
+            .scale_convolve = scale_convolve_ctx(exec_stream, dirty_nrow, dirty_ncol,
                                                  /*backward_batch_size=*/static_cast<int>(scale_sigmas.size()) - 1,
                                                  fft_padding),
-            .psf_convolve = psf_convolve_ctx(exec_resources, raw_psfs.extent(2),
+            .psf_convolve = psf_convolve_ctx(exec_stream, raw_psfs.extent(2),
                                              raw_psfs.extent(3), n_freq, fft_padding),
             .raw_psfs = raw_psfs,
             .xdes = xdes,

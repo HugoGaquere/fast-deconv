@@ -1,6 +1,8 @@
 #pragma once
+#include <cuda_runtime_api.h>
 #include <cufft.h>
 
+#include <fast_deconv/core/resources.hpp>
 #include <iostream>
 #include <utility>
 #include <vector>
@@ -25,15 +27,14 @@ namespace fast_deconv::linalg {
 /**
  * @brief Generic cuFFT convolution context.
  *
- * Builds 2D R2C/C2R FFT plans over a padded grid (one R2C, N C2R) and exposes
- * the maximum workspace size required across all plans via @ref required_work_size.
+ * Builds 2D R2C/C2R FFT plans over a padded grid (one R2C, N C2R) on a caller-
+ * provided stream, allocates the shared work area from that stream's pool, and
+ * binds both the work area and the stream to every plan in the constructor.
  *
- * The caller is responsible for:
- *   1. Allocating @ref required_work_size bytes from their pool of choice.
- *   2. Calling @ref set_work_area to bind that buffer to every plan.
- *   3. Calling @ref set_stream once per launch (or per stream change).
- *
- * Plans are destroyed with the context.
+ * The context owns the work area and frees it (on the same stream) at
+ * destruction, and all plans execute on that stream — so the caller must drive
+ * the convolution on the same stream the context was constructed with. The
+ * stream resources must outlive the context.
  */
 struct convolve_ctx {
   int input_nrow = 0, input_ncol = 0;       // unpadded input size
@@ -47,19 +48,23 @@ struct convolve_ctx {
   std::vector<cufftHandle> plans_forward;   // forward (R2C) plans
   std::vector<cufftHandle> plans_backward;  // backward (C2R) plans
   size_t work_size = 0;                     // max workspace size across all plans (bytes)
-  void* work_area = nullptr;                // shared cuFFT workspace (caller-managed)
+  void* work_area = nullptr;                // shared cuFFT workspace, owned and freed here
 
-  convolve_ctx() = default;
+  // Stream the plans run on
+  const core::stream_resources& stream_res;
 
   /**
-   * @brief Create plans for a padded 2D grid and disable cuFFT auto-allocation.
+   * @brief Create plans for a padded 2D grid, allocate the shared workspace on
+   *        @p stream, and bind both the workspace and the stream to every plan.
    *
    * Forward and backward plans can have different batch sizes, e.g. forward=1
    * to FFT a single image once, backward=N to IFFT N filtered spectra in a
-   * single batched call. The shared workspace is *not* allocated here; the
-   * caller must allocate @c required_work_size bytes and pass them to
-   * @ref set_work_area before executing any plan.
+   * single batched call. The work area is allocated from @p stream's pool and
+   * owned by this context (freed at destruction); all plans execute on
+   * @p stream, so the caller must drive the convolution on that same stream.
    *
+   * @param stream            Stream resources the plans run on and that owns
+   *                          the work-area allocation. Must outlive this ctx.
    * @param input_nrow        Unpadded input rows.
    * @param input_ncol        Unpadded input cols.
    * @param forward_batch     Batch size for the R2C plan.
@@ -67,37 +72,23 @@ struct convolve_ctx {
    * @param n_backward_plans  Number of C2R plans to create (e.g. 1 for conv, 2 for conv + conv^2).
    * @param padding           FFT padding factor (e.g. 1.5).
    */
-  convolve_ctx(int input_nrow, int input_ncol, int forward_batch, int backward_batch, int n_backward_plans,
-               float padding);
+  convolve_ctx(const core::stream_resources& stream, int input_nrow, int input_ncol, int forward_batch,
+               int backward_batch, int n_backward_plans, float padding);
 
   convolve_ctx(const convolve_ctx&) = delete;
   convolve_ctx& operator=(const convolve_ctx&) = delete;
-  convolve_ctx(convolve_ctx&&) noexcept = default;
-  convolve_ctx& operator=(convolve_ctx&&) noexcept = default;
+  convolve_ctx(convolve_ctx&&) = delete;
+  convolve_ctx& operator=(convolve_ctx&&) = delete;
 
   ~convolve_ctx()
   {
     for (auto p : plans_forward) CUFFT_CALL(cufftDestroy(p));
     for (auto p : plans_backward) CUFFT_CALL(cufftDestroy(p));
+    if (work_area != nullptr) stream_res.free_async(work_area);
   }
 
   /// Required size in bytes of the shared workspace buffer.
   size_t required_work_size() const { return work_size; }
-
-  /// Bind a single shared workspace buffer to every plan in this context.
-  void set_work_area(void* area)
-  {
-    work_area = area;
-    for (auto p : plans_forward) CUFFT_CALL(cufftSetWorkArea(p, area));
-    for (auto p : plans_backward) CUFFT_CALL(cufftSetWorkArea(p, area));
-  }
-
-  /// Bind a CUDA stream to every plan in this context.
-  void set_stream(cudaStream_t stream) const
-  {
-    for (auto p : plans_forward) CUFFT_CALL(cufftSetStream(p, stream));
-    for (auto p : plans_backward) CUFFT_CALL(cufftSetStream(p, stream));
-  }
 };
 
 // Pads and ifftshifts a 2D image in one pass.
@@ -123,9 +114,7 @@ void fftshift_crop(float* input, float* output, int nx, int ny, int px, int py, 
 // Compute padding amounts (rows, cols) for a target padding factor.
 std::pair<int, int> compute_padding(int npix_x, int npix_y, float padding);
 
-// Smallest m >= n whose prime factors are all in {2, 3, 5, 7}. cuFFT runs
-// Cooley-Tukey on these sizes with minimal workspace; non-smooth sizes (e.g.
-// large prime factors) trigger Bluestein, which can blow up workspace by 10x+.
+// Smallest m >= n whose prime factors are all in {2, 3, 5, 7}.
 int next_fast_size(int n);
 
 }  // namespace fast_deconv::linalg

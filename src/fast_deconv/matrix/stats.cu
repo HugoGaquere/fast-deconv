@@ -12,8 +12,9 @@ namespace fast_deconv::matrix {
 
 namespace {
 
-/// Per-pixel transform: emits the identity contribution for masked pixels so
-/// they can be combined into the reduction without affecting the result.
+/// Per-pixel transform: the mask excludes pixels from the max only. Every
+/// pixel contributes to the RMS so the noise estimate is computed over the
+/// whole image, matching DDFacet's `np.std(MeanDirty)` stop-threshold RMS.
 struct masked_stats_op {
   const float* data;
   const bool* mask;
@@ -21,9 +22,9 @@ struct masked_stats_op {
 
   __host__ __device__ __forceinline__ stats_acc operator()(int idx) const
   {
-    if (mask[idx]) return {-FLT_MAX, 0.f, 0.f, 0};
     const float v = data[idx];
-    return {use_abs ? fabsf(v) : v, v, v * v, 1};
+    const float max_v = mask[idx] ? -FLT_MAX : (use_abs ? fabsf(v) : v);
+    return {max_v, v, v * v, 1};
   }
 };
 

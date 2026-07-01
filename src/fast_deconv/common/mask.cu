@@ -1,3 +1,4 @@
+#include <cub/cub.cuh>
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/extrema.h>
@@ -10,22 +11,42 @@
 #include <fast_deconv/morphology/dilation.hpp>
 #include <fast_deconv/morphology/roi.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
+#include <fast_deconv/util/dump.hpp>
 #include <limits>
 #include <vector>
 
 namespace fast_deconv::kernel {
 
+// Block/thread tiling for the elementwise mask kernels. ITEMS_PER_THREAD=4 makes
+// the VECTORIZE algorithms emit 128-bit (float4 / uchar4) transactions; CUB checks
+// pointer alignment at runtime and falls back to scalar guarded loads otherwise,
+// and the partial-tile API bounds-guards the trailing tile. Delegating the vector
+// width to CUB keeps this correct/tuned as the target architecture changes.
+namespace detail {
+constexpr int kMaskBlock = 256;
+constexpr int kMaskItemsPerThread = 4;
+constexpr int kMaskTile = kMaskBlock * kMaskItemsPerThread;
+using LoadFloat = cub::BlockLoad<float, kMaskBlock, kMaskItemsPerThread, cub::BLOCK_LOAD_VECTORIZE>;
+using StoreFloat = cub::BlockStore<float, kMaskBlock, kMaskItemsPerThread, cub::BLOCK_STORE_VECTORIZE>;
+using LoadMask = cub::BlockLoad<unsigned char, kMaskBlock, kMaskItemsPerThread, cub::BLOCK_LOAD_VECTORIZE>;
+}  // namespace detail
+
 __global__ void mask_and_abs_kernel(float* data, const bool* mask, float fill_value, bool abs, int n_per_batch,
                                     int data_batch_stride, int mask_batch_stride)
 {
   float* d = data + blockIdx.y * data_batch_stride;
-  const bool* m = mask + blockIdx.y * mask_batch_stride;
-  const int stride = blockDim.x * gridDim.x;
-  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n_per_batch; i += stride) {
-    if (m[i])
-      d[i] = fill_value;
-    else if (abs)
-      d[i] = fabsf(d[i]);
+  const unsigned char* m = reinterpret_cast<const unsigned char*>(mask) + blockIdx.y * mask_batch_stride;
+  const int tile = detail::kMaskTile;
+  for (int base = blockIdx.x * tile; base < n_per_batch; base += gridDim.x * tile) {
+    const int valid = min(tile, n_per_batch - base);
+    float dv[detail::kMaskItemsPerThread];
+    unsigned char mv[detail::kMaskItemsPerThread];
+    detail::LoadFloat().Load(d + base, dv, valid);
+    detail::LoadMask().Load(m + base, mv, valid);
+#pragma unroll
+    for (int j = 0; j < detail::kMaskItemsPerThread; ++j)
+      dv[j] = mv[j] ? fill_value : (abs ? fabsf(dv[j]) : dv[j]);
+    detail::StoreFloat().Store(d + base, dv, valid);
   }
 }
 
@@ -33,9 +54,15 @@ __global__ void mask_less_than_threshold_kernel(float* data, float threshold, fl
                                                 int batch_stride)
 {
   float* d = data + blockIdx.y * batch_stride;
-  const int stride = blockDim.x * gridDim.x;
-  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n_per_batch; i += stride) {
-    if (data[i] < threshold) d[i] = fill_value;
+  const int tile = detail::kMaskTile;
+  for (int base = blockIdx.x * tile; base < n_per_batch; base += gridDim.x * tile) {
+    const int valid = min(tile, n_per_batch - base);
+    float dv[detail::kMaskItemsPerThread];
+    detail::LoadFloat().Load(d + base, dv, valid);
+#pragma unroll
+    for (int j = 0; j < detail::kMaskItemsPerThread; ++j)
+      if (dv[j] < threshold) dv[j] = fill_value;
+    detail::StoreFloat().Store(d + base, dv, valid);
   }
 }
 
@@ -94,9 +121,9 @@ void mask_and_abs_async(const core::stream_resources& stream_res, core::device_s
   assert(data.is_exhaustive() && mask.is_exhaustive());
   assert(data.extent(0) == mask.extent(0) && data.extent(1) == mask.extent(1));
   const int n = static_cast<int>(data.size());
-  dim3 grid(CEIL_DIV(n, 256), 1);
-  kernel::mask_and_abs_kernel<<<grid, 256, 0, stream_res.cuda_stream>>>(data.data_handle(), mask.data_handle(),
-                                                                        fill_value, abs, n, 0, 0);
+  dim3 grid(CEIL_DIV(n, kernel::detail::kMaskTile), 1);
+  kernel::mask_and_abs_kernel<<<grid, kernel::detail::kMaskBlock, 0, stream_res.cuda_stream>>>(
+      data.data_handle(), mask.data_handle(), fill_value, abs, n, 0, 0);
 }
 
 void mask_and_abs_async(const core::stream_resources& stream_res, core::device_span3d<float> data,
@@ -107,9 +134,9 @@ void mask_and_abs_async(const core::stream_resources& stream_res, core::device_s
   const int n_per_batch = static_cast<int>(mask.size());
   const int nbatch = data.extent(0);
   const int batch_stride = data.stride(0);
-  dim3 grid(CEIL_DIV(n_per_batch, 256), nbatch);
-  kernel::mask_and_abs_kernel<<<grid, 256, 0, stream_res.cuda_stream>>>(data.data_handle(), mask.data_handle(),
-                                                                        fill_value, abs, n_per_batch, batch_stride, 0);
+  dim3 grid(CEIL_DIV(n_per_batch, kernel::detail::kMaskTile), nbatch);
+  kernel::mask_and_abs_kernel<<<grid, kernel::detail::kMaskBlock, 0, stream_res.cuda_stream>>>(
+      data.data_handle(), mask.data_handle(), fill_value, abs, n_per_batch, batch_stride, 0);
 }
 
 void mask_and_abs_async(const core::stream_resources& stream_res, core::device_span3d<float> data,
@@ -117,11 +144,11 @@ void mask_and_abs_async(const core::stream_resources& stream_res, core::device_s
 {
   assert(data.is_exhaustive() && mask.is_exhaustive());
   assert(data.extents() == mask.extents());
-  const int n_per_batch = static_cast<int>(mask.size());
+  const int n_per_batch = static_cast<int>(data.extent(1)*data.extent(2));
   const int nbatch = data.extent(0);
   const int batch_stride = data.stride(0);
-  dim3 grid(CEIL_DIV(n_per_batch, 256), nbatch);
-  kernel::mask_and_abs_kernel<<<grid, 256, 0, stream_res.cuda_stream>>>(
+  dim3 grid(CEIL_DIV(n_per_batch, kernel::detail::kMaskTile), nbatch);
+  kernel::mask_and_abs_kernel<<<grid, kernel::detail::kMaskBlock, 0, stream_res.cuda_stream>>>(
       data.data_handle(), mask.data_handle(), fill_value, abs, n_per_batch, batch_stride, batch_stride);
 }
 void mask_less_than_threshold(const core::stream_resources& stream_res, core::device_span2d<float> data,
@@ -129,9 +156,9 @@ void mask_less_than_threshold(const core::stream_resources& stream_res, core::de
 {
   assert(data.is_exhaustive());
   const int n = static_cast<int>(data.size());
-  dim3 grid(CEIL_DIV(n, 256), 1);
-  kernel::mask_less_than_threshold_kernel<<<grid, 256, 0, stream_res.cuda_stream>>>(data.data_handle(), threshold,
-                                                                                    fill_value, n, 0);
+  dim3 grid(CEIL_DIV(n, kernel::detail::kMaskTile), 1);
+  kernel::mask_less_than_threshold_kernel<<<grid, kernel::detail::kMaskBlock, 0, stream_res.cuda_stream>>>(
+      data.data_handle(), threshold, fill_value, n, 0);
 }
 
 void build_auto_mask(const core::stream_resources& stream,
@@ -181,11 +208,10 @@ void build_auto_mask(const core::stream_resources& stream,
   }
 
   // ---- 2. Build a PSF-sized convolve_ctx with batched plans over n_freq (1 R2C + 1 C2R) ----
-  linalg::convolve_ctx ctx(psf_nrow, psf_ncol, /*forward_batch=*/n_freq, /*backward_batch=*/n_freq,
+  // ctx allocates its work area on `stream`, runs its plans on stream.cuda_stream
+  // (== cuda_stream below), and frees the work area at destruction.
+  linalg::convolve_ctx ctx(stream, psf_nrow, psf_ncol, /*forward_batch=*/n_freq, /*backward_batch=*/n_freq,
                            /*n_backward_plans=*/1, fft_padding);
-  void* fft_work = stream.alloc_async<void>(ctx.required_work_size());
-  ctx.set_work_area(fft_work);
-  ctx.set_stream(cuda_stream);
 
   const int padded_total = ctx.padded_nrow * ctx.padded_ncol;
   const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
@@ -276,6 +302,6 @@ void build_auto_mask(const core::stream_resources& stream,
   stream.free_async(freq_psf);
   stream.free_async(padded_psf);
   stream.free_async(gauss_kernels_ptr);
-  stream.free_async(fft_work);
+  // fft work area is owned by `ctx` and freed in its destructor.
 }
 }  // namespace fast_deconv::common

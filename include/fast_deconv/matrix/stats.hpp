@@ -26,7 +26,7 @@ struct stats_combine {
 /// Result returned to the host after a fused max + rms reduction.
 struct stats_result {
   float max;  ///< masked max (with optional abs); -FLT_MAX if every pixel is masked
-  float rms;  ///< sqrt(max(E[x^2] - E[x]^2, 0)) over unmasked pixels; 0 if every pixel is masked
+  float rms;  ///< sqrt(max(E[x^2] - E[x]^2, 0)) over all pixels (mask not applied)
 };
 
 /// Pre-allocated workspace for the fused max + rms reduction over a 2D image
