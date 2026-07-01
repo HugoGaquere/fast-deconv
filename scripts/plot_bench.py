@@ -9,7 +9,7 @@ cell answers "how does image-size scaling change as this one parameter varies,
 with everything else held at a representative baseline?"
 
 The single output image is a grid:
-    rows    = metrics (wall time / iter, compute & data throughput, wall time, memory)
+    rows    = metrics (wall time, wall time / iter, compute & data throughput, memory)
     columns = each swept axis other than image size (n_freq, n_scales, ...)
     x       = image size (nrow=ncol), linear by default (--xscale), ticked at sizes
     y       = metric, log by default (--yscale)
@@ -50,17 +50,17 @@ AXIS_LABEL = {
 # and memory), data above it at small sizes is fixed overhead, and a steeper-than-
 # guide tail flags worse-than-pixel-linear growth (extra compute / over-allocation).
 METRICS = [
-    ("ms_per_iter", "wall time / iter", "ms", None, False),
+    ("mean_ms", "wall time", "ms", ("s", 1000.0), True),
+    ("ms_per_iter", "wall time / iter", "ms", None, True),
     ("mpix_iter_per_s", "compute throughput", "Mpix.iter/s", None, False),
     ("mvox_iter_per_s", "data throughput", "Mvox.iter/s", None, False),
-    ("mean_ms", "wall time", "ms", ("s", 1000.0), True),
     ("used_mem_mb", "used memory", "MiB", ("GiB", 1024.0), True),
 ]
 # Hold value for an axis when it is *not* the one being varied (its "median"
 # baseline). Auto-computed by mid() unless overridden here. An override must be a
 # value actually swept for that axis, and for --mode=ofat must match the baseline
 # in src/bench_wscms.cu so the generated cross still lines up.
-MEDIAN_OVERRIDE = {"n_scales": 5}
+MEDIAN_OVERRIDE = {"n_freq": 2, "n_scales": 5, "n_facet": 100}
 INT_COLS = {
     "nrow", "ncol", "n_freq", "n_scales", "n_facet", "n_order", "psf_nrow",
     "psf_ncol", "K", "M", "total_iters", "n_components", "runs", "warmup",

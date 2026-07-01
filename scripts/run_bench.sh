@@ -30,6 +30,6 @@ mkdir -p "$outdir"
   --warmup=1 \
   --csv="$csv" --force --mode=ofat
 
-"$python" "$plot" "$csv" --outdir="$plotdir"
+"$python" "$plot" "$csv" --outdir="$plotdir" --xscale log
 
 echo "Done. CSV: $csv  Plots: $plotdir"

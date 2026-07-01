@@ -115,8 +115,10 @@ def analyze(all_rows: list[dict], out) -> dict:
     base = axis_baselines(ok)
     baseline = select(ok, base)
 
-    # One column per axis that was actually swept.
-    cols = [ax for ax in AXES if len({r[ax] for r in ok}) > 1] or [AXES[0]]
+    # One column per axis that was actually swept (K is held at baseline, not
+    # shown: its sweep mirrors M under the fixed K*M synthetic work).
+    cols = [ax for ax in AXES
+            if ax != "K" and len({r[ax] for r in ok}) > 1] or [AXES[0]]
     sizes = sorted({r["nrow"] for r in ok})  # x-ticks: exactly the swept sizes
 
     fig, axes2d = plt.subplots(len(METRIC_ROWS), len(cols),
