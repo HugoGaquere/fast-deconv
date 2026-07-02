@@ -27,6 +27,7 @@ coverage.xml
 # Linters / formatters
 .ruff_cache/
 .mypy_cache/
+.cache/
 
 # Editors / IDEs
 .vscode/

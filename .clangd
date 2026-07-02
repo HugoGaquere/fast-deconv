@@ -41,11 +41,11 @@ CompileFlags:
     - "-arch*"
     - "--restrict"
     - "--generate-line-info"
-    - "-Xcompiler=-fPIC"
+    - "-Xcompiler*"
 Hover:
   ShowAKA: No
 InlayHints:
-  Enabled: No
+  Enabled: Yes
 Diagnostics:
   Suppress:
     - "variadic_device_fn"
