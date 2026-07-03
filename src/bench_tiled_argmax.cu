@@ -393,7 +393,7 @@ int main(int argc, char** argv)
   }
 
   core::resources res(opt.device);
-  const core::stream_resources& sr = res.get_stream_resources();
+  const core::stream_resources sr = res.make_stream();
 
   float* d_data = res.alloc_async<float>(npix, sr);
   fill_image(d_data, npix, opt.seed, sr);

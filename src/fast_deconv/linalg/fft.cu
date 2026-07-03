@@ -161,21 +161,14 @@ convolve_ctx::convolve_ctx(const core::stream_resources& stream, int input_nrow_
   make_plan(plans_forward[0], CUFFT_R2C, forward_batch);
   for (auto& p : plans_backward) make_plan(p, CUFFT_C2R, backward_batch);
 
-  // Allocate the shared work area on the owning stream (synced before binding,
-  // matching the previous caller behaviour) and bind it plus the stream to
-  // every plan. The context owns this buffer and frees it at destruction.
-  if (work_size > 0) {
-    work_area = stream.alloc_async<void>(work_size);
-    stream.sync();
-  }
-  for (auto p : plans_forward) {
-    CUFFT_CALL(cufftSetWorkArea(p, work_area));
-    CUFFT_CALL(cufftSetStream(p, stream.cuda_stream));
-  }
-  for (auto p : plans_backward) {
-    CUFFT_CALL(cufftSetWorkArea(p, work_area));
-    CUFFT_CALL(cufftSetStream(p, stream.cuda_stream));
-  }
+  for (auto p : plans_forward) CUFFT_CALL(cufftSetStream(p, stream.cuda_stream));
+  for (auto p : plans_backward) CUFFT_CALL(cufftSetStream(p, stream.cuda_stream));
+}
+
+void convolve_ctx::bind_work_area(void* work_area)
+{
+  for (auto p : plans_forward) CUFFT_CALL(cufftSetWorkArea(p, work_area));
+  for (auto p : plans_backward) CUFFT_CALL(cufftSetWorkArea(p, work_area));
 }
 
 }  // namespace fast_deconv::linalg

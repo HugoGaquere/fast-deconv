@@ -3,13 +3,11 @@
 #include <cuda_runtime_api.h>
 #include <driver_types.h>
 
-#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <emu/cuda/device/mdcontainer.hpp>
 #include <emu/cuda/memory.hpp>
 #include <emu/cuda/stream.hpp>
-#include <memory>
 #include <vector>
 
 #include "cublas_v2.h"
@@ -20,10 +18,12 @@ namespace fast_deconv::core {
 
 class stream_resources {
  public:
+  static constexpr uint default_flag{cudaStreamDefault};
+
   /// Bind the calling thread to @p device before creating the stream and
   /// cuBLAS handle, so both end up on the requested GPU regardless of which
   /// device the thread had active before.
-  stream_resources(const cudaMemPool_t& mem_pool, uint flag, uint8_t device) : mem_pool_(mem_pool)
+  stream_resources(const cudaMemPool_t& mem_pool, uint flag, uint8_t device) : device(device), mem_pool_(mem_pool)
   {
     CHECK_CUDA(cudaSetDevice(device));
     CHECK_CUDA(cudaStreamCreateWithFlags(&cuda_stream, flag));
@@ -78,50 +78,9 @@ class stream_resources {
   const cudaMemPool_t& mem_pool_;
 };
 
-class stream_resources_pool {
- public:
-  static constexpr uint8_t default_size{16};
-  static constexpr uint8_t default_flag{cudaStreamDefault};
-
-  explicit stream_resources_pool(const cudaMemPool_t& mem_pool, uint8_t device, uint8_t pool_size = default_size,
-                                 uint8_t flag = default_flag)
-  {
-    for (uint8_t i = 0; i < pool_size; i++)
-      streams_.push_back(std::make_unique<stream_resources>(mem_pool, flag, device));
-  }
-
-  stream_resources_pool(const stream_resources_pool&) = delete;
-  stream_resources_pool& operator=(const stream_resources_pool&) = delete;
-  stream_resources_pool(stream_resources_pool&&) = delete;
-  stream_resources_pool& operator=(stream_resources_pool&&) = delete;
-
-  const stream_resources& get_stream_ref() const noexcept
-  {
-    return *streams_[next_stream_.fetch_add(1, std::memory_order_relaxed) % streams_.size()];
-  }
-
-  uint8_t size() const noexcept { return streams_.size(); }
-
- private:
-  std::vector<std::unique_ptr<stream_resources>> streams_;
-  mutable std::atomic_uint8_t next_stream_{};
-};
-
 class resources {
  public:
-  resources(uint8_t device) : device_(device), stream_res_pool_(memory_pool_, device)
-  {
-    cudaMemPoolProps pool_props = {};
-    pool_props.allocType = cudaMemAllocationTypePinned;    // page-locked GPU memory
-    pool_props.handleTypes = cudaMemHandleTypeNone;        // no inter-process sharing
-    pool_props.location.type = cudaMemLocationTypeDevice;  // memory lives on the GPU
-    pool_props.location.id = device;                       // GPU to allocate on
-    CHECK_CUDA(cudaMemPoolCreate(&memory_pool_, &pool_props));
-
-    // configure memory pool to never release back to os
-    uint64_t threshold = UINT64_MAX;
-    CHECK_CUDA(cudaMemPoolSetAttribute(memory_pool_, cudaMemPoolAttrReleaseThreshold, &threshold));
-  }
+  explicit resources(uint8_t device) : device_(device), memory_pool_(make_memory_pool(device)) {}
 
   resources(const resources&) = delete;
   resources& operator=(const resources&) = delete;
@@ -130,7 +89,16 @@ class resources {
 
   ~resources() { CHECK_CUDA(cudaMemPoolDestroy(memory_pool_)); }
 
-  const stream_resources& get_stream_resources() const noexcept { return stream_res_pool_.get_stream_ref(); }
+  const cudaMemPool_t& mem_pool() const noexcept { return memory_pool_; }
+
+  /// Mint a stream (+ cuBLAS handle) on this device, allocating from this
+  /// pool. The returned stream_resources references this object's mem pool,
+  /// so it must not outlive these resources. Callers own the stream they
+  /// create — there is no shared pool of streams to alias with.
+  stream_resources make_stream(uint flag = stream_resources::default_flag) const
+  {
+    return stream_resources(memory_pool_, flag, device_);
+  }
 
   template <typename T = void>
   T* alloc_async(uint64_t n, const stream_resources& stream_r) const
@@ -216,9 +184,27 @@ class resources {
   }
 
  private:
+  /// Build the device mem pool before any stream member could reference it —
+  /// members initialize in declaration order, so the pool handle must be a
+  /// fully-created value by the time anything downstream binds to it.
+  static cudaMemPool_t make_memory_pool(uint8_t device)
+  {
+    cudaMemPoolProps pool_props = {};
+    pool_props.allocType = cudaMemAllocationTypePinned;    // page-locked GPU memory
+    pool_props.handleTypes = cudaMemHandleTypeNone;        // no inter-process sharing
+    pool_props.location.type = cudaMemLocationTypeDevice;  // memory lives on the GPU
+    pool_props.location.id = device;                       // GPU to allocate on
+    cudaMemPool_t pool{};
+    CHECK_CUDA(cudaMemPoolCreate(&pool, &pool_props));
+
+    // configure memory pool to never release back to os
+    uint64_t threshold = UINT64_MAX;
+    CHECK_CUDA(cudaMemPoolSetAttribute(pool, cudaMemPoolAttrReleaseThreshold, &threshold));
+    return pool;
+  }
+
   uint8_t device_;
   cudaMemPool_t memory_pool_{};
-  stream_resources_pool stream_res_pool_;
 };
 
 }  // namespace fast_deconv::core

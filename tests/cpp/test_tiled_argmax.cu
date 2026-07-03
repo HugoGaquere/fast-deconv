@@ -61,7 +61,7 @@ TEST(TiledArgmax, SingleKnownPeak)
   img.at(flat(pr, pc, w)) = 5.0f;
 
   core::resources res(0);
-  const auto& sr = res.get_stream_resources();
+  const auto sr = res.make_stream();
 
   auto [val, idx] = run_once(res, sr, img, w, h, 32, 32);
   EXPECT_FLOAT_EQ(val, 5.0f);
@@ -79,7 +79,7 @@ TEST(TiledArgmax, RandomRaggedMatchesCpuValue)
   for (auto& v : img) v = dist(rng);
 
   core::resources res(0);
-  const auto& sr = res.get_stream_resources();
+  const auto sr = res.make_stream();
 
   auto [val, idx] = run_once(res, sr, img, w, h, 32, 32);
   auto [ref_val, ref_idx] = cpu_argmax(img);
@@ -105,7 +105,7 @@ TEST(TiledArgmax, UniquePeakIndexAcrossTiles)
   img.at(flat(pr, pc, w)) = 9.0f;  // strictly above everything in [0,1)
 
   core::resources res(0);
-  const auto& sr = res.get_stream_resources();
+  const auto sr = res.make_stream();
 
   auto [val, idx] = run_once(res, sr, img, w, h, 32, 32);
   EXPECT_FLOAT_EQ(val, 9.0f);
@@ -127,7 +127,7 @@ TEST(TiledArgmax, AllNegativeInitialisesToNegInf)
   img.at(flat(pr, pc, w)) = -0.5f;  // unique max, still negative
 
   core::resources res(0);
-  const auto& sr = res.get_stream_resources();
+  const auto sr = res.make_stream();
 
   auto [val, idx] = run_once(res, sr, img, w, h, 32, 32);
   EXPECT_FLOAT_EQ(val, -0.5f);
@@ -141,7 +141,7 @@ TEST(TiledArgmax, WorkspaceReuseAcrossCalls)
 {
   const int w = 64, h = 64;
   core::resources res(0);
-  const auto& sr = res.get_stream_resources();
+  const auto sr = res.make_stream();
 
   float* d = res.alloc_async<float>(w * h, sr);
   matrix::tiled_argmax_workspace ws{sr};
@@ -190,7 +190,7 @@ TEST(TiledArgmax, IncrementalRefreshesDirtyFootprint)
   img.at(flat(ar, ac, w)) = 5.0f;
 
   core::resources res(0);
-  const auto& sr = res.get_stream_resources();
+  const auto sr = res.make_stream();
 
   float* d = res.alloc_async<float>(img.size(), sr);
   CHECK_CUDA(cudaMemcpyAsync(d, img.data(), img.size() * sizeof(float), cudaMemcpyHostToDevice, sr.cuda_stream));

@@ -65,7 +65,7 @@ class ComputeMaskRoiTest : public ::testing::Test {
   morpho::roi run(const std::vector<bool>& mask)
   {
     core::resources resources(0);
-    const auto& sr = resources.get_stream_resources();
+    const auto sr = resources.make_stream();
 
     bool* d_mask = upload_bool(resources, sr, mask, NROW * NCOL);
     core::device_span2d<bool> view(d_mask, NROW, NCOL);
@@ -176,7 +176,7 @@ class BinaryDilationTest : public ::testing::Test {
                            int se_n, morpho::roi se_roi)
   {
     core::resources resources(0);
-    const auto& sr = resources.get_stream_resources();
+    const auto sr = resources.make_stream();
 
     const std::size_t npix = NROW * NCOL;
     bool* d_data = upload_bool(resources, sr, data, npix);
