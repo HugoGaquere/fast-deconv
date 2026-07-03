@@ -82,7 +82,7 @@ TEST_F(ScaleSelectionTest, MakeScales)
   const int half_total = freq_nrow * freq_ncol;
 
   core::resources resources(0);
-  const auto& stream_res = resources.get_stream_resources();
+  const auto stream_res = resources.make_stream();
 
   float* d_sigmas = resources.alloc_async<float>(n_scales, stream_res);
   float* d_scales = resources.alloc_async<float>(half_total * n_scales, stream_res);
@@ -127,7 +127,7 @@ TEST_F(ScaleSelectionTest, ScaleConvolve)
   const float padding = 1.2f;
 
   core::resources resources(0);
-  const auto& stream_res = resources.get_stream_resources();
+  const auto stream_res = resources.make_stream();
 
   fast_deconv::algorithm::wscms::scale_convolve_ctx ctx(stream_res, nrow, ncol, /*backward_batch_size=*/1, padding);
 
@@ -185,7 +185,7 @@ TEST_F(ScaleSelectionTest, ScaleSelectionResult)
   const int npix = nrow * ncol;
 
   core::resources resources(0);
-  const core::stream_resources& stream_res = resources.get_stream_resources();
+  const core::stream_resources stream_res = resources.make_stream();
 
   // Allocate and copy to device (bias stays on host)
   float* d_scaled_dirty = resources.alloc_async<float>(n_scales * npix, stream_res);
@@ -248,7 +248,7 @@ TEST_F(ScaleSelectionTest, ScaleSelectionResult)
 //   const int best_scale = expected_scale.as_int32()[0];
 //
 //   core::resources resources(0);
-//   const auto& stream_res = resources.get_stream_resources();
+//   const auto stream_res = resources.make_stream();
 //
 //   float* d_src = resources.alloc_async<float>(n_scales * npix, stream_res);
 //   CHECK_CUDA(cudaMemcpyAsync(d_src, conv_npy.as_float32(), n_scales * npix * sizeof(float),

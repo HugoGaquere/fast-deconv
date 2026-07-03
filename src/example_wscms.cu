@@ -11,7 +11,7 @@
 /// `--device` selects the CUDA device (default: 0). The example calls
 /// cudaSetDevice on that device before any cudaMalloc/cudaMemcpy so the host
 /// uploads target the right GPU; wscms::context propagates the same id to
-/// core::resources, which binds its stream pool to that device.
+/// core::resources and its streams, which are bound to that device.
 /// `--csv` writes per-cycle stats (timing, component count, etc.) to a CSV
 /// file. Use scripts/plot_cycle_timing.py to chart the output.
 /// `--force-auto-mask-last` forces auto-masking on the last cycle of the set,
@@ -171,7 +171,7 @@ int main(int argc, char** argv)
 
   // Bind this thread to the requested device so the raw cudaMalloc/cudaMemcpy
   // calls below target it. wscms::context will pass the same id down to
-  // core::resources, which binds its stream pool to the same device.
+  // core::resources and its streams, which are bound to the same device.
   cudaError_t set_err = cudaSetDevice(device_id);
   if (set_err != cudaSuccess) {
     fprintf(stderr, "cudaSetDevice(%d) failed: %s\n", device_id, cudaGetErrorString(set_err));

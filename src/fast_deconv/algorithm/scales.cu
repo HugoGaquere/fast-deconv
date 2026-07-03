@@ -114,10 +114,7 @@ void convolve_with_scales(const algorithm::wscms::scale_convolve_ctx& ctx, core:
   CHECK_CUDA(cudaMemcpyAsync(out_scaled_dirty.data_handle(), dirty.data_handle(), npix * sizeof(float),
                              cudaMemcpyDeviceToDevice, cuda_stream));
 
-  if (n_scales <= 1) {
-    stream_res.sync();
-    return;
-  }
+  if (n_scales <= 1) return;
 
   // Plan was built with this batch size; loop over chunks of that size to cover
   // all (n_scales - 1) non-trivial scales. (n_scales - 1) must be a multiple of
@@ -129,8 +126,8 @@ void convolve_with_scales(const algorithm::wscms::scale_convolve_ctx& ctx, core:
     throw std::invalid_argument("convolve_with_scales: (n_scales - 1) must be a multiple of backward_batch_size");
   }
 
-  // Plans were bound to their stream at construction; the caller must pass the
-  // matching stream_res (the context's exec_stream).
+  // Plans were bound to their stream at construction (the wscms context's
+  // compute stream); temporaries are stream-ordered on that same stream.
   float* dirty_padded = stream_res.alloc_async<float>(img_padded_total);
   complex_type* dirty_freq = stream_res.alloc_async<complex_type>(freq_total);
   complex_type* scaled_dirty_freq =
@@ -166,8 +163,6 @@ void convolve_with_scales(const algorithm::wscms::scale_convolve_ctx& ctx, core:
   stream_res.free_async(dirty_freq);
   stream_res.free_async(scaled_dirty_freq);
   stream_res.free_async(scaled_dirty);
-
-  stream_res.sync();
 }
 
 int scale_selection(const core::stream_resources& stream_res,

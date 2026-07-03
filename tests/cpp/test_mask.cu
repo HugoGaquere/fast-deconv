@@ -33,7 +33,7 @@ TEST(BuildAutoMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
   const std::vector<int> scales = {0, 2, 1};
 
   core::resources resources(0);
-  const auto& sr = resources.get_stream_resources();
+  const auto sr = resources.make_stream();
 
   // Output mask buffer, pre-filled with 0xff to verify the internal memset.
   bool* d_mask = resources.alloc_async<bool>(total, sr);
