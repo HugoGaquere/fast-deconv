@@ -131,6 +131,10 @@ TEST_F(ScaleSelectionTest, ScaleConvolve)
 
   fast_deconv::algorithm::wscms::scale_convolve_ctx ctx(stream_res, nrow, ncol, /*backward_batch_size=*/1, padding);
 
+  void* fft_work_area = nullptr;
+  if (ctx.required_work_size() > 0) fft_work_area = stream_res.alloc_async(ctx.required_work_size());
+  ctx.bind_work_area(fft_work_area);
+
   float* d_dirty = resources.alloc_async<float>(npix, stream_res);
   float* d_scales = resources.alloc_async<float>(kernel_total, stream_res);
   float* d_output = resources.alloc_async<float>(npix * n_scales, stream_res);
@@ -164,6 +168,7 @@ TEST_F(ScaleSelectionTest, ScaleConvolve)
   resources.free_async(d_dirty, stream_res);
   resources.free_async(d_scales, stream_res);
   resources.free_async(d_output, stream_res);
+  stream_res.free_async(fft_work_area);
   stream_res.sync();
 }
 
