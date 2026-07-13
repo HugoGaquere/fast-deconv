@@ -208,10 +208,14 @@ void build_auto_mask(const core::stream_resources& stream,
   }
 
   // ---- 2. Build a PSF-sized convolve_ctx with batched plans over n_freq (1 R2C + 1 C2R) ----
-  // ctx allocates its work area on `stream`, runs its plans on stream.cuda_stream
-  // (== cuda_stream below), and frees the work area at destruction.
+  // ctx runs its plans on stream.cuda_stream (== cuda_stream below). Its plans have
+  // auto-allocation disabled, so a caller-owned work area must be bound before any exec.
   linalg::convolve_ctx ctx(stream, psf_nrow, psf_ncol, /*forward_batch=*/n_freq, /*backward_batch=*/n_freq,
                            /*n_backward_plans=*/1, fft_padding);
+
+  void* fft_work_area = nullptr;
+  if (ctx.required_work_size() > 0) fft_work_area = stream.alloc_async(ctx.required_work_size());
+  ctx.bind_work_area(fft_work_area);
 
   const int padded_total = ctx.padded_nrow * ctx.padded_ncol;
   const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
@@ -302,6 +306,6 @@ void build_auto_mask(const core::stream_resources& stream,
   stream.free_async(freq_psf);
   stream.free_async(padded_psf);
   stream.free_async(gauss_kernels_ptr);
-  // fft work area is owned by `ctx` and freed in its destructor.
+  stream.free_async(fft_work_area);
 }
 }  // namespace fast_deconv::common
