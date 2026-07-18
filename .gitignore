@@ -27,6 +27,7 @@ coverage.xml
 # Linters / formatters
 .ruff_cache/
 .mypy_cache/
+.cache/
 
 # Editors / IDEs
 .vscode/
@@ -44,7 +45,6 @@ AGENTS.md
 # Project outputs
 results/
 bench_results/
-tests/data/
 docs/*
 
 # Profiler reports

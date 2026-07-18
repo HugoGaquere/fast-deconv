@@ -27,14 +27,16 @@ namespace fast_deconv::linalg {
 /**
  * @brief Generic cuFFT convolution context.
  *
- * Builds 2D R2C/C2R FFT plans over a padded grid (one R2C, N C2R) on a caller-
- * provided stream, allocates the shared work area from that stream's pool, and
- * binds both the work area and the stream to every plan in the constructor.
+ * Builds 2D R2C/C2R FFT plans over a padded grid (one R2C, N C2R) with cuFFT
+ * auto-allocation disabled and binds every plan to a caller-provided stream.
+ * The constructor allocates nothing: the caller queries required_work_size()
+ * and provides a workspace buffer via bind_work_area() before any exec. The
+ * buffer may be shared with other contexts whose plans run on the same stream,
+ * since executions are then serialized.
  *
- * The context owns the work area and frees it (on the same stream) at
- * destruction, and all plans execute on that stream — so the caller must drive
- * the convolution on the same stream the context was constructed with. The
- * stream resources must outlive the context.
+ * All plans execute on the bound stream, so the caller must drive the
+ * convolution on that same stream. The stream resources and the work-area
+ * buffer must outlive the context.
  */
 struct convolve_ctx {
   int input_nrow = 0, input_ncol = 0;       // unpadded input size
@@ -48,23 +50,20 @@ struct convolve_ctx {
   std::vector<cufftHandle> plans_forward;   // forward (R2C) plans
   std::vector<cufftHandle> plans_backward;  // backward (C2R) plans
   size_t work_size = 0;                     // max workspace size across all plans (bytes)
-  void* work_area = nullptr;                // shared cuFFT workspace, owned and freed here
 
   // Stream the plans run on
   const core::stream_resources& stream_res;
 
   /**
-   * @brief Create plans for a padded 2D grid, allocate the shared workspace on
-   *        @p stream, and bind both the workspace and the stream to every plan.
+   * @brief Create plans for a padded 2D grid and bind the stream to every plan.
    *
    * Forward and backward plans can have different batch sizes, e.g. forward=1
    * to FFT a single image once, backward=N to IFFT N filtered spectra in a
-   * single batched call. The work area is allocated from @p stream's pool and
-   * owned by this context (freed at destruction); all plans execute on
-   * @p stream, so the caller must drive the convolution on that same stream.
+   * single batched call. No workspace is allocated here — the caller must call
+   * bind_work_area() with a buffer of at least required_work_size() bytes
+   * before executing any plan.
    *
-   * @param stream            Stream resources the plans run on and that owns
-   *                          the work-area allocation. Must outlive this ctx.
+   * @param stream            Stream resources the plans run on. Must outlive this ctx.
    * @param input_nrow        Unpadded input rows.
    * @param input_ncol        Unpadded input cols.
    * @param forward_batch     Batch size for the R2C plan.
@@ -84,8 +83,12 @@ struct convolve_ctx {
   {
     for (auto p : plans_forward) CUFFT_CALL(cufftDestroy(p));
     for (auto p : plans_backward) CUFFT_CALL(cufftDestroy(p));
-    if (work_area != nullptr) stream_res.free_async(work_area);
   }
+
+  /// Bind a caller-owned workspace buffer (>= required_work_size() bytes) to
+  /// every plan. The context does not take ownership; the buffer must stay
+  /// alive until the last plan execution.
+  void bind_work_area(void* work_area);
 
   /// Required size in bytes of the shared workspace buffer.
   size_t required_work_size() const { return work_size; }

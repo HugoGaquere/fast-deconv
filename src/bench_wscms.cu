@@ -441,10 +441,11 @@ static std::size_t estimate_bytes(const bench_config& c)
   input_buffers += nf * F;                    // d_weights
   input_buffers += 2 * nf * npix * F;         // d_dirty + d_dirty_master
 
-  // (2) Persistent cuFFT work areas (allocated from the pool at context ctor).
+  // (2) Persistent cuFFT work area: one buffer shared by both FFT contexts
+  //   (their plans run sequentially on the same stream), sized to the max.
   //   scale ctx: R2C batch 1, C2R batch ns-1.  psf ctx: R2C/C2R batch nf (two C2R plans).
-  const std::size_t work_areas = cufft_work_bytes(img_pr, img_pc, 1, static_cast<int>(ns) - 1, 1) +
-                                 cufft_work_bytes(psf_pr, psf_pc, c.n_freq, c.n_freq, 2);
+  const std::size_t work_areas = std::max(cufft_work_bytes(img_pr, img_pc, 1, static_cast<int>(ns) - 1, 1),
+                                          cufft_work_bytes(psf_pr, psf_pc, c.n_freq, c.n_freq, 2));
 
   // (3) run_wscms_cycles pool working set.
   // Always-live for the whole call (allocated before PSF precompute, freed last):
