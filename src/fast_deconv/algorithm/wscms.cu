@@ -326,6 +326,11 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     auto [this_flux, this_rms] = matrix::compute_stats(stats_ws, mean_residual, ws.mask);
     FD_NVTX_MARK("post_iter_stats end");
 
+    // TODO(guards): abort the outer loop when !std::isfinite(this_flux) || !std::isfinite(this_rms).
+    // Once the residual overflows to inf/nan, the stall tracker (|inf - inf| < eps is false) and the
+    // per-iteration divergence check both go dead, and the loop grinds until max_iteration
+    // (observed: 1-MS run with stop_flux below the artifact floor overflowed to peak_flux~9.5e16, rms=inf).
+
     if (last_selected_scale != selected_scale_idx) {
       const float flux_to_go = this_flux - stop_flux;
       FD_LOG_INFO("run_wscms: [iter={}] scale={} peak_flux={:.8f} rms={:.8f} flux_to_go={:.8f}", total_iterations,

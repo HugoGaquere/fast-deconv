@@ -1,0 +1,10 @@
+# LeakSanitizer suppressions for CUDA test runs.
+# The CUDA driver/runtime and its math libraries hold allocations until
+# process exit; LSan reports them as leaks. Suppress by originating library
+# so real leaks in fast_deconv host code still surface.
+leak:libcuda.so
+leak:libcudart
+leak:libcublas
+leak:libcufft
+leak:libnvrtc
+leak:libnvidia

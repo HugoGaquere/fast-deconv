@@ -36,7 +36,19 @@ cmake --build build/Release
 ctest --test-dir build/Release
 ```
 
-Notable outputs: `libfast_deconv.a`, the `example_wscms` driver (runs against FastDDFacet `dump_ref` exports), and the `fast_deconv_tests` GoogleTest binary.
+Notable outputs: `libfast_deconv.a`, the `example_wscms` driver (runs against FastDDFacet `dump_ref` exports), and the GoogleTest binaries `fast_deconv_unit_tests` / `fast_deconv_nonreg_tests`.
+
+## Tests
+
+```bash
+ctest --test-dir build/Release -L UNIT      # unit tests (CPU-oracle based; GPU tests skip if no device)
+ctest --test-dir build/Release -L NONREG    # synthetic WSCMS non-regression run vs JSON baseline
+```
+
+The non-regression test compares scalar metrics of a full synthetic WSCMS run
+against `tests/baselines/wscms_synthetic.json`. After an intentional
+algorithmic change, regenerate with `FAST_DECONV_UPDATE_BASELINE=1 ctest
+--test-dir build/Release -L NONREG` and commit the reviewed JSON diff.
 
 ## Layout
 

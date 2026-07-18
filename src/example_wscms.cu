@@ -49,7 +49,7 @@
 #include <string>
 #include <vector>
 
-#include "../tests/cpp/npy_loader.hpp"
+#include "npy_loader.hpp"
 
 namespace core = fast_deconv::core;
 namespace scale = fast_deconv::scale;
@@ -68,10 +68,7 @@ T* device_upload(const T* host_ptr, std::size_t count)
 }
 
 /// Treat a NaN scalar from the dump as "field unset" (nullopt).
-static std::optional<float> opt_finite(float v)
-{
-  return std::isnan(v) ? std::nullopt : std::optional<float>(v);
-}
+static std::optional<float> opt_finite(float v) { return std::isnan(v) ? std::nullopt : std::optional<float>(v); }
 
 /// Parse a cycle spec like "1,2,4-6" into an ordered list of cycle ids.
 /// Returns an empty vector for malformed input (caller treats as error).
@@ -337,8 +334,7 @@ int main(int argc, char** argv)
     // --force-auto-mask-last forces auto-masking on the final cycle of the
     // set regardless of the dump's per-cycle force_auto_mask flag.
     const bool is_last_cycle = idx + 1 == cycle_ids.size();
-    const bool force_auto_mask =
-        npy_force_auto_mask.scalar<bool>() || (force_auto_mask_last && is_last_cycle);
+    const bool force_auto_mask = npy_force_auto_mask.scalar<bool>() || (force_auto_mask_last && is_last_cycle);
 
     wscms::params params{
         .max_iteration = npy_max_iteration.scalar<int>(),
@@ -380,8 +376,8 @@ int main(int argc, char** argv)
     CHECK_CUDA(cudaDeviceSynchronize());
     const auto t_end = std::chrono::steady_clock::now();
     const double elapsed_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-    stats.push_back({cid, elapsed_ms, result.peak_coords.size(), result.total_iterations, result.final_flux,
-                     result.stop_flux});
+    stats.push_back(
+        {cid, elapsed_ms, result.peak_coords.size(), result.total_iterations, result.final_flux, result.stop_flux});
     total_ms += elapsed_ms;
 
     printf("Cycle %d done in %.3f ms (%.3f s). %zu components (scales=%zu gains=%zu coeffs=%zu)\n", cid, elapsed_ms,
@@ -410,22 +406,20 @@ int main(int argc, char** argv)
         fast_deconv::util::dump_npy(cycle_dir + "/residual.npy", dirty);
         std::ofstream comp(cycle_dir + "/components.csv");
         if (!comp) throw std::runtime_error("cannot open " + cycle_dir + "/components.csv");
-        const std::size_t comp_n_order =
-            result.coeffs.empty() ? 0 : result.coeffs.front().size();
+        const std::size_t comp_n_order = result.coeffs.empty() ? 0 : result.coeffs.front().size();
         comp << "row,col,scale,gain";
         for (std::size_t k = 0; k < comp_n_order; ++k) comp << ",coeff" << k;
         comp << '\n';
         for (std::size_t i = 0; i < result.peak_coords.size(); ++i) {
-          comp << result.peak_coords.at(i).first << ',' << result.peak_coords.at(i).second << ','
-               << result.scales.at(i) << ',' << result.gains.at(i);
+          comp << result.peak_coords.at(i).first << ',' << result.peak_coords.at(i).second << ',' << result.scales.at(i)
+               << ',' << result.gains.at(i);
           // coeffs are filled by a separate path than the component lists and
           // may legitimately be shorter; emit only what exists for this row.
           if (i < result.coeffs.size())
             for (float cval : result.coeffs.at(i)) comp << ',' << cval;
           comp << '\n';
         }
-        printf("Dumped residual + %zu components to %s\n", result.peak_coords.size(),
-               cycle_dir.c_str());
+        printf("Dumped residual + %zu components to %s\n", result.peak_coords.size(), cycle_dir.c_str());
       } catch (const std::exception& e) {
         fprintf(stderr, "Warning: --dump-result failed for cycle %d: %s\n", cid, e.what());
       }
