@@ -190,19 +190,12 @@ if (NOT SKBUILD)
   add_executable(bench_tiled_argmax src/bench_tiled_argmax.cu)
   target_link_libraries(bench_tiled_argmax PRIVATE fast_deconv)
 
-  add_executable(example_peer_access src/example_peer_access.cu)
-  target_link_libraries(example_peer_access PRIVATE fast_deconv)
-
-  add_executable(probe_fft_workspace src/probe_fft_workspace.cu)
-  target_link_libraries(probe_fft_workspace PRIVATE CUDA::cufft)
-
   if(FAST_DECONV_SANITIZE)
     # nvcc's host compiler (g++-15 here) has no sanitizer link files on
     # Fedora — they ship only for the default gcc. Host-link the CUDA
     # executables with the CXX driver instead, like the test binaries.
     set_target_properties(
       fast_deconv_app example_wscms bench_wscms bench_tiled_argmax
-      example_peer_access probe_fft_workspace
       PROPERTIES LINKER_LANGUAGE CXX
     )
   endif()
