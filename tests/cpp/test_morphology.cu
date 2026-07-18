@@ -2,50 +2,18 @@
 #include <gtest/gtest.h>
 
 #include <climits>
-#include <vector>
-
-#include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/morphology/dilation.hpp>
 #include <fast_deconv/morphology/roi.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
+#include <vector>
+
+#include "helpers/device_buffers.hpp"
+#include "helpers/gpu_test.hpp"
 
 namespace core = fast_deconv::core;
 namespace morpho = fast_deconv::morphology;
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-namespace {
-
-// Upload a host bool buffer to device, returns the device pointer (caller frees).
-bool* upload_bool(const core::resources& res, const core::stream_resources& sr,
-                  const std::vector<bool>& host, std::size_t n)
-{
-  // std::vector<bool> is bit-packed, so unpack into a uint8_t buffer first.
-  std::vector<uint8_t> packed(n);
-  for (std::size_t i = 0; i < n; ++i) packed[i] = host[i] ? 1 : 0;
-
-  bool* d_ptr = res.alloc_async<bool>(n, sr);
-  CHECK_CUDA(cudaMemcpyAsync(d_ptr, packed.data(), n * sizeof(bool), cudaMemcpyHostToDevice,
-                             sr.cuda_stream));
-  sr.sync();
-  return d_ptr;
-}
-
-std::vector<uint8_t> download_bool(const core::stream_resources& sr, const bool* d_ptr,
-                                   std::size_t n)
-{
-  // Read into uint8_t (1 byte per element) to avoid std::vector<bool> bit-packing.
-  std::vector<uint8_t> host(n);
-  CHECK_CUDA(cudaMemcpyAsync(host.data(), d_ptr, n * sizeof(bool), cudaMemcpyDeviceToHost,
-                             sr.cuda_stream));
-  sr.sync();
-  return host;
-}
-
-}  // namespace
+namespace fdtest = fast_deconv::test;
 
 // ============================================================================
 // compute_mask_roi
@@ -56,7 +24,7 @@ std::vector<uint8_t> download_bool(const core::stream_resources& sr, const bool*
 // Empty mask sentinel: {INT_MAX, -1, INT_MAX, -1}.
 // ============================================================================
 
-class ComputeMaskRoiTest : public ::testing::Test {
+class ComputeMaskRoiTest : public fdtest::GpuTest {
  protected:
   // Deliberately non-square to exercise the row-major flat-index unravel.
   static constexpr int NROW = 6;
@@ -64,15 +32,12 @@ class ComputeMaskRoiTest : public ::testing::Test {
 
   morpho::roi run(const std::vector<bool>& mask)
   {
-    core::resources resources(0);
-    const auto sr = resources.make_stream();
+    const auto sr = res().make_stream();
 
-    bool* d_mask = upload_bool(resources, sr, mask, NROW * NCOL);
-    core::device_span2d<bool> view(d_mask, NROW, NCOL);
+    fdtest::device_buffer<bool> d_mask(res(), sr, mask);
+    core::device_span2d<bool> view(d_mask.get(), NROW, NCOL);
 
     morpho::roi r = morpho::compute_mask_roi(sr, view);
-
-    resources.free_async(d_mask, sr);
     sr.sync();
     return r;
   }
@@ -156,14 +121,11 @@ TEST_F(ComputeMaskRoiTest, CornerPixelsHitBoundary)
 // ============================================================================
 // binary_dilation
 //
-// NOTE: binary_dilation is currently a stub. Tests are DISABLED_ until the
-// kernel is implemented. Re-enable by removing the DISABLED_ prefix.
-//
 // Tests focus on properties (extensivity, single-pixel oracle, translation
 // equivariance) so they remain valid across implementation refactors.
 // ============================================================================
 
-class BinaryDilationTest : public ::testing::Test {
+class BinaryDilationTest : public fdtest::GpuTest {
  protected:
   // Non-square data shape to catch row/col indexing bugs.
   static constexpr int NROW = 6;
@@ -172,33 +134,24 @@ class BinaryDilationTest : public ::testing::Test {
   // 3x3 square structuring element, anchor at center.
   static std::vector<bool> se_square_3x3() { return std::vector<bool>(9, true); }
 
-  std::vector<uint8_t> run(const std::vector<bool>& data, const std::vector<bool>& se,
-                           int se_n, morpho::roi se_roi)
+  std::vector<uint8_t> run(const std::vector<bool>& data, const std::vector<bool>& se, int se_n, morpho::roi se_roi)
   {
-    core::resources resources(0);
-    const auto sr = resources.make_stream();
+    const auto sr = res().make_stream();
 
     const std::size_t npix = NROW * NCOL;
-    bool* d_data = upload_bool(resources, sr, data, npix);
-    bool* d_se = upload_bool(resources, sr, se, se_n * se_n);
-    bool* d_out = resources.alloc_async<bool>(npix, sr);
-    CHECK_CUDA(cudaMemsetAsync(d_out, 0, npix * sizeof(bool), sr.cuda_stream));
-    sr.sync();
+    fdtest::device_buffer<bool> d_data(res(), sr, data);
+    fdtest::device_buffer<bool> d_se(res(), sr, se);
+    fdtest::device_buffer<bool> d_out(res(), sr, npix);
+    CHECK_CUDA(cudaMemsetAsync(d_out.get(), 0, npix * sizeof(bool), sr.cuda_stream));
 
-    core::device_span2d<bool> data_view(d_data, NROW, NCOL);
-    core::device_span2d<bool> se_view(d_se, se_n, se_n);
-    core::device_span2d<bool> out_view(d_out, NROW, NCOL);
+    core::device_span2d<bool> data_view(d_data.get(), NROW, NCOL);
+    core::device_span2d<bool> se_view(d_se.get(), se_n, se_n);
+    core::device_span2d<bool> out_view(d_out.get(), NROW, NCOL);
 
     morpho::binary_dilation(sr, data_view, se_view, se_roi, out_view);
     sr.sync();
 
-    auto host_out = download_bool(sr, d_out, npix);
-
-    resources.free_async(d_data, sr);
-    resources.free_async(d_se, sr);
-    resources.free_async(d_out, sr);
-    sr.sync();
-    return host_out;
+    return d_out.to_host();
   }
 };
 
@@ -223,10 +176,8 @@ TEST_F(BinaryDilationTest, SinglePixelExpandsToStructuringElement)
 
   for (int r = 0; r < NROW; ++r) {
     for (int c = 0; c < NCOL; ++c) {
-      const bool inside_block =
-          (r >= row - 1 && r <= row + 1 && c >= col - 1 && c <= col + 1);
-      EXPECT_EQ(out[r * NCOL + c] != 0, inside_block)
-          << "mismatch at (" << r << ", " << c << ")";
+      const bool inside_block = (r >= row - 1 && r <= row + 1 && c >= col - 1 && c <= col + 1);
+      EXPECT_EQ(out[r * NCOL + c] != 0, inside_block) << "mismatch at (" << r << ", " << c << ")";
     }
   }
 }

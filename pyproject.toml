@@ -17,9 +17,6 @@ classifiers = [
 ]
 dependencies=["numpy", "cupy-cuda12x"]
 
-[project.optional-dependencies]
-test = ["pytest"]
-
 [build-system]
 requires = ["scikit-build-core>=0.10", "pybind11", "numpy", "conan"]
 build-backend = "scikit_build_core.build"
@@ -32,22 +29,10 @@ editable.rebuild = true
 [tool.scikit-build.cmake]
 define = {CMAKE_PROJECT_TOP_LEVEL_INCLUDES = "cmake/conan_provider.cmake"}
 
-[tool.pytest.ini_options]
-minversion = "8.0"
-addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
-xfail_strict = true
-log_cli_level = "INFO"
-filterwarnings = [
-  "error",
-  "ignore::pytest.PytestCacheWarning",
-]
-testpaths = ["tests"]
-
 [tool.uv]
 cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.{h,c,hpp,cpp}" }, { file = "CMakeLists.txt" }]
 
+# Tests are C++/GTest only (they need a GPU): no wheel test-command.
 [tool.cibuildwheel]
 build-frontend = "build[uv]"
-test-command = "pytest {project}/tests"
-test-extras = ["test"]
 

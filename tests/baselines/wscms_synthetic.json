@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "note": "regenerate with FAST_DECONV_UPDATE_BASELINE=1; tolerances live in test_wscms_nonreg.cu",
+  "config": {
+    "seed": 42,
+    "nrow": 256,
+    "ncol": 256,
+    "n_freq": 4,
+    "n_scales": 4,
+    "sigma_psf": 2.0,
+    "noise_sigma": 0.009999999776482582,
+    "scale_bias": [
+      1.0,
+      1.4500000476837158,
+      2.299999952316284,
+      4.199999809265137
+    ],
+    "scale_stall_threshold": 9.999999747378752e-05
+  },
+  "metrics": {
+    "n_components": 769,
+    "total_iterations": 769,
+    "final_flux": 0.05160550773143768,
+    "stop_flux": 0.05999999865889549,
+    "residual_rms": 0.01319298055022955,
+    "residual_max_abs": 0.3873465359210968,
+    "cleaned_flux_total": 23.054998414061828,
+    "components_per_scale": [
+      198,
+      0,
+      150,
+      421
+    ],
+    "recovered_flux_per_source": [
+      9.932827958208735,
+      3.9467822841820457,
+      4.228283337925122,
+      4.238019434710916,
+      0.7090853990350798
+    ]
+  }
+}
