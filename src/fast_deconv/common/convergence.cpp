@@ -19,6 +19,10 @@ void convergence::track_flux(float flux, int subminor_count)
 
   // Match DDFacet: divergence iff current flux exceeds factor * previous flux,
   // and the count is cumulative across the major cycle (not reset on non-trigger).
+  // TODO(guards): this only catches fast blowup. Slow exponential divergence (~1% growth per outer
+  // iteration) compounds to float overflow without ever exceeding factor * previous flux. Also
+  // compare against the initial flux (e.g. |flux| > divergence_factor * |flux_history_.front()|
+  // => flux_diverged) to catch the slow case.
   const bool diverging_iter = std::abs(flux) > divergence_factor_ * std::abs(flux_history_.back());
   if (diverging_iter) count_divergent_iter_++;
 
@@ -42,6 +46,10 @@ void convergence::update_status_()
 void scale_stall_tracker::update(int scale, float rms)
 {
   // Match DDFacet: cumulative stall count per scale, never reset on non-trigger.
+  // TODO(guards): last_rms_ is shared across scales, so a scale gets a stall strike based on the
+  // rms left by whichever scale ran before it — a plateau on one scale can retire others (observed:
+  // scales 4-9 all retired within seconds). Consider tracking last_rms_ per scale so a strike only
+  // reflects that scale's own progress.
   if (std::abs(last_rms_ - rms) < stall_threshold_) scales_stall_count_.at(scale)++;
   last_rms_ = rms;
 }

@@ -24,11 +24,10 @@ inline std::string fmt_optional(const std::optional<float>& v)
   return v.has_value() ? fmt::format("{:.6f}", *v) : std::string{"unset"};
 }
 
-std::string format_run_banner(const params& p, std::size_t dirty_nrows, std::size_t dirty_ncols,
-                              uint32_t n_freq, uint32_t n_facets, int n_scales, int psf_nrow, int psf_ncol)
+std::string format_run_banner(const params& p, std::size_t dirty_nrows, std::size_t dirty_ncols, uint32_t n_freq,
+                              uint32_t n_facets, int n_scales, int psf_nrow, int psf_ncol)
 {
-  constexpr const char* sep =
-      "------------------------------------------------------------------------";
+  constexpr const char* sep = "------------------------------------------------------------------------";
   return fmt::format(
       "run_wscms: launching deconvolution\n"
       "  {}\n"
@@ -40,16 +39,11 @@ std::string format_run_banner(const params& p, std::size_t dirty_nrows, std::siz
       "  clean loop | max_clean_iteration={}  peak_factor={:.4f}  gamma={:.4f}  clean_negative={}\n"
       "  auto mask  | enable={}  force={}  peak_threshold={}  rms_threshold={}\n"
       "  {}",
-      sep,
-      dirty_nrows, dirty_ncols, n_freq, n_facets, psf_nrow, psf_ncol,
-      n_scales, p.scale_stall_threshold,
-      p.max_iteration, p.divergence_factor,
-      p.flux_threshold, p.stop_rms_factor, p.stop_peak_factor,
-      p.stop_cycle_factor, p.stop_sidelobe_level,
-      p.max_clean_iteration, p.peak_factor, p.gamma, p.clean_negative,
-      p.enable_auto_mask, p.force_enable_auto_mask,
-      fmt_optional(p.auto_mask_peak_threshold), fmt_optional(p.auto_mask_rms_threshold),
-      sep);
+      sep, dirty_nrows, dirty_ncols, n_freq, n_facets, psf_nrow, psf_ncol, n_scales, p.scale_stall_threshold,
+      p.max_iteration, p.divergence_factor, p.flux_threshold, p.stop_rms_factor, p.stop_peak_factor,
+      p.stop_cycle_factor, p.stop_sidelobe_level, p.max_clean_iteration, p.peak_factor, p.gamma, p.clean_negative,
+      p.enable_auto_mask, p.force_enable_auto_mask, fmt_optional(p.auto_mask_peak_threshold),
+      fmt_optional(p.auto_mask_rms_threshold), sep);
 }
 
 }  // namespace
@@ -66,12 +60,13 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   auto& scale_ctx = ws.scale_convolve;
   auto& psf_ctx = ws.psf_convolve;
 
-  // stream_a must be the stream the FFT plans were built on (the context's
-  // dedicated convolution stream), so the convolutions and the surrounding
-  // kernels share one stream. stream_b is a second stream for the clean-loop
-  // per-channel subtract.
-  const auto& stream_a = ctx.exec_stream;
-  const auto& stream_b = exec_resources.get_stream_resources();
+  // stream_a is the context's compute stream — the FFT plans are bound to it,
+  // so the convolutions and the surrounding kernels share one stream.
+  // stream_b is the context's aux stream for the clean-loop per-channel
+  // fit/subtract path; everything it touches (dirty, the coeff buffers) is
+  // allocated and driven on it.
+  const auto& stream_a = ctx.compute_stream;
+  const auto& stream_b = ctx.aux_stream;
 
   const uint32_t n_freq = dirty.extent(0);
   const uint32_t n_facets = ws.raw_psfs.extent(0);
@@ -82,8 +77,8 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   const int n_order = ws.xdes.extent(1);
   const int n_scales = static_cast<int>(ws.scale_sigmas.size());
 
-  FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales,
-                                      psf_ctx.input_nrow, psf_ctx.input_ncol));
+  FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_ctx.input_nrow,
+                                      psf_ctx.input_ncol));
 
   // exec_resources.print_memory_usage("init/entry");
 
@@ -125,11 +120,18 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   deconv_convergence.track_flux(track_flux);
   scale_stall_tracker.init_rms(track_rms);
 
-  // Shared device buffer for all component coefficients across all outer iterations.
+  // Shared device buffer for all component coefficients across all outer
+  // iterations. Written by fit_coefficients on stream_b, so it lives on
+  // stream_b's timeline (alloc-follows-use).
   const std::size_t coeffs_capacity = static_cast<std::size_t>(p.max_iteration + p.max_clean_iteration) * n_order;
   // exec_resources.print_memory_usage("init/before d_all_coeffs");
-  float* d_all_coeffs = exec_resources.alloc_async<float>(coeffs_capacity, stream_a);
+  float* d_all_coeffs = exec_resources.alloc_async<float>(coeffs_capacity, stream_b);
   // exec_resources.print_memory_usage("init/after d_all_coeffs");
+
+  // Per-channel coefficient scratch for the clean loop: written and consumed
+  // only on stream_b, fixed size, so allocated once for the whole call.
+  float* coeffs_per_chan_ptr = exec_resources.alloc_async<float>(n_freq, stream_b);
+  auto coeffs_per_chan = core::device_vect<float>(coeffs_per_chan_ptr, n_freq);
 
   // Setup workspace for repeated argmax over mean_residual
   // exec_resources.print_memory_usage("init/before peak_ws");
@@ -153,8 +155,8 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
       exec_resources.alloc_async<float>(static_cast<std::size_t>(n_scales) * n_facets * psf_npix, stream_a);
   // exec_resources.print_memory_usage("init/after conv2_psfs");
   // exec_resources.print_memory_usage("init/before conv_psfs");
-  float* conv_psfs_ptr = exec_resources.alloc_async<float>(
-      static_cast<std::size_t>(n_scales) * n_facets * n_freq * psf_npix, stream_a);
+  float* conv_psfs_ptr =
+      exec_resources.alloc_async<float>(static_cast<std::size_t>(n_scales) * n_facets * n_freq * psf_npix, stream_a);
   // exec_resources.print_memory_usage("init/after conv_psfs");
   core::device_span5d<float> all_conv_psfs(conv_psfs_ptr, n_scales, n_facets, n_freq, psf_ctx.input_nrow,
                                            psf_ctx.input_ncol);
@@ -254,9 +256,6 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
 
     const std::size_t gain_offset = static_cast<std::size_t>(selected_scale_idx) * n_facets;
 
-    float* coeffs_per_chan_ptr = exec_resources.alloc_async<float>(n_freq, stream_a);
-    auto coeffs_per_chan = core::device_vect<float>(coeffs_per_chan_ptr, n_freq);
-
     auto [peak_value, peak_index] = matrix::argmax(peak_ws, mean_residual.data_handle());
 
     const float threshold = peak_value * p.peak_factor;
@@ -297,18 +296,18 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
       common::subtract_component_async(stream_a, mean_residual, conv2_psf, peak_coords, peak_value * gain);
       // Only the conv2_psf footprint centered on peak_coords was dirtied; refresh
       // just the touched tiles and re-combine against the cached ones.
-      std::tie(peak_value, peak_index) = matrix::argmax_incremental(
-          tiled_ws, mean_residual.data_handle(), peak_coords.first, peak_coords.second,
-          conv2_psf.extent(0), conv2_psf.extent(1));
+      std::tie(peak_value, peak_index) =
+          matrix::argmax_incremental(tiled_ws, mean_residual.data_handle(), peak_coords.first, peak_coords.second,
+                                     conv2_psf.extent(0), conv2_psf.extent(1));
 
       n_clean_iter++;
     }
 
     stream_a.sync();
+    // stream_b must finish its per-channel subtracts on `dirty` before
+    // stream_a reads it in the weighted_sum below.
     stream_b.sync();
     FD_NVTX_MARK("clean_loop end");
-
-    stream_a.free_async(coeffs_per_chan_ptr);
 
     // FD_LOG_INFO("run_wscms: scale {} produced {} clean iterations", selected_scale_idx, n_clean_iter);
 
@@ -327,9 +326,15 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     auto [this_flux, this_rms] = matrix::compute_stats(stats_ws, mean_residual, ws.mask);
     FD_NVTX_MARK("post_iter_stats end");
 
+    // TODO(guards): abort the outer loop when !std::isfinite(this_flux) || !std::isfinite(this_rms).
+    // Once the residual overflows to inf/nan, the stall tracker (|inf - inf| < eps is false) and the
+    // per-iteration divergence check both go dead, and the loop grinds until max_iteration
+    // (observed: 1-MS run with stop_flux below the artifact floor overflowed to peak_flux~9.5e16, rms=inf).
+
     if (last_selected_scale != selected_scale_idx) {
       const float flux_to_go = this_flux - stop_flux;
-      FD_LOG_INFO("run_wscms: [iter={}] scale={} peak_flux={:.8f} rms={:.8f} flux_to_go={:.8f}", total_iterations, selected_scale_idx, this_flux, this_rms, flux_to_go);
+      FD_LOG_INFO("run_wscms: [iter={}] scale={} peak_flux={:.8f} rms={:.8f} flux_to_go={:.8f}", total_iterations,
+                  selected_scale_idx, this_flux, this_rms, flux_to_go);
       last_selected_scale = selected_scale_idx;
     }
 
@@ -366,7 +371,8 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   stream_a.free_async(conv2_psfs_ptr);
   stream_a.free_async(conv_psfs_ptr);
   stream_a.free_async(scales_x_dirty_ptr);
-  stream_a.free_async(d_all_coeffs);
+  stream_b.free_async(d_all_coeffs);
+  stream_b.free_async(coeffs_per_chan_ptr);
   stream_a.free_async(scale_kernels_ptr);
   stream_a.free_async(mean_residual_ptr);
   if (mask_per_scale_ptr != nullptr) stream_a.free_async(mask_per_scale_ptr);

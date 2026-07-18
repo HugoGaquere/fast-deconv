@@ -10,7 +10,7 @@ class Recipe(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
 
     # List of files to export to the conan cache when creating package.
-    exports_sources = "CMakeLists.txt", "include/*", "src/*", "test/*"
+    exports_sources = "CMakeLists.txt", "include/*", "src/*", "tests/*"
 
     options = {"python_module": [True, False]}
     default_options = {"python_module": False}
@@ -27,6 +27,7 @@ class Recipe(ConanFile):
             options={"python": self.options.python_module, "cuda": True},
         )
         self.requires("gtest/1.15.0")
+        self.requires("nlohmann_json/3.11.3")
 
     def layout(self):
         if self.options.python_module:

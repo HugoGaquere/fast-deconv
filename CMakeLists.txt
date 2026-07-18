@@ -26,6 +26,39 @@ if(SKBUILD)
 endif()
 
 #-------------------------------------------------------------------#
+# Host sanitizers (ASan + UBSan)
+#-------------------------------------------------------------------#
+# Instruments HOST code only — device code is out of reach for these
+# sanitizers (use compute-sanitizer for kernels). Run the resulting test
+# binaries with:
+#   ASAN_OPTIONS=protect_shadow_gap=0 \
+#   LSAN_OPTIONS=suppressions=<repo>/tests/lsan_suppressions.txt
+option(FAST_DECONV_SANITIZE "Build host code with ASan + UBSan" OFF)
+
+if(FAST_DECONV_SANITIZE)
+  # nvcc splits -Xcompiler arguments on commas, so -fsanitize=address,undefined
+  # must be passed as separate flags.
+  set(_fd_san_flags
+    -fsanitize=address
+    -fsanitize=undefined
+    -fno-sanitize-recover=undefined  # make UBSan findings fail the test
+    -fno-omit-frame-pointer
+  )
+  set(_fd_san_flags_cuda "")
+  foreach(_flag IN LISTS _fd_san_flags)
+    list(APPEND _fd_san_flags_cuda "-Xcompiler=${_flag}")
+  endforeach()
+
+  add_compile_options(
+    "$<$<COMPILE_LANGUAGE:CXX>:${_fd_san_flags}>"
+    "$<$<COMPILE_LANGUAGE:CUDA>:${_fd_san_flags_cuda}>"
+  )
+  # CMake host-links CUDA targets with the CXX compiler, so plain flags work
+  # for both link languages.
+  add_link_options(-fsanitize=address -fsanitize=undefined)
+endif()
+
+#-------------------------------------------------------------------#
 # Dependencies
 #-------------------------------------------------------------------#
 find_package(fmt CONFIG REQUIRED)
@@ -162,6 +195,17 @@ if (NOT SKBUILD)
 
   add_executable(probe_fft_workspace src/probe_fft_workspace.cu)
   target_link_libraries(probe_fft_workspace PRIVATE CUDA::cufft)
+
+  if(FAST_DECONV_SANITIZE)
+    # nvcc's host compiler (g++-15 here) has no sanitizer link files on
+    # Fedora — they ship only for the default gcc. Host-link the CUDA
+    # executables with the CXX driver instead, like the test binaries.
+    set_target_properties(
+      fast_deconv_app example_wscms bench_wscms bench_tiled_argmax
+      example_peer_access probe_fft_workspace
+      PROPERTIES LINKER_LANGUAGE CXX
+    )
+  endif()
 endif()
 
 #-------------------------------------------------------------------#
@@ -171,34 +215,7 @@ option(BUILD_TESTS "Build unit tests" ON)
 
 if(BUILD_TESTS AND NOT SKBUILD)
   enable_testing()
-  find_package(GTest CONFIG REQUIRED)
-
-  foreach(_tp_target IN ITEMS GTest::gtest GTest::gtest_main GTest::gmock GTest::gmock_main)
-    if(TARGET ${_tp_target})
-      set_target_properties(${_tp_target} PROPERTIES SYSTEM TRUE)
-    endif()
-  endforeach()
-
-  add_executable(fast_deconv_tests
-    tests/cpp/test_main.cpp
-    tests/cpp/test_scale_selection.cu
-    tests/cpp/morphology.cu
-    tests/cpp/test_mask.cu
-    tests/cpp/test_tiled_argmax.cu
-  )
-
-  target_link_libraries(fast_deconv_tests PRIVATE
-    fast_deconv
-    GTest::gtest
-    GTest::gtest_main
-  )
-
-  target_include_directories(fast_deconv_tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests/cpp
-  )
-
-  include(GoogleTest)
-  gtest_discover_tests(fast_deconv_tests)
+  add_subdirectory(tests/cpp)
 endif()
 
 #-------------------------------------------------------------------#
