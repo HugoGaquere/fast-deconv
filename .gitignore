@@ -45,6 +45,7 @@ AGENTS.md
 # Project outputs
 results/
 bench_results/
+tests/data/
 docs/*
 
 # Profiler reports
