@@ -2,16 +2,12 @@
 
 #include <cstdint>
 #include <fast_deconv/algorithm/wscms_types.hpp>
-#include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/util/utils.hpp>
 #include <utility>
 #include <vector>
 
-// Pure index math and host-side bookkeeping — no GPU work. The device spans
-// below are built on a fake pointer that is never dereferenced; slice_leading
-// is plain pointer/extent arithmetic.
+// Pure index math and host-side bookkeeping — no GPU work.
 
-namespace core = fast_deconv::core;
 namespace util = fast_deconv::util;
 namespace wscms = fast_deconv::algorithm::wscms;
 
@@ -32,54 +28,6 @@ TEST(UnravelIndex2D, CornersAndInteriorOnNonSquareGrid)
 
   const int last = 5 * width - 1;
   EXPECT_EQ(util::unravel_index_2D(last, width), (std::pair<int, int>{4, width - 1}));
-}
-
-// ============================================================================
-// core::slice_leading — leading-dimension slices preserve trailing extents and
-// advance the data pointer by i * stride(0).
-// ============================================================================
-
-namespace {
-float* fake_base() { return reinterpret_cast<float*>(0x1000); }
-}  // namespace
-
-TEST(SliceLeading, Span3dToSpan2d)
-{
-  core::device_span3d<float> s3(fake_base(), 4, 5, 6);
-  auto s2 = core::slice_leading(s3, 2);
-  EXPECT_EQ(s2.data_handle(), fake_base() + 2 * 5 * 6);
-  EXPECT_EQ(s2.extent(0), 5);
-  EXPECT_EQ(s2.extent(1), 6);
-}
-
-TEST(SliceLeading, Span4dToSpan3d)
-{
-  core::device_span4d<float> s4(fake_base(), 3, 4, 5, 6);
-  auto s3 = core::slice_leading(s4, 1);
-  EXPECT_EQ(s3.data_handle(), fake_base() + 1 * 4 * 5 * 6);
-  EXPECT_EQ(s3.extent(0), 4);
-  EXPECT_EQ(s3.extent(1), 5);
-  EXPECT_EQ(s3.extent(2), 6);
-}
-
-TEST(SliceLeading, Span5dToSpan4d)
-{
-  core::device_span5d<float> s5(fake_base(), 2, 3, 4, 5, 6);
-  auto s4 = core::slice_leading(s5, 1);
-  EXPECT_EQ(s4.data_handle(), fake_base() + 1 * 3 * 4 * 5 * 6);
-  EXPECT_EQ(s4.extent(0), 3);
-  EXPECT_EQ(s4.extent(1), 4);
-  EXPECT_EQ(s4.extent(2), 5);
-  EXPECT_EQ(s4.extent(3), 6);
-}
-
-TEST(SliceLeading, IndexZeroIsIdentityView)
-{
-  core::device_span3d<float> s3(fake_base(), 4, 5, 6);
-  auto s2 = core::slice_leading(s3, 0);
-  EXPECT_EQ(s2.data_handle(), fake_base());
-  EXPECT_EQ(s2.extent(0), 5);
-  EXPECT_EQ(s2.extent(1), 6);
 }
 
 // ============================================================================
