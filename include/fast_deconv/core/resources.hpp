@@ -3,18 +3,32 @@
 #include <cuda_runtime_api.h>
 #include <driver_types.h>
 
+#include <concepts>
 #include <cstdio>
 #include <cstdlib>
 #include <emu/cuda/device/mdcontainer.hpp>
 #include <emu/cuda/memory.hpp>
 #include <emu/cuda/stream.hpp>
+#include <memory>
 #include <vector>
 
 #include "cublas_v2.h"
+#include "fast_deconv/core/span_types.hpp"
 #include "fast_deconv/util/cublas_macros.hpp"
 #include "fast_deconv/util/cuda_macros.hpp"
 
 namespace fast_deconv::core {
+
+/// Frees pool memory with cudaFreeAsync on the stream it was allocated on.
+/// Captures the raw cudaStream_t: the stream must outlive the last copy of
+/// any container using this deleter. CHECK_CUDA exits on failure (no-throw).
+struct stream_deleter {
+  cudaStream_t stream{};
+  void operator()(void* ptr) const noexcept
+  {
+    if (ptr != nullptr) CHECK_CUDA(cudaFreeAsync(ptr, stream));
+  }
+};
 
 class stream_resources {
  public:
@@ -57,6 +71,22 @@ class stream_resources {
     T* ptr = nullptr;
     CHECK_CUDA(cudaMallocFromPoolAsync(reinterpret_cast<void**>(&ptr), num_bytes, mem_pool_, cuda_stream));
     return ptr;
+  }
+
+  /// Owning RAII variant of alloc_async: pool memory, stream-ordered on
+  /// cuda_stream, freed with cudaFreeAsync on the same stream when the last
+  /// copy of the returned container is destroyed. cuda_stream must outlive
+  /// every copy of the container.
+  template <typename T, typename... Exts>
+    requires((std::convertible_to<Exts, std::int32_t> && ...) && sizeof...(Exts) > 0)
+  mdcontainer<T, sizeof...(Exts)> alloc_mdcontainer_async(Exts... exts) const
+  {
+    // Element count in uint64_t before the extents narrow to int32_t: the
+    // product may exceed int32 even when every extent fits.
+    const uint64_t n = (uint64_t{1} * ... * static_cast<uint64_t>(exts));
+    T* ptr = alloc_async<T>(n);
+    return mdcontainer<T, sizeof...(Exts)>(ptr, std::unique_ptr<T[], stream_deleter>(ptr, stream_deleter{cuda_stream}),
+                                           emu::exts_flag, exts...);
   }
 
   template <typename T>
