@@ -43,22 +43,17 @@ constexpr stats_acc kIdentity = {-FLT_MAX, 0.f, 0.f, 0};
 stats_workspace::stats_workspace(const core::stream_resources& sr, size_t n, bool abs_)
     : stream_res(sr), n_elements(n), use_abs(abs_)
 {
-  d_state = stream_res.alloc_async<stats_acc>(1);
+  d_state = stream_res.alloc_mdcontainer_async<stats_acc>(1);
 
   // Query temp-storage bytes against the same iterator/op/state types we will
   // use at call time. The pointers held by the iterator are unused during the
   // sizing query.
   auto it_query = make_iter(nullptr, nullptr, use_abs);
-  CHECK_CUDA(cub::DeviceReduce::Reduce(nullptr, temp_storage_bytes, it_query, d_state, static_cast<int>(n_elements),
-                                       stats_combine{}, kIdentity, stream_res.cuda_stream));
+  CHECK_CUDA(cub::DeviceReduce::Reduce(nullptr, temp_storage_bytes, it_query, d_state.data_handle(),
+                                       static_cast<int>(n_elements), stats_combine{}, kIdentity,
+                                       stream_res.cuda_stream));
 
-  d_temp = stream_res.alloc_async<char>(temp_storage_bytes);
-}
-
-stats_workspace::~stats_workspace()
-{
-  if (d_temp) stream_res.free_async(d_temp);
-  if (d_state) stream_res.free_async(d_state);
+  d_temp = stream_res.alloc_mdcontainer_async<char>(temp_storage_bytes);
 }
 
 void compute_stats_async(stats_workspace& ws, core::device_span2d<float> data, core::device_span2d<bool> mask)
@@ -68,7 +63,7 @@ void compute_stats_async(stats_workspace& ws, core::device_span2d<float> data, c
   assert(data.size() == ws.n_elements);
 
   auto it = make_iter(data.data_handle(), mask.data_handle(), ws.use_abs);
-  CHECK_CUDA(cub::DeviceReduce::Reduce(ws.d_temp, ws.temp_storage_bytes, it, ws.d_state,
+  CHECK_CUDA(cub::DeviceReduce::Reduce(ws.d_temp.data_handle(), ws.temp_storage_bytes, it, ws.d_state.data_handle(),
                                        static_cast<int>(ws.n_elements), stats_combine{}, kIdentity,
                                        ws.stream_res.cuda_stream));
 }
@@ -77,7 +72,7 @@ stats_result compute_stats(stats_workspace& ws, core::device_span2d<float> data,
 {
   compute_stats_async(ws, data, mask);
 
-  CHECK_CUDA(cudaMemcpyAsync(&ws.h_state, ws.d_state, sizeof(stats_acc), cudaMemcpyDeviceToHost,
+  CHECK_CUDA(cudaMemcpyAsync(&ws.h_state, ws.d_state.data_handle(), sizeof(stats_acc), cudaMemcpyDeviceToHost,
                              ws.stream_res.cuda_stream));
   ws.stream_res.sync();
 

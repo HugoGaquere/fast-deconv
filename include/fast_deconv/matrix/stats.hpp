@@ -42,14 +42,13 @@ struct stats_workspace {
   size_t n_elements = 0;
   bool use_abs = false;
 
-  stats_acc* d_state = nullptr;
-  char* d_temp = nullptr;
+  core::device_cont<stats_acc> d_state;
+  core::device_cont<char> d_temp;
   size_t temp_storage_bytes = 0;
 
   stats_acc h_state{};
 
   stats_workspace(const core::stream_resources& stream_res, size_t n_elements, bool use_abs);
-  ~stats_workspace();
 
   stats_workspace(const stats_workspace&) = delete;
   stats_workspace& operator=(const stats_workspace&) = delete;
