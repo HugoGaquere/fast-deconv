@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cub/cub.cuh>
+#include <emu/submdspan.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/core/logger.hpp>
 #include <fast_deconv/linalg/fft.hpp>
@@ -128,19 +129,17 @@ void convolve_with_scales(const algorithm::wscms::scale_convolve_ctx& ctx, core:
 
   // Plans were bound to their stream at construction (the wscms context's
   // compute stream); temporaries are stream-ordered on that same stream.
-  float* dirty_padded = stream_res.alloc_async<float>(img_padded_total);
-  complex_type* dirty_freq = stream_res.alloc_async<complex_type>(freq_total);
-  complex_type* scaled_dirty_freq =
-      stream_res.alloc_async<complex_type>(static_cast<uint64_t>(chunk_batch) * freq_total);
-  float* scaled_dirty =
-      stream_res.alloc_async<float>(static_cast<uint64_t>(chunk_batch) * img_padded_total);
+  auto dirty_padded = stream_res.alloc_mdcontainer_async<float>(img_padded_total);
+  auto dirty_freq = stream_res.alloc_mdcontainer_async<complex_type>(freq_total);
+  auto scaled_dirty_freq = stream_res.alloc_mdcontainer_async<complex_type>(chunk_batch, freq_total);
+  auto scaled_dirty = stream_res.alloc_mdcontainer_async<float>(chunk_batch, img_padded_total);
 
   // Pad + ifftshift dirty image
-  linalg::pad_ifftshift(dirty.data_handle(), dirty_padded, ctx.input_nrow, ctx.input_ncol, ctx.padded_nrow,
-                        ctx.padded_ncol, ctx.padding_nrow, ctx.padding_ncol, cuda_stream);
+  linalg::pad_ifftshift(dirty.data_handle(), dirty_padded.data_handle(), ctx.input_nrow, ctx.input_ncol,
+                        ctx.padded_nrow, ctx.padded_ncol, ctx.padding_nrow, ctx.padding_ncol, cuda_stream);
 
   // Forward R2C — once, reused across all chunks
-  CUFFT_CALL(cufftExecR2C(ctx.plan_forward(), dirty_padded, dirty_freq));
+  CUFFT_CALL(cufftExecR2C(ctx.plan_forward(), dirty_padded.data_handle(), dirty_freq.data_handle()));
 
   // Loop over chunks of chunk_batch scales (skip scale 0, identity, already memcpy'd above).
   const float norm = 1.0f / static_cast<float>(img_padded_total);
@@ -149,25 +148,19 @@ void convolve_with_scales(const algorithm::wscms::scale_convolve_ctx& ctx, core:
 
     dim3 mul_grid(CEIL_DIV(freq_total, 256), chunk_batch);
     kernel::multiply_batched_kernel<<<mul_grid, 256, 0, cuda_stream>>>(
-        dirty_freq, scales.data_handle() + scale_idx_start * freq_total, scaled_dirty_freq, freq_total, chunk_batch,
-        norm);
+        dirty_freq.data_handle(), scales.data_handle() + scale_idx_start * freq_total, scaled_dirty_freq.data_handle(),
+        freq_total, chunk_batch, norm);
 
-    CUFFT_CALL(cufftExecC2R(ctx.plan_backward(), scaled_dirty_freq, scaled_dirty));
+    CUFFT_CALL(cufftExecC2R(ctx.plan_backward(), scaled_dirty_freq.data_handle(), scaled_dirty.data_handle()));
 
-    linalg::fftshift_crop(scaled_dirty, out_scaled_dirty.data_handle() + scale_idx_start * npix, ctx.input_nrow,
-                          ctx.input_ncol, ctx.padded_nrow, ctx.padded_ncol, ctx.padding_nrow, ctx.padding_ncol,
-                          chunk_batch, cuda_stream);
+    linalg::fftshift_crop(scaled_dirty.data_handle(), out_scaled_dirty.data_handle() + scale_idx_start * npix,
+                          ctx.input_nrow, ctx.input_ncol, ctx.padded_nrow, ctx.padded_ncol, ctx.padding_nrow,
+                          ctx.padding_ncol, chunk_batch, cuda_stream);
   }
-
-  stream_res.free_async(dirty_padded);
-  stream_res.free_async(dirty_freq);
-  stream_res.free_async(scaled_dirty_freq);
-  stream_res.free_async(scaled_dirty);
 }
 
-int scale_selection(const core::stream_resources& stream_res,
-                    core::device_span3d<float> scaled_dirty, core::host_vect<float> bias,
-                    const std::vector<int>& retired_scales)
+int scale_selection(const core::stream_resources& stream_res, core::device_span3d<float> scaled_dirty,
+                    core::host_vect<float> bias, const std::vector<int>& retired_scales)
 {
   const auto cuda_stream = stream_res.cuda_stream;
 
@@ -182,26 +175,25 @@ int scale_selection(const core::stream_resources& stream_res,
   // scale saturates the GPU on every segment instead. We only need the peak
   // VALUE per scale (the argmax index is never used downstream), so Max — not
   // ArgMax — suffices. Masked-out pixels are already -inf, so they never win.
-  float* d_maxes = stream_res.alloc_async<float>(n_scales);
+  auto d_maxes = stream_res.alloc_mdcontainer_async<float>(n_scales);
 
   size_t temp_bytes = 0;
-  CHECK_CUDA(cub::DeviceReduce::Max(nullptr, temp_bytes, scaled_dirty.data_handle(), d_maxes, npix, cuda_stream));
-  void* d_temp = stream_res.alloc_async(temp_bytes);
+  CHECK_CUDA(cub::DeviceReduce::Max(nullptr, temp_bytes, scaled_dirty.data_handle(), d_maxes.data_handle(), npix,
+                                    cuda_stream));
+  auto d_temp = stream_res.alloc_mdcontainer_async<char>(temp_bytes);
 
   for (int s = 0; s < n_scales; s++) {
-    CHECK_CUDA(cub::DeviceReduce::Max(d_temp, temp_bytes, scaled_dirty.data_handle() + static_cast<size_t>(s) * npix,
-                                      d_maxes + s, npix, cuda_stream));
+    CHECK_CUDA(cub::DeviceReduce::Max(d_temp.data_handle(), temp_bytes,
+                                      scaled_dirty.data_handle() + static_cast<size_t>(s) * npix,
+                                      d_maxes.data_handle() + s, npix, cuda_stream));
   }
 
   // Copy per-scale peaks to host
   std::vector<float> h_maxes(n_scales);
-  CHECK_CUDA(cudaMemcpyAsync(h_maxes.data(), d_maxes, sizeof(float) * n_scales, cudaMemcpyDeviceToHost, cuda_stream));
+  CHECK_CUDA(cudaMemcpyAsync(h_maxes.data(), d_maxes.data_handle(), sizeof(float) * n_scales, cudaMemcpyDeviceToHost,
+                             cuda_stream));
 
   stream_res.sync();
-
-  // Async cleanup
-  stream_res.free_async(d_maxes);
-  stream_res.free_async(d_temp);
 
   // Biased scale selection on host (skip retired scales)
   int best_scale = 0;
@@ -219,9 +211,8 @@ int scale_selection(const core::stream_resources& stream_res,
 }
 
 void convolve_psfs_with_scale_async(const algorithm::wscms::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
-                                    core::device_vect<float> d_sigma, int scale_idx,
-                                    core::device_vect<float> weights, core::device_span4d<float> out_conv_psf,
-                                    core::device_span3d<float> out_conv2_mean)
+                                    core::device_vect<float> d_sigma, int scale_idx, core::device_vect<float> weights,
+                                    core::device_span4d<float> out_conv_psf, core::device_span3d<float> out_conv2_mean)
 {
   const core::stream_resources& stream_res = ctx.stream_res;  // plans run on this stream
   const int n_facets = psfs.extent(0);
@@ -236,8 +227,8 @@ void convolve_psfs_with_scale_async(const algorithm::wscms::psf_convolve_ctx& ct
     CHECK_CUDA(cudaMemcpyAsync(out_conv_psf.data_handle(), psfs.data_handle(), sizeof(float) * n_facets * facet_stride,
                                cudaMemcpyDeviceToDevice, stream_res.cuda_stream));
     for (int f = 0; f < n_facets; f++) {
-      linalg::weighted_sum_async(stream_res, core::slice_leading(psfs, f), weights,
-                                 core::slice_leading(out_conv2_mean, f));
+      linalg::weighted_sum_async(stream_res, core::device_span3d<float>(emu::submdspan(psfs, f)), weights,
+                                 core::device_span2d<float>(emu::submdspan(out_conv2_mean, f)));
     }
     return;
   }
@@ -245,18 +236,16 @@ void convolve_psfs_with_scale_async(const algorithm::wscms::psf_convolve_ctx& ct
   const auto cuda_stream = stream_res.cuda_stream;
 
   // Allocate temporaries
-  float* padded_psf = stream_res.alloc_async<float>(n_freq * padded_total);
-  complex_type* freq_psf = stream_res.alloc_async<complex_type>(n_freq * freq_total);
-  complex_type* freq_conv = stream_res.alloc_async<complex_type>(n_freq * freq_total);
-  complex_type* freq_conv2 = stream_res.alloc_async<complex_type>(n_freq * freq_total);
-  float* padded_conv = stream_res.alloc_async<float>(n_freq * padded_total);
-  float* padded_conv2 = stream_res.alloc_async<float>(n_freq * padded_total);
-  float* conv2_cropped_ptr = stream_res.alloc_async<float>(n_freq * psf_npix);
-  core::device_span3d<float> conv2_cropped(conv2_cropped_ptr, n_freq, ctx.input_nrow, ctx.input_ncol);
+  auto padded_psf = stream_res.alloc_mdcontainer_async<float>(n_freq, padded_total);
+  auto freq_psf = stream_res.alloc_mdcontainer_async<complex_type>(n_freq, freq_total);
+  auto freq_conv = stream_res.alloc_mdcontainer_async<complex_type>(n_freq, freq_total);
+  auto freq_conv2 = stream_res.alloc_mdcontainer_async<complex_type>(n_freq, freq_total);
+  auto padded_conv = stream_res.alloc_mdcontainer_async<float>(n_freq, padded_total);
+  auto padded_conv2 = stream_res.alloc_mdcontainer_async<float>(n_freq, padded_total);
+  auto conv2_cropped = stream_res.alloc_mdcontainer_async<float>(n_freq, ctx.input_nrow, ctx.input_ncol);
 
   // Generate Gaussian scale kernel at PSF resolution (single kernel, reused for all facets)
-  float* scale_kernel_ptr = stream_res.alloc_async<float>(freq_total);
-  core::device_span3d<float> scale_kernel(scale_kernel_ptr, 1, ctx.freq_nrow, ctx.freq_ncol);
+  auto scale_kernel = stream_res.alloc_mdcontainer_async<float>(1, ctx.freq_nrow, ctx.freq_ncol);
   make_gaussian_kernels_async(stream_res, d_sigma, ctx.padded_ncol, scale_kernel);
 
   const float norm = 1.0f / static_cast<float>(padded_total);
@@ -267,44 +256,35 @@ void convolve_psfs_with_scale_async(const algorithm::wscms::psf_convolve_ctx& ct
     float* dst_conv2_mean = out_conv2_mean.data_handle() + f * psf_npix;
 
     // 1. Pad + ifftshift (batched over n_freq)
-    linalg::pad_ifftshift_batched(src, padded_psf, ctx.input_nrow, ctx.input_ncol, ctx.padded_nrow, ctx.padded_ncol,
-                                  ctx.padding_nrow, ctx.padding_ncol, n_freq, cuda_stream);
+    linalg::pad_ifftshift_batched(src, padded_psf.data_handle(), ctx.input_nrow, ctx.input_ncol, ctx.padded_nrow,
+                                  ctx.padded_ncol, ctx.padding_nrow, ctx.padding_ncol, n_freq, cuda_stream);
 
     // 2. Batched R2C FFT
-    CUFFT_CALL(cufftExecR2C(ctx.plan_forward(), padded_psf, freq_psf));
+    CUFFT_CALL(cufftExecR2C(ctx.plan_forward(), padded_psf.data_handle(), freq_psf.data_handle()));
 
     // 3. Multiply by G and G^2
     kernel::multiply_psf_scale_kernel<<<CEIL_DIV(freq_total, 256), 256, 0, cuda_stream>>>(
-        freq_psf, scale_kernel_ptr, freq_conv, freq_conv2, freq_total, n_freq, norm);
+        freq_psf.data_handle(), scale_kernel.data_handle(), freq_conv.data_handle(), freq_conv2.data_handle(),
+        freq_total, n_freq, norm);
 
     // 4. Batched C2R IFFT for conv_psf
-    CUFFT_CALL(cufftExecC2R(ctx.plan_backward(), freq_conv, padded_conv));
+    CUFFT_CALL(cufftExecC2R(ctx.plan_backward(), freq_conv.data_handle(), padded_conv.data_handle()));
 
     // 5. Batched C2R IFFT for conv2_psf
-    CUFFT_CALL(cufftExecC2R(ctx.plan_backward_2(), freq_conv2, padded_conv2));
+    CUFFT_CALL(cufftExecC2R(ctx.plan_backward_2(), freq_conv2.data_handle(), padded_conv2.data_handle()));
 
     // 6. fftshift + crop for conv_psf -> output
-    linalg::fftshift_crop(padded_conv, dst_conv, ctx.input_nrow, ctx.input_ncol, ctx.padded_nrow, ctx.padded_ncol,
-                          ctx.padding_nrow, ctx.padding_ncol, n_freq, cuda_stream);
+    linalg::fftshift_crop(padded_conv.data_handle(), dst_conv, ctx.input_nrow, ctx.input_ncol, ctx.padded_nrow,
+                          ctx.padded_ncol, ctx.padding_nrow, ctx.padding_ncol, n_freq, cuda_stream);
 
     // 7. fftshift + crop for conv2_psf -> temporary
-    linalg::fftshift_crop(padded_conv2, conv2_cropped_ptr, ctx.input_nrow, ctx.input_ncol, ctx.padded_nrow,
-                          ctx.padded_ncol, ctx.padding_nrow, ctx.padding_ncol, n_freq, cuda_stream);
+    linalg::fftshift_crop(padded_conv2.data_handle(), conv2_cropped.data_handle(), ctx.input_nrow, ctx.input_ncol,
+                          ctx.padded_nrow, ctx.padded_ncol, ctx.padding_nrow, ctx.padding_ncol, n_freq, cuda_stream);
 
     // 8. Weighted mean over channels -> conv2_mean output
     core::device_span2d<float> dst_conv2_mean_view(dst_conv2_mean, ctx.input_nrow, ctx.input_ncol);
     linalg::weighted_sum_async(stream_res, conv2_cropped, weights, dst_conv2_mean_view);
   }
-
-  // Cleanup temporaries
-  stream_res.free_async(conv2_cropped_ptr);
-  stream_res.free_async(padded_conv2);
-  stream_res.free_async(padded_conv);
-  stream_res.free_async(freq_conv2);
-  stream_res.free_async(freq_conv);
-  stream_res.free_async(freq_psf);
-  stream_res.free_async(padded_psf);
-  stream_res.free_async(scale_kernel_ptr);
 }
 
 void convolve_psfs_with_scales_async(const algorithm::wscms::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
@@ -314,8 +294,8 @@ void convolve_psfs_with_scales_async(const algorithm::wscms::psf_convolve_ctx& c
   const int n_scales = d_sigmas.size();
   for (int i = 0; i < n_scales; i++) {
     core::device_vect<float> sigma_view(d_sigmas.data_handle() + i, 1);
-    auto current_conv_psf = core::slice_leading(out_conv_psf, i);
-    auto current_conv2_psf = core::slice_leading(out_conv2_mean, i);
+    core::device_span4d<float> current_conv_psf = emu::submdspan(out_conv_psf, i);
+    core::device_span3d<float> current_conv2_psf = emu::submdspan(out_conv2_mean, i);
     convolve_psfs_with_scale_async(ctx, psfs, sigma_view, i, weights, current_conv_psf, current_conv2_psf);
   }
 }

@@ -158,12 +158,11 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   FD_NVTX_MARK("init/compute_gains end");
 
   // Loop-only buffers
-  const uint64_t freq_scales_total = static_cast<int64_t>(scale_ctx.freq_nrow) * scale_ctx.freq_ncol * n_scales;
   auto scale_kernels = stream_a.alloc_mdcontainer_async<float>(n_scales, scale_ctx.freq_nrow, scale_ctx.freq_ncol);
   scale::make_gaussian_kernels_async(stream_a, ws.scale_sigmas, scale_ctx.padded_ncol, scale_kernels);
 
   FD_LOG_DEBUG("run_wscms: built {} scale kernels in freq domain ({}x{}, {} floats total)", n_scales,
-               scale_ctx.freq_nrow, scale_ctx.freq_ncol, freq_scales_total);
+               scale_ctx.freq_nrow, scale_ctx.freq_ncol, scale_kernels.size());
 
   auto scales_x_dirty = stream_a.alloc_mdcontainer_async<float>(n_scales, dirty_nrows, dirty_ncols);
 
