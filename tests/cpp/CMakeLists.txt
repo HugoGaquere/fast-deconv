@@ -13,6 +13,7 @@ endforeach()
 add_executable(fast_deconv_unit_tests
   test_main.cpp
   test_convergence.cpp
+  test_resources.cu
   test_utils.cu
   test_fft.cu
   test_linalg.cu
