@@ -300,49 +300,4 @@ void convolve_psfs_with_scales_async(const algorithm::wscms::psf_convolve_ctx& c
   }
 }
 
-std::vector<float> compute_scale_gains(const core::resources& resources, const core::stream_resources& stream_res,
-                                       const float* conv_psfs, const float* weights, int n_facets, int nch,
-                                       int psf_npix, int scale_idx, float gamma)
-{
-  if (scale_idx == 0) {
-    return std::vector<float>(n_facets, gamma);
-  }
-
-  const auto cuda_stream = stream_res.cuda_stream;
-  const int facet_stride = nch * psf_npix;
-
-  // Scratch buffer for the weighted mean PSF of each facet
-  float* wmean = resources.alloc_async<float>(psf_npix, stream_res);
-
-  // Per-facet max values on device (bulk-copied to host after the loop)
-  float* d_maxes = resources.alloc_async<float>(n_facets, stream_res);
-
-  // CUB DeviceReduce::Max temp storage (query once, reuse across facets)
-  size_t temp_bytes = 0;
-  cub::DeviceReduce::Max(nullptr, temp_bytes, wmean, d_maxes, psf_npix, cuda_stream);
-  char* d_temp = resources.alloc_async<char>(temp_bytes, stream_res);
-
-  for (int f = 0; f < n_facets; f++) {
-    // 1. Weighted mean over channels
-    linalg::weighted_sum_async(stream_res, conv_psfs + f * facet_stride, weights, wmean, nch, psf_npix);
-
-    // 2. Max reduction -> d_maxes[f]
-    cub::DeviceReduce::Max(d_temp, temp_bytes, wmean, d_maxes + f, psf_npix, cuda_stream);
-  }
-
-  // Bulk copy all max values to host and compute gains
-  std::vector<float> gains(n_facets);
-  CHECK_CUDA(cudaMemcpyAsync(gains.data(), d_maxes, sizeof(float) * n_facets, cudaMemcpyDeviceToHost, cuda_stream));
-  stream_res.sync();
-  resources.free_async(d_temp, stream_res);
-  resources.free_async(d_maxes, stream_res);
-  resources.free_async(wmean, stream_res);
-
-  for (int f = 0; f < n_facets; f++) {
-    gains[f] = gamma / gains[f];
-  }
-
-  return gains;
-}
-
 }  // namespace fast_deconv::scale
