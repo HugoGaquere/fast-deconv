@@ -80,8 +80,6 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_ctx.input_nrow,
                                       psf_ctx.input_ncol));
 
-  // exec_resources.print_memory_usage("init/entry");
-
   FD_NVTX_MARK("init/queue_residual_and_kernels");
   // Initial mean residual: owning buffer plus a mutable view that gets
   // re-seated onto scale slices during the loop.
@@ -130,9 +128,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   auto coeffs_per_chan = stream_b.alloc_mdcontainer_async<float>(n_freq);
 
   // Setup workspace for repeated argmax over mean_residual
-  // exec_resources.print_memory_usage("init/before peak_ws");
   matrix::argmax_workspace peak_ws{stream_a, mean_residual_n_items};
-  // exec_resources.print_memory_usage("init/after peak_ws");
 
   // Tiled argmax workspace for the clean loop: after a clean subtraction only the
   // conv2_psf footprint is dirtied, so we recompute just the touched tiles instead
@@ -150,11 +146,9 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
       stream_a.alloc_mdcontainer_async<float>(n_scales, n_facets, psf_ctx.input_nrow, psf_ctx.input_ncol);
   scale::convolve_psfs_with_scales_async(psf_ctx, ws.raw_psfs, ws.scale_sigmas, weights_freq, all_conv_psfs,
                                          all_conv2_psfs);
-  // exec_resources.print_memory_usage("init/after convolve_psfs_with_scales");
   FD_NVTX_MARK("init/precompute_psfs end");
   FD_NVTX_MARK("init/compute_gains begin");
   auto all_gains = common::compute_all_gains_batched(stream_a, all_conv_psfs, weights_freq, p.gamma);
-  // exec_resources.print_memory_usage("init/after compute_all_gains_batched");
   FD_NVTX_MARK("init/compute_gains end");
 
   // Loop-only buffers
@@ -344,9 +338,6 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   ws.historical_peak_coords.insert(ws.historical_peak_coords.end(), result.peak_coords.begin(),
                                    result.peak_coords.end());
   ws.historical_scales.insert(ws.historical_scales.end(), result.scales.begin(), result.scales.end());
-
-  // print used memory
-  // exec_resources.print_memory_usage("End");
 
   return result;
 }
