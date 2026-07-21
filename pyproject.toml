@@ -1,6 +1,6 @@
 [project]
 name = "fast-deconv"
-version = "0.5.0"
+version = "0.6.0"
 description = "GPU-accelerated deconvolution for radio astronomy"
 readme = "README.md"
 authors = [
