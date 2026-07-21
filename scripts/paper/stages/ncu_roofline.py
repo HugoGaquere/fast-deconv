@@ -1,7 +1,7 @@
 """Stage 4 -- hardware efficiency of the dominant kernels via Nsight Compute.
 
 Profiles a short iteration-bounded run of the first real-data cycle
-(example_wscms on a FastDDFacet dump, capped to one scale selection x a few clean
+(example_ddmsc on a FastDDFacet dump, capped to one scale selection x a few clean
 iters) with an explicit metric list (much faster than --set full), aggregates per
 kernel, and reports achieved DRAM bandwidth and %-of-peak DRAM/SM throughput. A
 memory-bound kernel near the DRAM roof is the no-baseline-needed argument that the
@@ -156,10 +156,10 @@ def run(ctx: Ctx) -> dict:
                         "roofline data")
     if not ctx.dump_dir:
         raise SkipStage("no --dump-dir given -- the roofline profiles the first "
-                        "real-data cycle (example_wscms on a FastDDFacet dump)")
+                        "real-data cycle (example_ddmsc on a FastDDFacet dump)")
     cfg = ctx.preset["ncu"]
     out = ctx.stage_dir("ncu")
-    rep = out / "wscms"
+    rep = out / "ddmsc"
 
     # Profile every launch of the iteration-bounded run (one scale selection x a
     # few clean iters) so the clean-loop kernels are covered, not just the opening
@@ -178,7 +178,7 @@ def run(ctx: Ctx) -> dict:
         "--replay-mode", "application",
         f"--metrics={','.join(METRICS)}",
         *launch_cap,
-        ctx.binary("example_wscms"),
+        ctx.binary("example_ddmsc"),
         ctx.dump_dir,
         f"--cycles={first_cycle(ctx.cycles)}",
         f"--device={ctx.device}",
@@ -497,7 +497,7 @@ def analyze(raw: str, out, nsys_csv=None) -> dict:
                 f"{s:.1f}%", va="center", fontsize=8)
     ax.set_yticks(y, pn)
     ax.set_xlabel("share of DRAM bytes moved [%]")
-    ax.set_title("WSCMS DRAM traffic by phase")
+    ax.set_title("DDMSC DRAM traffic by phase")
     plots.save_fig(fig, out / "dram_traffic_by_phase")
 
     # --- achieved DRAM bandwidth vs the absolute hardware roof: the % of peak in

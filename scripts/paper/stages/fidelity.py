@@ -1,6 +1,6 @@
 """Stage 6 -- numerical fidelity: GPU output vs the DDFacet reference.
 
-Compares the GPU outputs written by the realdata stage (example_wscms
+Compares the GPU outputs written by the realdata stage (example_ddmsc
 --dump-result) against reference minor-cycle outputs exported from DDFacet,
 per cycle: component positions and gains, plus residual-image RMS / max-abs
 differences, with a GPU/reference/difference image figure.

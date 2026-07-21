@@ -197,7 +197,7 @@ TEST_F(MatrixReductions, ComputeStatsAsyncLeavesResultOnDevice)
   matrix::compute_stats_async(ws, img_view, mask_view);
 
   matrix::stats_acc acc{};
-  CHECK_CUDA(cudaMemcpyAsync(&acc, ws.d_state, sizeof(acc), cudaMemcpyDeviceToHost, sr.cuda_stream));
+  CHECK_CUDA(cudaMemcpyAsync(&acc, ws.d_state.data_handle(), sizeof(acc), cudaMemcpyDeviceToHost, sr.cuda_stream));
   sr.sync();
 
   ASSERT_EQ(acc.count, kNpix);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-command data collection for the SPIE paper (GPU WSCMS deconvolution).
+"""One-command data collection for the SPIE paper (GPU DDMSC deconvolution).
 
 Run everything this machine can produce into a self-describing bundle:
 
@@ -43,7 +43,7 @@ PRESETS = {
             runs=10, warmup=2),
         "argmax": dict(size=20000, tiles=[16, 32, 64, 128, 256, 512, 1024, 2048],
                        psfs=[256, 512, 1024, 1700], reps=50, warmup=5),
-        # nsys/ncu profile the first real-data cycle (example_wscms on --dump-dir),
+        # nsys/ncu profile the first real-data cycle (example_ddmsc on --dump-dir),
         # not the synthetic bench. nsys runs the full cycle so its time-share is
         # representative (capping inner iters would re-bias the FFT/clean ratio);
         # ncu bounds the run to 1 scale selection x 5 clean iters -- enough to
@@ -280,7 +280,7 @@ def main() -> int:
     rp.add_argument("--dump-dir", default="",
                     help="FastDDFacet dump_ref export (enables the realdata stage)")
     rp.add_argument("--cycles", default="1",
-                    help="cycle spec for example_wscms, e.g. '1,2,4-6'")
+                    help="cycle spec for example_ddmsc, e.g. '1,2,4-6'")
     rp.add_argument("--ref-dir", default="",
                     help="DDFacet reference outputs (enables the fidelity stage)")
     rp.add_argument("--dump-gpu-output", action="store_true",

@@ -6,6 +6,6 @@ namespace py = pybind11;
 
 PYBIND11_MODULE(_fast_deconv, m)
 {
-  m.doc() = "fast_deconv wscms module";
-  fast_deconv::python::bind_wscms(m);
+  m.doc() = "fast_deconv ddmsc module";
+  fast_deconv::python::bind_ddmsc(m);
 }
