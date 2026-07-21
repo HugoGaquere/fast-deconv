@@ -112,7 +112,7 @@ def first_cycle(spec: str) -> int:
 
 
 def iteration_flags(cfg: dict) -> list[str]:
-    """example_wscms --max-clean-iter/--max-iter flags from a stage cfg. Omitted
+    """example_ddmsc --max-clean-iter/--max-iter flags from a stage cfg. Omitted
     when the cfg does not set them, so the dump's full schedule runs."""
     flags = []
     if cfg.get("max_clean_iter"):

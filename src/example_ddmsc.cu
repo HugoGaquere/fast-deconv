@@ -1,16 +1,16 @@
-/// Example: launch run_wscms_cycles with real data dumped from DDFacet.
+/// Example: launch run_ddmsc_cycles with real data dumped from DDFacet.
 ///
-/// Usage:  example_wscms <dump_dir> [--cycles=LIST] [--device=N] [--history=DIR] [--csv=PATH]
+/// Usage:  example_ddmsc <dump_dir> [--cycles=LIST] [--device=N] [--history=DIR] [--csv=PATH]
 ///
 /// `--cycles` selects which `cycle_<N>/` subdirectories to load and run, as
 /// a comma-separated list with optional ranges (e.g. `1,2,4-6`). Cycles
 /// execute in the order given on a single shared context: the auto-mask
-/// history accumulated by WSCMS carries over between cycles, mirroring the
+/// history accumulated by DDMSC carries over between cycles, mirroring the
 /// real DDFacet flow. Default: `1`. The deprecated `--cycle=N` flag is
 /// accepted as a synonym for a single-cycle spec.
 /// `--device` selects the CUDA device (default: 0). The example calls
 /// cudaSetDevice on that device before any cudaMalloc/cudaMemcpy so the host
-/// uploads target the right GPU; wscms::context propagates the same id to
+/// uploads target the right GPU; ddmsc::context propagates the same id to
 /// core::resources and its streams, which are bound to that device.
 /// `--csv` writes per-cycle stats (timing, component count, etc.) to a CSV
 /// file. Use scripts/plot_cycle_timing.py to chart the output.
@@ -26,7 +26,7 @@
 /// The dump directory must contain `init/` and `cycle_<N>/` subdirectories
 /// produced by FastDDFacet's dump_ref utility (set DUMP_REF=<dir> when
 /// running DDF.py). `init/` holds the one-time setup (raw PSFs, scale
-/// kernels, Wscms ctor inputs, auto-masking thresholds). `cycle_<N>/` holds
+/// kernels, Ddmsc ctor inputs, auto-masking thresholds). `cycle_<N>/` holds
 /// the per-cycle inputs and runtime parameters (dirty, jones_norm,
 /// weights, mask, stop limits, etc.).
 
@@ -36,9 +36,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <fast_deconv/algorithm/ddmsc.hpp>
+#include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
-#include <fast_deconv/algorithm/wscms.hpp>
-#include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/util/dump.hpp>
@@ -53,7 +53,7 @@
 
 namespace core = fast_deconv::core;
 namespace scale = fast_deconv::scale;
-namespace wscms = fast_deconv::algorithm::wscms;
+namespace ddmsc = fast_deconv::algorithm::ddmsc;
 
 /// Helper: allocate device memory and copy host data into it. Exits with a
 /// diagnostic on failure -- a silent OOM here would feed garbage pointers into
@@ -167,7 +167,7 @@ int main(int argc, char** argv)
   }
 
   // Bind this thread to the requested device so the raw cudaMalloc/cudaMemcpy
-  // calls below target it. wscms::context will pass the same id down to
+  // calls below target it. ddmsc::context will pass the same id down to
   // core::resources and its streams, which are bound to the same device.
   cudaError_t set_err = cudaSetDevice(device_id);
   if (set_err != cudaSuccess) {
@@ -244,12 +244,12 @@ int main(int argc, char** argv)
 
   const float fft_padding = npy_fft_padding.scalar<float>();
 
-  // ----- Build WSCMS context (resources + workspace + FFT plans) -----
-  wscms::context ctx(device_id, raw_psfs, xdes, mask0, scale_sigmas, scale_bias, map_pixel_facet, nrow, ncol, n_freq,
+  // ----- Build DDMSC context (resources + workspace + FFT plans) -----
+  ddmsc::context ctx(device_id, raw_psfs, xdes, mask0, scale_sigmas, scale_bias, map_pixel_facet, nrow, ncol, n_freq,
                      fft_padding);
 
   // ----- Optionally seed auto-mask history from a previous DicoModel -----
-  // Seeded once before the cycle loop; WSCMS appends to this history during
+  // Seeded once before the cycle loop; DDMSC appends to this history during
   // each cycle, so subsequent cycles see the accumulated components.
   if (!history_dir.empty()) {
     auto npy_hist_coords = npy::load_npy(history_dir + "/historical_peak_coords.npy");
@@ -336,7 +336,7 @@ int main(int argc, char** argv)
     const bool is_last_cycle = idx + 1 == cycle_ids.size();
     const bool force_auto_mask = npy_force_auto_mask.scalar<bool>() || (force_auto_mask_last && is_last_cycle);
 
-    wscms::params params{
+    ddmsc::params params{
         .max_iteration = npy_max_iteration.scalar<int>(),
         .divergence_factor = npy_divergence.scalar<float>(),
         .flux_threshold = npy_flux_threshold.scalar<float>(),
@@ -366,11 +366,11 @@ int main(int argc, char** argv)
       printf("  iteration overrides: max_iteration=%d max_clean_iteration=%d\n", params.max_iteration,
              params.max_clean_iteration);
 
-    printf("Running WSCMS on %dx%d image, mask: %dx%d, %d scales, %d freq, %d facets...\n", nrow, ncol, mask_nrow,
+    printf("Running DDMSC on %dx%d image, mask: %dx%d, %d scales, %d freq, %d facets...\n", nrow, ncol, mask_nrow,
            mask_ncol, n_scales, n_freq, n_facet);
 
     const auto t_start = std::chrono::steady_clock::now();
-    wscms::wscms_result result = wscms::run_wscms_cycles(ctx, params, dirty, jones_norm, weights_freq);
+    ddmsc::ddmsc_result result = ddmsc::run_ddmsc_cycles(ctx, params, dirty, jones_norm, weights_freq);
     // Checked sync: an async kernel failure must not be recorded as a valid
     // (and absurdly fast) cycle timing.
     CHECK_CUDA(cudaDeviceSynchronize());

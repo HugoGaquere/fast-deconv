@@ -100,7 +100,7 @@ void make_gaussian_kernels_async(const core::stream_resources& stream_res, core:
       sigmas.data_handle(), scale_nrow, scale_ncol_half, scale_ncol_full, n_scales, scales.data_handle());
 }
 
-void convolve_with_scales(const algorithm::wscms::scale_convolve_ctx& ctx, core::device_span2d<float> dirty,
+void convolve_with_scales(const algorithm::ddmsc::scale_convolve_ctx& ctx, core::device_span2d<float> dirty,
                           core::device_span3d<float> scales, core::device_span3d<float> out_scaled_dirty)
 {
   const core::stream_resources& stream_res = ctx.stream_res;  // plans run on this stream
@@ -127,7 +127,7 @@ void convolve_with_scales(const algorithm::wscms::scale_convolve_ctx& ctx, core:
     throw std::invalid_argument("convolve_with_scales: (n_scales - 1) must be a multiple of backward_batch_size");
   }
 
-  // Plans were bound to their stream at construction (the wscms context's
+  // Plans were bound to their stream at construction (the ddmsc context's
   // compute stream); temporaries are stream-ordered on that same stream.
   auto dirty_padded = stream_res.alloc_mdcontainer_async<float>(img_padded_total);
   auto dirty_freq = stream_res.alloc_mdcontainer_async<complex_type>(freq_total);
@@ -210,7 +210,7 @@ int scale_selection(const core::stream_resources& stream_res, core::device_span3
   return best_scale;
 }
 
-void convolve_psfs_with_scale_async(const algorithm::wscms::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
+void convolve_psfs_with_scale_async(const algorithm::ddmsc::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
                                     core::device_vect<float> d_sigma, int scale_idx, core::device_vect<float> weights,
                                     core::device_span4d<float> out_conv_psf, core::device_span3d<float> out_conv2_mean)
 {
@@ -287,7 +287,7 @@ void convolve_psfs_with_scale_async(const algorithm::wscms::psf_convolve_ctx& ct
   }
 }
 
-void convolve_psfs_with_scales_async(const algorithm::wscms::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
+void convolve_psfs_with_scales_async(const algorithm::ddmsc::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
                                      core::device_vect<float> d_sigmas, core::device_vect<float> weights,
                                      core::device_span5d<float> out_conv_psf, core::device_span4d<float> out_conv2_mean)
 {

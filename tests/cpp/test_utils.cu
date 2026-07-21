@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <fast_deconv/algorithm/wscms_types.hpp>
+#include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/util/utils.hpp>
 #include <utility>
 #include <vector>
@@ -9,7 +9,7 @@
 // Pure index math and host-side bookkeeping — no GPU work.
 
 namespace util = fast_deconv::util;
-namespace wscms = fast_deconv::algorithm::wscms;
+namespace ddmsc = fast_deconv::algorithm::ddmsc;
 
 // ============================================================================
 // util::unravel_index_2D — row-major flat index → (y, x)
@@ -31,12 +31,12 @@ TEST(UnravelIndex2D, CornersAndInteriorOnNonSquareGrid)
 }
 
 // ============================================================================
-// wscms_result::add_component — parallel-array bookkeeping
+// ddmsc_result::add_component — parallel-array bookkeeping
 // ============================================================================
 
-TEST(WscmsResult, AddComponentKeepsParallelArraysInSync)
+TEST(DdmscResult, AddComponentKeepsParallelArraysInSync)
 {
-  wscms::wscms_result result(/*max_iter=*/10, /*coeff_order=*/2);
+  ddmsc::ddmsc_result result(/*max_iter=*/10, /*coeff_order=*/2);
   EXPECT_TRUE(result.peak_coords.empty());
   EXPECT_TRUE(result.scales.empty());
   EXPECT_TRUE(result.gains.empty());

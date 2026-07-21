@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Run the WSCMS benchmark sweep and generate marginalized plots.
+# Run the DDMSC benchmark sweep and generate marginalized plots.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 
-bin="$repo_root/build/Release/bench_wscms"
+bin="$repo_root/build/Release/bench_ddmsc"
 python="$repo_root/.venv/bin/python"
 plot="$script_dir/plot_bench.py"
 

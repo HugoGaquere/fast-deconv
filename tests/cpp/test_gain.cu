@@ -66,7 +66,7 @@ TEST_F(GainBatched, PerFacetGainMatchesWeightedMeanMaxOracle)
 
 // compute_all_gains_batched: scale 0 short-circuits to gamma; other scales go
 // through the per-facet oracle. The output ordering gains[s * n_facets + f] is
-// what run_wscms_cycles indexes into — pin it.
+// what run_ddmsc_cycles indexes into — pin it.
 TEST_F(GainBatched, AllGainsScaleZeroFastPathAndScaleMajorOrdering)
 {
   const int n_scales = 3;
