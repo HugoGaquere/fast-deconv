@@ -6,7 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <fast_deconv/algorithm/ddmsc.hpp>
+#include <fast_deconv/algorithm/ddmsc_cycles.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fstream>

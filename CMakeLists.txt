@@ -87,8 +87,8 @@ endforeach()
 
 add_library(fast_deconv STATIC
         src/fast_deconv/algorithm/scales.cu
+        src/fast_deconv/algorithm/ddmsc_cycles.cu
         src/fast_deconv/algorithm/ddmsc.cu
-        src/fast_deconv/algorithm/ddmsc_class.cu
         src/fast_deconv/common/mask.cu
         src/fast_deconv/common/gain.cu
         src/fast_deconv/common/clean.cu

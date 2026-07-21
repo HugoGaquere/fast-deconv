@@ -1,7 +1,7 @@
 #include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
-#include <fast_deconv/algorithm/ddmsc_class.hpp>
+#include <fast_deconv/algorithm/ddmsc.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <memory>

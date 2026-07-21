@@ -53,7 +53,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fast_deconv/algorithm/ddmsc.hpp>
+#include <fast_deconv/algorithm/ddmsc_cycles.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/core/logger.hpp>
 #include <fast_deconv/core/span_types.hpp>
