@@ -36,7 +36,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <fast_deconv/algorithm/ddmsc.hpp>
+#include <fast_deconv/algorithm/ddmsc_cycles.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/core/resources.hpp>
