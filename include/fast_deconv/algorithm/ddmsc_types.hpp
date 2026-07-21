@@ -10,7 +10,7 @@
 
 #include "fast_deconv/linalg/fft.hpp"
 
-namespace fast_deconv::algorithm::wscms {
+namespace fast_deconv::algorithm::ddmsc {
 
 static constexpr int MAX_SPECTRAL_ORDER = 4;
 
@@ -65,7 +65,7 @@ struct workspace {
   core::host_vect<float> scale_bias;
   core::host_span2d<int> map_pixel_facet;
 
-  // Component history accumulated across run_wscms_cycles calls — feeds the
+  // Component history accumulated across run_ddmsc_cycles calls — feeds the
   // auto-mask so neighborhoods of every previously-cleaned component
   // (across all major cycles) stay valid.
   std::vector<std::pair<int, int>> historical_peak_coords;
@@ -108,7 +108,7 @@ struct context {
   core::resources exec_resources;
   // Named streams owned by the context. compute_stream drives the whole
   // convolution path: both FFT contexts bind their plans to it, and
-  // run_wscms_cycles uses it as its main stream so the plans execute on the
+  // run_ddmsc_cycles uses it as its main stream so the plans execute on the
   // same stream as the surrounding kernels. aux_stream carries the clean-loop
   // per-channel fit/subtract path that overlaps with the main stream.
   core::stream_resources compute_stream;
@@ -117,7 +117,7 @@ struct context {
   // sequentially on compute_stream, so one buffer of the max required size
   // suffices. Owned here, freed on compute_stream at destruction.
   void* fft_work_area = nullptr;
-  wscms::workspace workspace;
+  ddmsc::workspace workspace;
 
   /**
    * @brief Build the GPU memory pool and streams, the cuFFT plans for scale
@@ -171,7 +171,7 @@ struct context {
   }
 };
 
-struct wscms_result {
+struct ddmsc_result {
   std::vector<std::pair<int, int>> peak_coords;
   std::vector<int> scales;
   std::vector<float> gains;
@@ -180,7 +180,7 @@ struct wscms_result {
   float stop_flux = 0.0f;    // composed stop-flux threshold used for this call (max of the four limits)
   int total_iterations = 0;  // total minor iterations consumed across all outer cycles
 
-  wscms_result(int max_iter, int coeff_order)
+  ddmsc_result(int max_iter, int coeff_order)
   {
     peak_coords.reserve(max_iter);
     scales.reserve(max_iter);
@@ -210,4 +210,4 @@ struct wscms_result {
   };
 };
 
-}  // namespace fast_deconv::algorithm::wscms
+}  // namespace fast_deconv::algorithm::ddmsc

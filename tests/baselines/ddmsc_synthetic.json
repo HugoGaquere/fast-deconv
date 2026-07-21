@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "note": "regenerate with FAST_DECONV_UPDATE_BASELINE=1; tolerances live in test_wscms_nonreg.cu",
+  "note": "regenerate with FAST_DECONV_UPDATE_BASELINE=1; tolerances live in test_ddmsc_nonreg.cu",
   "config": {
     "seed": 42,
     "nrow": 256,

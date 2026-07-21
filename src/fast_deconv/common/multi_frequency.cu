@@ -10,9 +10,8 @@ namespace fast_deconv::kernel {
 // xdes row-major:       [n_freq, n_order]
 // weights row-major:    [n_freq]
 // A row-major:          [n_freq, n_order]
-__global__ void compute_spectral_matrix_kernel(float* SAX, float* A, const float* xdes,
-                                               const float* jones_norm, const float* weights,
-                                               int n_freq, int n_order, int jn_freq_stride,
+__global__ void compute_spectral_matrix_kernel(float* SAX, float* A, const float* xdes, const float* jones_norm,
+                                               const float* weights, int n_freq, int n_order, int jn_freq_stride,
                                                int jn_peak_offset)
 {
   const int n = n_freq * n_order;
@@ -33,11 +32,9 @@ __global__ void compute_spectral_matrix_kernel(float* SAX, float* A, const float
 // A_pinv: col-major [n_order, n_freq]  (from compute_pseudo_inverse)
 // A:      row-major [n_freq, n_order]  (from compute_spectral_matrix_kernel)
 constexpr int SPECTRAL_BLOCK_SIZE = 128;
-__global__ void compute_spectral_coeffs_kernel(float* compact_out, float* per_chan_out,
-                                               const float* dirty, const float* weights,
-                                               const float* A_pinv, const float* SAX, int n_freq,
-                                               int n_order, int dirty_freq_stride,
-                                               int dirty_peak_offset)
+__global__ void compute_spectral_coeffs_kernel(float* compact_out, float* per_chan_out, const float* dirty,
+                                               const float* weights, const float* A_pinv, const float* SAX, int n_freq,
+                                               int n_order, int dirty_freq_stride, int dirty_peak_offset)
 {
   extern __shared__ float smem[];
   float* s_wy = smem;                // [n_freq]
@@ -80,45 +77,37 @@ __global__ void compute_spectral_coeffs_kernel(float* compact_out, float* per_ch
 
 namespace fast_deconv::multi_frequency {
 
-void fit_coefficients(const core::stream_resources& stream_res,
-                      const core::device_span3d<float> residual,
-                      const core::device_span3d<float> jones_norm,
-                      const core::device_vect<float> weights_freq,
+void fit_coefficients(const core::stream_resources& stream_res, const core::device_span3d<float> residual,
+                      const core::device_span3d<float> jones_norm, const core::device_vect<float> weights_freq,
                       const core::device_span2d<float> xdes, const std::pair<int, int> peak_coords,
-                      core::device_vect<float> compact_coeffs_out,
-                      core::device_vect<float> coeffs_per_chan_out)
+                      core::device_vect<float> compact_coeffs_out, core::device_vect<float> coeffs_per_chan_out)
 {
   const int n_freq = xdes.extent(0);
   const int n_order = xdes.extent(1);
   const auto [peak_row, peak_col] = peak_coords;
 
-  float* d_SAX = stream_res.alloc_async<float>(n_freq * n_order);
-  float* d_A = stream_res.alloc_async<float>(n_freq * n_order);
-  float* d_A_pinv = stream_res.alloc_async<float>(n_order * n_freq);
+  auto d_SAX = stream_res.alloc_mdcontainer_async<float>(n_freq * n_order);
+  auto d_A = stream_res.alloc_mdcontainer_async<float>(n_freq * n_order);
+  auto d_A_pinv = stream_res.alloc_mdcontainer_async<float>(n_order * n_freq);
 
   //   1. SAX = sqrt(jones_norm[f, peak]) * xdes[f, o],  A = sqrt(w[f]) * SAX
   const int jn_freq_stride = jones_norm.extent(1) * jones_norm.extent(2);
   const int jn_peak_offset = peak_row * jones_norm.extent(2) + peak_col;
   kernel::compute_spectral_matrix_kernel<<<1, n_freq * n_order, 0, stream_res.cuda_stream>>>(
-      d_SAX, d_A, xdes.data_handle(), jones_norm.data_handle(), weights_freq.data_handle(), n_freq,
-      n_order, jn_freq_stride, jn_peak_offset);
+      d_SAX.data_handle(), d_A.data_handle(), xdes.data_handle(), jones_norm.data_handle(), weights_freq.data_handle(),
+      n_freq, n_order, jn_freq_stride, jn_peak_offset);
 
   //   2. A_pinv = inv(A^T A) @ A^T
-  linalg::compute_pseudo_inverse(stream_res, d_A, d_A_pinv, n_freq, n_order);
+  linalg::compute_pseudo_inverse(stream_res, d_A.data_handle(), d_A_pinv.data_handle(), n_freq, n_order);
 
   //   3. wy = sqrt_w * dirty[f, peak]  →  compact = A_pinv @ wy  →  per_chan = SAX @ compact
   const int dirty_freq_stride = residual.extent(1) * residual.extent(2);
   const int dirty_peak_offset = peak_row * residual.extent(2) + peak_col;
   size_t smem_bytes = (n_freq + n_order) * sizeof(float);
-  kernel::compute_spectral_coeffs_kernel<<<1, kernel::SPECTRAL_BLOCK_SIZE, smem_bytes,
-                                           stream_res.cuda_stream>>>(
+  kernel::compute_spectral_coeffs_kernel<<<1, kernel::SPECTRAL_BLOCK_SIZE, smem_bytes, stream_res.cuda_stream>>>(
       compact_coeffs_out.data_handle(), coeffs_per_chan_out.data_handle(), residual.data_handle(),
-      weights_freq.data_handle(), d_A_pinv, d_SAX, n_freq, n_order, dirty_freq_stride,
+      weights_freq.data_handle(), d_A_pinv.data_handle(), d_SAX.data_handle(), n_freq, n_order, dirty_freq_stride,
       dirty_peak_offset);
-
-  stream_res.free_async(d_A_pinv);
-  stream_res.free_async(d_A);
-  stream_res.free_async(d_SAX);
 }
 
 }  // namespace fast_deconv::multi_frequency

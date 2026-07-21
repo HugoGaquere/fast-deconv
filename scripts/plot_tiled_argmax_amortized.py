@@ -2,7 +2,7 @@
 """Amortized tiled-argmax analysis: effective speedup vs reseed interval N.
 
 The incremental path needs a one-time full tiled pass to seed the per-tile cache,
-then handles N dirty-footprint updates before the cache must be rebuilt (in WSCMS
+then handles N dirty-footprint updates before the cache must be rebuilt (in DDMSC
 a scale switch dirties the whole image, forcing a full recompute). So per argmax
 call the tiled approach costs, amortized over a block of N iterations:
 

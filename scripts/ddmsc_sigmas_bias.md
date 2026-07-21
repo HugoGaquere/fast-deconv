@@ -1,10 +1,10 @@
-# WSCMS — How DDFacet derives `sigmas` and `bias`
+# DDMSC — How DDFacet derives `sigmas` and `bias`
 
-Reference: `DDFacet/Imager/WSCMS/ClassScaleMachine.py`.
+Reference: `DDFacet/Imager/DDMSC/ClassScaleMachine.py`.
 
 Both arrays have shape `(Nscales,)`. They are derived from `alphas` (scale extent
 in pixels) plus the `MultiScaleBias` config knob. `alphas` itself is either
-user-supplied (`WSCMS.Scales`) or auto-derived from imaging parameters.
+user-supplied (`DDMSC.Scales`) or auto-derived from imaging parameters.
 
 ---
 
@@ -15,17 +15,17 @@ Source: `ClassScaleMachine.set_scales()` (lines 366–417).
 ### User-supplied path
 
 ```python
-alphas = np.asarray(GD["WSCMS"]["Scales"], dtype=float)
+alphas = np.asarray(GD["DDMSC"]["Scales"], dtype=float)
 Nscales = alphas.size
 ```
 
-### Auto-derivation path (`WSCMS.Scales is None`)
+### Auto-derivation path (`DDMSC.Scales is None`)
 
 Inputs:
 - `MaxBaseline` (max baseline length, in wavelengths at max frequency, passed to `Init()`)
 - `Cell` from `GD["Image"]["Cell"]` — either a scalar or a `(cell_x, cell_y)` tuple, in arcsec
 - `Npix_x, Npix_y` — image dimensions
-- `MaxScale` from `GD["WSCMS"]["MaxScale"]` — defaults to `max(Npix_x, Npix_y) // 4`
+- `MaxScale` from `GD["DDMSC"]["MaxScale"]` — defaults to `max(Npix_x, Npix_y) // 4`
 
 ```python
 min_beam       = 1.0 / MaxBaseline                              # rad
@@ -70,7 +70,7 @@ for i in range(Nscales):
 ```
 
 Dumped to `.npy` as `float32` via
-`ClassImageDeconvMachineWSCMS._init_gpu_subminorloop`.
+`ClassImageDeconvMachineDDMSC._init_gpu_subminorloop`.
 
 ---
 
@@ -78,13 +78,13 @@ Dumped to `.npy` as `float32` via
 
 Source: `ClassScaleMachine.set_bias()` (lines 487–498). Inputs:
 - `alphas` (computed above)
-- `MultiScaleBias` = `GD["WSCMS"]["MultiScaleBias"]` (called `beta` below)
+- `MultiScaleBias` = `GD["DDMSC"]["MultiScaleBias"]` (called `beta` below)
 
 Hardcoded constant: `first_auto_scale_size = beam_size_in_pixels * 2 = 8.0`.
 
 ```python
 bias    = ones(Nscales, dtype=float64)
-beta    = GD["WSCMS"]["MultiScaleBias"]
+beta    = GD["DDMSC"]["MultiScaleBias"]
 # bias[0] stays 1.0 (delta scale)
 for i in range(1, Nscales):
     bias[i] = beta ** (-log2(alphas[i] / 8.0))

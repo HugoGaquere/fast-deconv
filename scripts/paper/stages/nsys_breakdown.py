@@ -1,6 +1,6 @@
 """Stage 3 -- where the time goes: nsys profile of the first real-data cycle.
 
-Profiles the first cycle of a real deconvolution (example_wscms on a
+Profiles the first cycle of a real deconvolution (example_ddmsc on a
 FastDDFacet dump) under Nsight Systems, exports the per-kernel GPU time
 summary, maps every kernel to an algorithm phase by name, and renders the
 phase-share breakdown of total GPU time. Real data is used rather than the
@@ -101,15 +101,15 @@ def run(ctx: Ctx) -> dict:
                         "the phase breakdown")
     if not ctx.dump_dir:
         raise SkipStage("no --dump-dir given -- the phase breakdown profiles the "
-                        "first real-data cycle (example_wscms on a FastDDFacet dump)")
+                        "first real-data cycle (example_ddmsc on a FastDDFacet dump)")
     cfg = ctx.preset["nsys"]
     out = ctx.stage_dir("nsys")
-    rep = out / "wscms"
+    rep = out / "ddmsc"
 
     run_cmd(ctx, [
         "nsys", "profile", "--trace=cuda,nvtx", "--force-overwrite=true",
         f"--output={rep}",
-        ctx.binary("example_wscms"),
+        ctx.binary("example_ddmsc"),
         ctx.dump_dir,
         f"--cycles={first_cycle(ctx.cycles)}",
         f"--device={ctx.device}",
@@ -168,7 +168,7 @@ def analyze(rows: list[dict], out) -> dict:
          for k in top],
         out / "top_kernels", title="Top kernels by GPU time")
 
-    _stacked_share_bar(plt, phases, total_ms, "WSCMS minor-cycle GPU time by phase",
+    _stacked_share_bar(plt, phases, total_ms, "DDMSC minor-cycle GPU time by phase",
                        out / "phase_breakdown", label_floor=4.0)
 
     # Same data without the phase bucketing: per-kernel shares, with template
@@ -183,7 +183,7 @@ def analyze(rows: list[dict], out) -> dict:
     other = sum(ms for _, ms in ranked[12:])
     if other > 0:
         top_k = top_k + [("Other", other)]
-    _stacked_share_bar(plt, top_k, total_ms, "WSCMS minor-cycle GPU time by kernel",
+    _stacked_share_bar(plt, top_k, total_ms, "DDMSC minor-cycle GPU time by kernel",
                        out / "kernel_breakdown", label_floor=3.0)
 
     return {

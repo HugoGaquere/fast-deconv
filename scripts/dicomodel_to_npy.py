@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert a DDFacet WSCMS .DicoModel pickle to .npy history files.
+"""Convert a DDFacet DDMSC .DicoModel pickle to .npy history files.
 
 Walks DicoSMStacked["Comp"][iScale][(x, y)] and writes:
   historical_peak_coords.npy   (N, 2) int32   -- (row, col) per component

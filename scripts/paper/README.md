@@ -1,7 +1,7 @@
 # Paper-data harness
 
 One-command collection of every measurement for the SPIE paper results section
-(GPU WSCMS deconvolution). Designed to be carried to any GPU machine: build the
+(GPU DDMSC deconvolution). Designed to be carried to any GPU machine: build the
 repo, run one command, get back a portable, self-describing bundle directory.
 Bundles from several machines are then merged into the paper figures/tables
 with a second command.
@@ -12,7 +12,7 @@ absolute ms per minor iteration).
 
 ## Prerequisites
 
-- Built binaries (`bench_wscms`, `bench_tiled_argmax`, `example_wscms`):
+- Built binaries (`bench_ddmsc`, `bench_tiled_argmax`, `example_ddmsc`):
 
   ```bash
   conan install . --output-folder=build/Release --build=missing -s build_type=Release
@@ -83,11 +83,11 @@ is `n_freq × nrow × ncol` float32, i.e. multi-GiB on survey-size images).
 
 | stage      | tool               | output (per bundle)                                       | paper use |
 |------------|--------------------|-----------------------------------------------------------|-----------|
-| `scaling`  | `bench_wscms`      | `scaling/bench.csv`, scaling panels, fitted exponents     | wall time / memory ∝ N^p, throughput, parameter sensitivity |
+| `scaling`  | `bench_ddmsc`      | `scaling/bench.csv`, scaling panels, fitted exponents     | wall time / memory ∝ N^p, throughput, parameter sensitivity |
 | `argmax`   | `bench_tiled_argmax` | tile sweep, speedup heatmap, amortized-speedup curve    | optimization study |
-| `nsys`     | Nsight Systems on `example_wscms` | per-kernel GPU time, phase-share breakdown of the first real-data cycle | where the time goes (Amdahl); needs `--dump-dir` |
-| `ncu`      | Nsight Compute on `example_wscms` | per-kernel achieved GB/s and % of peak DRAM/SM (opening launches of the first real-data cycle), cross-referenced with each kernel's nsys time share | efficiency without a CPU baseline; shows the profiled kernels dominate the runtime; needs `--dump-dir` |
-| `realdata` | `example_wscms`    | per-cycle timings, ms/iter, convergence plot              | real-workload numbers (needs `--dump-dir`) |
+| `nsys`     | Nsight Systems on `example_ddmsc` | per-kernel GPU time, phase-share breakdown of the first real-data cycle | where the time goes (Amdahl); needs `--dump-dir` |
+| `ncu`      | Nsight Compute on `example_ddmsc` | per-kernel achieved GB/s and % of peak DRAM/SM (opening launches of the first real-data cycle), cross-referenced with each kernel's nsys time share | efficiency without a CPU baseline; shows the profiled kernels dominate the runtime; needs `--dump-dir` |
+| `realdata` | `example_ddmsc`    | per-cycle timings, ms/iter, convergence plot              | real-workload numbers (needs `--dump-dir`) |
 | `fidelity` | numpy              | component + residual comparison vs DDFacet reference      | correctness (needs `--ref-dir`, see below) |
 
 Every stage writes raw data (CSV / .nsys-rep / .ncu-rep), figures as PNG + PDF,
@@ -116,6 +116,6 @@ ref_dir/
     residual.npy     # float32 (n_freq, nrow, ncol), residual after the minor cycle
 ```
 
-This is exactly the format `example_wscms --dump-result=DIR` writes for the GPU
+This is exactly the format `example_ddmsc --dump-result=DIR` writes for the GPU
 side, so the FastDDFacet exporter just needs to target it. Until then the
 fidelity stage reports `skipped`.

@@ -13,6 +13,7 @@ endforeach()
 add_executable(fast_deconv_unit_tests
   test_main.cpp
   test_convergence.cpp
+  test_resources.cu
   test_utils.cu
   test_fft.cu
   test_linalg.cu
@@ -25,7 +26,7 @@ add_executable(fast_deconv_unit_tests
   test_gain.cu
   test_multi_frequency.cu
   test_scales.cu
-  test_wscms_class.cu
+  test_ddmsc_class.cu
 )
 
 target_link_libraries(fast_deconv_unit_tests PRIVATE
@@ -41,7 +42,7 @@ include(GoogleTest)
 gtest_discover_tests(fast_deconv_unit_tests PROPERTIES LABELS "UNIT")
 
 #-------------------------------------------------------------------#
-# Non-regression test (label NONREG): full synthetic WSCMS run whose
+# Non-regression test (label NONREG): full synthetic DDMSC run whose
 # scalar metrics are compared against a committed JSON baseline.
 # Regenerate the baseline with FAST_DECONV_UPDATE_BASELINE=1.
 #-------------------------------------------------------------------#
@@ -49,7 +50,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(fast_deconv_nonreg_tests
   test_main.cpp
-  test_wscms_nonreg.cu
+  test_ddmsc_nonreg.cu
 )
 
 target_link_libraries(fast_deconv_nonreg_tests PRIVATE
@@ -64,7 +65,7 @@ target_include_directories(fast_deconv_nonreg_tests PRIVATE
 
 # Baseline lives in the source tree so a regeneration shows up as a git diff.
 target_compile_definitions(fast_deconv_nonreg_tests PRIVATE
-  FAST_DECONV_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../baselines/wscms_synthetic.json"
+  FAST_DECONV_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../baselines/ddmsc_synthetic.json"
 )
 
 gtest_discover_tests(fast_deconv_nonreg_tests PROPERTIES LABELS "NONREG" TIMEOUT 300)

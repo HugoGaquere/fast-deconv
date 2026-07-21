@@ -1,8 +1,8 @@
 #include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
-#include <fast_deconv/algorithm/wscms_class.hpp>
-#include <fast_deconv/algorithm/wscms_types.hpp>
+#include <fast_deconv/algorithm/ddmsc.hpp>
+#include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <memory>
 #include <optional>
@@ -12,13 +12,13 @@
 #include "helpers/gpu_test.hpp"
 
 namespace core = fast_deconv::core;
-namespace wscms = fast_deconv::algorithm::wscms;
+namespace ddmsc = fast_deconv::algorithm::ddmsc;
 namespace fdtest = fast_deconv::test;
 
-// Minimal but real construction scene: the Wscms constructor allocates the
+// Minimal but real construction scene: the Ddmsc constructor allocates the
 // pool, both streams, and the cuFFT plans, so this is a GPU fixture. All spans
 // are stored as views by the class — the backing buffers live in the fixture.
-class WscmsClass : public fdtest::GpuTest {
+class DdmscClass : public fdtest::GpuTest {
  protected:
   static constexpr int kFacets = 1;
   static constexpr int kFreq = 2;
@@ -45,7 +45,7 @@ class WscmsClass : public fdtest::GpuTest {
     map_pixel_facet_ = std::vector<int>(kSize * kSize, 0);
   }
 
-  wscms::Wscms make_wscms()
+  ddmsc::Ddmsc make_ddmsc()
   {
     core::device_span4d<float> psf_view(d_psfs_->get(), kFacets, kFreq, kSize, kSize);
     core::device_span2d<float> xdes_view(d_xdes_->get(), kFreq, kOrder);
@@ -54,7 +54,7 @@ class WscmsClass : public fdtest::GpuTest {
     core::host_vect<float> bias_view(scale_bias_.data(), kScales);
     core::host_span2d<int> map_view(map_pixel_facet_.data(), kSize, kSize);
 
-    return wscms::Wscms(psf_view, xdes_view, mask_view, sigma_view, bias_view, map_view,
+    return ddmsc::Ddmsc(psf_view, xdes_view, mask_view, sigma_view, bias_view, map_view,
                         /*dirty_nrow=*/kSize, /*dirty_ncol=*/kSize, /*n_freq=*/kFreq, /*fft_padding=*/1.5f);
   }
 
@@ -77,15 +77,15 @@ class WscmsClass : public fdtest::GpuTest {
 // The constructor builds the pool, both streams, the shared cuFFT work area and
 // all plans — surviving construction and destruction on a tiny scene is the
 // smoke test.
-TEST_F(WscmsClass, ConstructsAndDestroysCleanly)
+TEST_F(DdmscClass, ConstructsAndDestroysCleanly)
 {
-  auto w = make_wscms();
+  auto w = make_ddmsc();
   (void)w;
 }
 
-TEST_F(WscmsClass, SetterGetterRoundTripForEveryParameter)
+TEST_F(DdmscClass, SetterGetterRoundTripForEveryParameter)
 {
-  auto w = make_wscms();
+  auto w = make_ddmsc();
 
   w.set_clean_negative(true);
   EXPECT_TRUE(w.clean_negative());
@@ -144,9 +144,9 @@ TEST_F(WscmsClass, SetterGetterRoundTripForEveryParameter)
   EXPECT_FALSE(w.auto_mask_rms_threshold().has_value());
 }
 
-// wscms_result::add_coeffs_from_device slices a (n_components, n_order) device
+// ddmsc_result::add_coeffs_from_device slices a (n_components, n_order) device
 // buffer into one host vector per component.
-TEST_F(WscmsClass, AddCoeffsFromDeviceSlicesRows)
+TEST_F(DdmscClass, AddCoeffsFromDeviceSlicesRows)
 {
   const int n_components = 3, n_order = 2;
   const std::vector<float> coeffs = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
@@ -155,7 +155,7 @@ TEST_F(WscmsClass, AddCoeffsFromDeviceSlicesRows)
   fdtest::device_buffer<float> d_coeffs(res(), sr, coeffs);
   core::device_span2d<float> view(d_coeffs.get(), n_components, n_order);
 
-  wscms::wscms_result result(/*max_iter=*/10, n_order);
+  ddmsc::ddmsc_result result(/*max_iter=*/10, n_order);
   result.add_coeffs_from_device(view);
 
   ASSERT_EQ(result.coeffs.size(), static_cast<std::size_t>(n_components));

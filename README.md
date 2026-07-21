@@ -2,7 +2,7 @@
 
 GPU-accelerated deconvolution for radio astronomy.
 
-CUDA implementation of the WSCMS minor-cycle loop, designed for integration with [DDFacet](https://github.com/cyriltasse/DDFacet)-style imaging pipelines. The C++/CUDA core is exposed to Python via pybind11.
+CUDA implementation of the DDMSC minor-cycle loop, designed for integration with [DDFacet](https://github.com/cyriltasse/DDFacet)-style imaging pipelines. The C++/CUDA core is exposed to Python via pybind11.
 
 > **Status:** beta (`v0.3.0`). WIP
 
@@ -36,17 +36,17 @@ cmake --build build/Release
 ctest --test-dir build/Release
 ```
 
-Notable outputs: `libfast_deconv.a`, the `example_wscms` driver (runs against FastDDFacet `dump_ref` exports), and the GoogleTest binaries `fast_deconv_unit_tests` / `fast_deconv_nonreg_tests`.
+Notable outputs: `libfast_deconv.a`, the `example_ddmsc` driver (runs against FastDDFacet `dump_ref` exports), and the GoogleTest binaries `fast_deconv_unit_tests` / `fast_deconv_nonreg_tests`.
 
 ## Tests
 
 ```bash
 ctest --test-dir build/Release -L UNIT      # unit tests (CPU-oracle based; GPU tests skip if no device)
-ctest --test-dir build/Release -L NONREG    # synthetic WSCMS non-regression run vs JSON baseline
+ctest --test-dir build/Release -L NONREG    # synthetic DDMSC non-regression run vs JSON baseline
 ```
 
-The non-regression test compares scalar metrics of a full synthetic WSCMS run
-against `tests/baselines/wscms_synthetic.json`. After an intentional
+The non-regression test compares scalar metrics of a full synthetic DDMSC run
+against `tests/baselines/ddmsc_synthetic.json`. After an intentional
 algorithmic change, regenerate with `FAST_DECONV_UPDATE_BASELINE=1 ctest
 --test-dir build/Release -L NONREG` and commit the reviewed JSON diff.
 

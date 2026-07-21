@@ -1,11 +1,11 @@
 #pragma once
 #include <cstdint>
+#include <emu/cuda/device/mdcontainer.hpp>
 #include <emu/cuda/device/mdspan.hpp>
 #include <emu/cuda/device/span.hpp>
 #include <emu/detail/mdspan_types.hpp>
 
 namespace fast_deconv::core {
-
 
 template <std::size_t N>
 using dims = emu::dextents<std::int32_t, N>;
@@ -30,6 +30,23 @@ template <typename T>
 using device_span5d = mdspan<T, 5>;
 template <typename T>
 using device_span6d = mdspan<T, 6>;
+
+// Owning device containers (RAII, refcounted via emu::capsule). Same extents
+// and layout as the span aliases above: an mdcontainer IS-A mdspan and
+// converts implicitly to the matching device_spanNd.
+template <typename T, std::size_t N>
+using mdcontainer = emu::cuda::device::mdcontainer<T, dims<N>, emu::layout_right>;
+
+template <typename T>
+using device_cont = mdcontainer<T, 1>;
+template <typename T>
+using device_cont2d = mdcontainer<T, 2>;
+template <typename T>
+using device_cont3d = mdcontainer<T, 3>;
+template <typename T>
+using device_cont4d = mdcontainer<T, 4>;
+template <typename T>
+using device_cont5d = mdcontainer<T, 5>;
 
 // Layout left (column-major, Fortran-order)
 template <typename T, std::size_t N>
@@ -119,26 +136,5 @@ template <typename T>
 using host_span5d_S = h_mdspan_S<T, 5>;
 template <typename T>
 using host_span6d_S = h_mdspan_S<T, 6>;
-
-template <class T>
-device_span4d<T> slice_leading(const device_span5d<T>& src, std::size_t i)
-{
-  return core::device_span4d<T>(src.data_handle() + i * src.stride(0), src.extent(1), src.extent(2),
-                                src.extent(3), src.extent(4));
-}
-
-template <class T>
-device_span3d<T> slice_leading(const device_span4d<T>& src, std::size_t i)
-{
-  return core::device_span3d<T>(src.data_handle() + i * src.stride(0), src.extent(1), src.extent(2),
-                                src.extent(3));
-}
-
-template <class T>
-device_span2d<T> slice_leading(const device_span3d<T>& src, std::size_t i)
-{
-  return core::device_span2d<T>(src.data_handle() + i * src.stride(0), src.extent(1),
-                                src.extent(2));
-}
 
 }  // namespace fast_deconv::core

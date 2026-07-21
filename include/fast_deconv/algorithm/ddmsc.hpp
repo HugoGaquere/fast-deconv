@@ -1,44 +1,37 @@
 #pragma once
 
+#include <fast_deconv/algorithm/ddmsc_cycles.hpp>
+#include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
-#include <fast_deconv/algorithm/wscms.hpp>
-#include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/core/span_types.hpp>
-#include <vector>
 
-namespace fast_deconv::algorithm::wscms {
+namespace fast_deconv::algorithm::ddmsc {
 
 /**
- * @brief   Stateful WSCMS deconvolution session.
+ * @brief   Stateful DDMSC deconvolution session.
  * @details Constructor builds heavy resources once: the GPU resource pool and
  *          the cuFFT plans for the scale and PSF convolutions. The static
- *          `WSCMS_ctx` (raw_psfs, xdes, scale_mask, scale_sigmas, scale_bias,
+ *          `DDMSC_ctx` (raw_psfs, xdes, scale_mask, scale_sigmas, scale_bias,
  *          map_pixel_facet) is also captured at construction.
  *
  *          `run()` accepts only the per-call inputs that change between major
  *          cycles: the dirty image, jones normalization, and per-frequency
- *          weights. All algorithm parameters are tunable via properties.
+ *          weights. All algorithm parameters are tunable.
  */
-class Wscms {
+class Ddmsc {
  public:
-  Wscms(const core::device_span4d<float>& raw_psfs, const core::device_span2d<float>& xdes,
+  Ddmsc(const core::device_span4d<float>& raw_psfs, const core::device_span2d<float>& xdes,
         const core::device_span2d<bool>& mask, const core::device_vect<float>& scale_sigmas,
-        const core::host_vect<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet,
-        int dirty_nrow, int dirty_ncol, int n_freq, float fft_padding, int exec_device = 0);
+        const core::host_vect<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
+        int dirty_ncol, int n_freq, float fft_padding, int exec_device = 0);
 
   /// Run one full deconvolution session.
-  wscms_result run(core::device_span3d<float>& dirty,
-                   const core::device_span3d<float>& jones_norm,
+  ddmsc_result run(core::device_span3d<float>& dirty, const core::device_span3d<float>& jones_norm,
                    const core::device_vect<float>& weights_freq);
 
-  /// Hot-swap the scale_mask between runs (e.g. when DDFacet updates its mask).
-  void set_scale_mask(const core::device_span2d<bool>& mask)
-  {
-    ctx_.workspace.mask = mask;
-  }
-
-  // ---- Tunable parameters (Python @property targets) -------------------- //
+  /// Hot-swap the mask between runs
+  void set_scale_mask(const core::device_span2d<bool>& mask) { ctx_.workspace.mask = mask; }
 
   bool clean_negative() const { return params_.clean_negative; }
   void set_clean_negative(bool v) { params_.clean_negative = v; }
@@ -93,4 +86,4 @@ class Wscms {
   params params_;
 };
 
-}  // namespace fast_deconv::algorithm::wscms
+}  // namespace fast_deconv::algorithm::ddmsc

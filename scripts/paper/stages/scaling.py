@@ -1,4 +1,4 @@
-"""Stage 1 -- scaling & throughput sweep via bench_wscms (synthetic, fixed K*M work).
+"""Stage 1 -- scaling & throughput sweep via bench_ddmsc (synthetic, fixed K*M work).
 
 Runs the OFAT parameter sweep, then renders image-size scaling panels (one
 column per swept axis, one row per metric, log-log with an N^2 guide), fits the
@@ -33,7 +33,7 @@ def run(ctx: Ctx) -> dict:
     csv_path = out / "bench.csv"
 
     run_cmd(ctx, [
-        ctx.binary("bench_wscms"),
+        ctx.binary("bench_ddmsc"),
         f"--mode={cfg['mode']}",
         f"--sizes={_lst(cfg['sizes'])}",
         f"--nfreq={_lst(cfg['nfreq'])}",
@@ -60,7 +60,7 @@ def run(ctx: Ctx) -> dict:
 #  Analysis (also reused by aggregate for the cross-GPU overlay)
 # --------------------------------------------------------------------------- #
 
-# Hold-at overrides matching the OFAT baseline pinned in src/bench_wscms.cu
+# Hold-at overrides matching the OFAT baseline pinned in src/bench_ddmsc.cu
 # (n_freq=2, n_scales=5, n_facet=100). Any axis not listed holds at the median of
 # its distinct values.
 PINNED_BASELINES = {"n_freq": 2, "n_scales": 5, "n_facet": 100}

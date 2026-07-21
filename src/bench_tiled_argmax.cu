@@ -1,7 +1,7 @@
 /// Benchmark + profiling driver for the tiled argmax (matrix::argmax and
 /// matrix::argmax_incremental).
 ///
-/// Motivation: in the WSCMS clean loop a minor iteration subtracts a PSF stamp
+/// Motivation: in the DDMSC clean loop a minor iteration subtracts a PSF stamp
 /// at the current peak, dirtying only a footprint-sized sub-region of the mean
 /// dirty image. Today the loop reruns a full-image argmax every iteration; the
 /// incremental argmax instead recomputes only the tiles overlapping the dirtied
@@ -76,14 +76,13 @@
 namespace core = fast_deconv::core;
 namespace matrix = fast_deconv::matrix;
 
-#define BENCH_CHECK_CUDA(call)                                                                 \
-  do {                                                                                         \
-    cudaError_t _e = (call);                                                                   \
-    if (_e != cudaSuccess) {                                                                   \
-      fprintf(stderr, "CUDA error %s at %s:%d: %s\n", #call, __FILE__, __LINE__,               \
-              cudaGetErrorString(_e));                                                         \
-      std::exit(1);                                                                            \
-    }                                                                                          \
+#define BENCH_CHECK_CUDA(call)                                                                            \
+  do {                                                                                                    \
+    cudaError_t _e = (call);                                                                              \
+    if (_e != cudaSuccess) {                                                                              \
+      fprintf(stderr, "CUDA error %s at %s:%d: %s\n", #call, __FILE__, __LINE__, cudaGetErrorString(_e)); \
+      std::exit(1);                                                                                       \
+    }                                                                                                     \
   } while (0)
 
 // ------------------------------------------------------------------------- //
@@ -192,8 +191,8 @@ struct tile_result {
 };
 
 // Run the full + incremental phases for one (tile, psf) pair over the shared image.
-static tile_result run_tile(const core::stream_resources& sr, const float* d_data,
-                            const options& opt, int tile, int psf)
+static tile_result run_tile(const core::stream_resources& sr, const float* d_data, const options& opt, int tile,
+                            int psf)
 {
   tile_result tr;
   tr.tile = tile;
@@ -224,9 +223,8 @@ static tile_result run_tile(const core::stream_resources& sr, const float* d_dat
 
   // Phase 1 (full) also seeds every tile, which argmax_incremental requires.
   tr.full = time_phase(opt.warmup, opt.reps, [&] { matrix::argmax(ws, d_data); });
-  tr.incr = time_phase(opt.warmup, opt.reps, [&] {
-    matrix::argmax_incremental(ws, d_data, peak_row, peak_col, psf, psf);
-  });
+  tr.incr =
+      time_phase(opt.warmup, opt.reps, [&] { matrix::argmax_incremental(ws, d_data, peak_row, peak_col, psf, psf); });
 
   sr.sync();  // ws releases its device buffers in its destructor
   return tr;
@@ -256,16 +254,14 @@ static const char* CSV_HEADER =
     "full_mean_ms,full_min_ms,full_max_ms,"
     "incr_mean_ms,incr_min_ms,incr_max_ms,speedup_incr,speedup_full,breakeven_n\n";
 
-static void write_csv_row(std::ostream& os, const options& opt, const timing& native,
-                          const tile_result& r)
+static void write_csv_row(std::ostream& os, const options& opt, const timing& native, const tile_result& r)
 {
   const double su_incr = r.incr.mean_ms > 0 ? native.mean_ms / r.incr.mean_ms : 0.0;
   const double su_full = r.full.mean_ms > 0 ? native.mean_ms / r.full.mean_ms : 0.0;
-  os << opt.width << ',' << opt.height << ',' << r.psf << ',' << r.tile << ',' << r.n_tiles_x
-     << ',' << r.n_tiles_y << ',' << r.n_tiles << ',' << r.dirty_tiles << ',' << opt.reps << ','
-     << opt.warmup << ',' << native.mean_ms << ',' << native.min_ms << ',' << native.max_ms << ','
-     << r.full.mean_ms << ',' << r.full.min_ms << ',' << r.full.max_ms << ',' << r.incr.mean_ms
-     << ',' << r.incr.min_ms << ',' << r.incr.max_ms << ',' << su_incr << ',' << su_full << ','
+  os << opt.width << ',' << opt.height << ',' << r.psf << ',' << r.tile << ',' << r.n_tiles_x << ',' << r.n_tiles_y
+     << ',' << r.n_tiles << ',' << r.dirty_tiles << ',' << opt.reps << ',' << opt.warmup << ',' << native.mean_ms << ','
+     << native.min_ms << ',' << native.max_ms << ',' << r.full.mean_ms << ',' << r.full.min_ms << ',' << r.full.max_ms
+     << ',' << r.incr.mean_ms << ',' << r.incr.min_ms << ',' << r.incr.max_ms << ',' << su_incr << ',' << su_full << ','
      << breakeven_n(native, r) << '\n';
 }
 
@@ -273,8 +269,7 @@ static void write_csv_row(std::ostream& os, const options& opt, const timing& na
 //  Optional correctness cross-check
 // ------------------------------------------------------------------------- //
 
-static void validate(const core::stream_resources& sr, float* d_data, const options& opt, int tile,
-                     int psf)
+static void validate(const core::stream_resources& sr, float* d_data, const options& opt, int tile, int psf)
 {
   const int peak_row = opt.height / 2, peak_col = opt.width / 2;
 
@@ -287,17 +282,15 @@ static void validate(const core::stream_resources& sr, float* d_data, const opti
   // Plant a unique global peak (data is in [0,1)); the full pass must find it.
   const int gidx = peak_row * opt.width + peak_col;
   const float big = 5.0f;
-  BENCH_CHECK_CUDA(
-      cudaMemcpyAsync(d_data + gidx, &big, sizeof(float), cudaMemcpyHostToDevice, sr.cuda_stream));
+  BENCH_CHECK_CUDA(cudaMemcpyAsync(d_data + gidx, &big, sizeof(float), cudaMemcpyHostToDevice, sr.cuda_stream));
   auto [fv, fi] = matrix::argmax(ws, d_data);
-  printf("  [validate] FULL %s: peak %.3f at %d (want %.3f at %d)\n",
-         (fv == big && fi == gidx) ? "ok" : "MISMATCH", fv, fi, big, gidx);
+  printf("  [validate] FULL %s: peak %.3f at %d (want %.3f at %d)\n", (fv == big && fi == gidx) ? "ok" : "MISMATCH", fv,
+         fi, big, gidx);
 
   // Dirty the footprint: plant an even bigger peak inside it, refresh incrementally.
   const int bidx = (peak_row + 3) * opt.width + (peak_col + 5);
   const float bigger = 9.0f;
-  BENCH_CHECK_CUDA(cudaMemcpyAsync(d_data + bidx, &bigger, sizeof(float), cudaMemcpyHostToDevice,
-                                   sr.cuda_stream));
+  BENCH_CHECK_CUDA(cudaMemcpyAsync(d_data + bidx, &bigger, sizeof(float), cudaMemcpyHostToDevice, sr.cuda_stream));
   auto [iv, ii] = matrix::argmax_incremental(ws, d_data, peak_row, peak_col, psf, psf);
   printf("  [validate] INCREMENTAL %s: peak %.3f at %d (want %.3f at %d)\n",
          (iv == bigger && ii == bidx) ? "ok" : "MISMATCH", iv, ii, bigger, bidx);
@@ -322,20 +315,37 @@ int main(int argc, char** argv)
   for (int i = 1; i < argc; ++i) {
     const std::string a(argv[i]);
     auto val = [&](const char* pfx) { return a.substr(std::strlen(pfx)); };
-    if (a.rfind("--size=", 0) == 0) { opt.width = opt.height = std::atoi(val("--size=").c_str()); }
-    else if (a.rfind("--width=", 0) == 0) opt.width = std::atoi(val("--width=").c_str());
-    else if (a.rfind("--height=", 0) == 0) opt.height = std::atoi(val("--height=").c_str());
-    else if (a.rfind("--psfs=", 0) == 0) opt.psfs = parse_int_list(val("--psfs="));
-    else if (a.rfind("--psf=", 0) == 0) opt.psf = std::atoi(val("--psf=").c_str());
-    else if (a.rfind("--tiles=", 0) == 0) opt.tiles = parse_int_list(val("--tiles="));
-    else if (a.rfind("--tile=", 0) == 0) opt.tile = std::atoi(val("--tile=").c_str());
-    else if (a.rfind("--reps=", 0) == 0) opt.reps = std::atoi(val("--reps=").c_str());
-    else if (a.rfind("--warmup=", 0) == 0) opt.warmup = std::atoi(val("--warmup=").c_str());
-    else if (a.rfind("--device=", 0) == 0) opt.device = std::atoi(val("--device=").c_str());
-    else if (a.rfind("--seed=", 0) == 0) opt.seed = std::strtoull(val("--seed=").c_str(), nullptr, 10);
-    else if (a.rfind("--csv=", 0) == 0) opt.csv_path = val("--csv=");
-    else if (a == "--validate") opt.validate = true;
-    else { fprintf(stderr, "Unrecognized argument: %s\n", a.c_str()); usage(); return 1; }
+    if (a.rfind("--size=", 0) == 0) {
+      opt.width = opt.height = std::atoi(val("--size=").c_str());
+    } else if (a.rfind("--width=", 0) == 0)
+      opt.width = std::atoi(val("--width=").c_str());
+    else if (a.rfind("--height=", 0) == 0)
+      opt.height = std::atoi(val("--height=").c_str());
+    else if (a.rfind("--psfs=", 0) == 0)
+      opt.psfs = parse_int_list(val("--psfs="));
+    else if (a.rfind("--psf=", 0) == 0)
+      opt.psf = std::atoi(val("--psf=").c_str());
+    else if (a.rfind("--tiles=", 0) == 0)
+      opt.tiles = parse_int_list(val("--tiles="));
+    else if (a.rfind("--tile=", 0) == 0)
+      opt.tile = std::atoi(val("--tile=").c_str());
+    else if (a.rfind("--reps=", 0) == 0)
+      opt.reps = std::atoi(val("--reps=").c_str());
+    else if (a.rfind("--warmup=", 0) == 0)
+      opt.warmup = std::atoi(val("--warmup=").c_str());
+    else if (a.rfind("--device=", 0) == 0)
+      opt.device = std::atoi(val("--device=").c_str());
+    else if (a.rfind("--seed=", 0) == 0)
+      opt.seed = std::strtoull(val("--seed=").c_str(), nullptr, 10);
+    else if (a.rfind("--csv=", 0) == 0)
+      opt.csv_path = val("--csv=");
+    else if (a == "--validate")
+      opt.validate = true;
+    else {
+      fprintf(stderr, "Unrecognized argument: %s\n", a.c_str());
+      usage();
+      return 1;
+    }
   }
   if (opt.width <= 0 || opt.height <= 0) {
     fprintf(stderr, "width/height must be positive\n");
@@ -347,7 +357,10 @@ int main(int argc, char** argv)
   std::vector<int> tiles = opt.tiles.empty() ? std::vector<int>{opt.tile} : opt.tiles;
   std::vector<int> psfs = opt.psfs.empty() ? std::vector<int>{opt.psf} : opt.psfs;
   for (int t : tiles)
-    if (t <= 0) { fprintf(stderr, "tile sizes must be positive\n"); return 1; }
+    if (t <= 0) {
+      fprintf(stderr, "tile sizes must be positive\n");
+      return 1;
+    }
   for (int p : psfs)
     if (p <= 0 || p > std::min(opt.width, opt.height)) {
       fprintf(stderr, "psf sizes must be in (0, min(width,height)]\n");
@@ -368,12 +381,11 @@ int main(int argc, char** argv)
   };
 
   printf("==================== tiled argmax bench ====================\n");
-  printf("  image      : %d x %d  (%.0f Mpix, %.2f MiB)\n", opt.width, opt.height, npix / 1e6,
-         img_mb);
+  printf("  image      : %d x %d  (%.0f Mpix, %.2f MiB)\n", opt.width, opt.height, npix / 1e6, img_mb);
   print_list("footprints", psfs);
   print_list("tiles", tiles);
-  printf("  reps       : %d timed, %d warmup  (%zu x %zu = %zu configs)\n", opt.reps, opt.warmup,
-         psfs.size(), tiles.size(), psfs.size() * tiles.size());
+  printf("  reps       : %d timed, %d warmup  (%zu x %zu = %zu configs)\n", opt.reps, opt.warmup, psfs.size(),
+         tiles.size(), psfs.size() * tiles.size());
   printf("============================================================\n\n");
 
   // OOM pre-check with an actionable message: the image is by far the biggest
@@ -411,33 +423,40 @@ int main(int argc, char** argv)
     matrix::argmax_workspace native_ws{sr, npix};
     native = time_phase(opt.warmup, opt.reps, [&] { matrix::argmax(native_ws, d_data); });
   }
-  printf("native argmax (cub ArgMax over %.0f Mpix): mean %.4f ms  min %.4f  (%.1f GiB/s)\n\n",
-         npix / 1e6, native.mean_ms, native.min_ms,
-         native.mean_ms > 0 ? img_mb / 1024.0 / (native.mean_ms / 1000.0) : 0.0);
+  printf("native argmax (cub ArgMax over %.0f Mpix): mean %.4f ms  min %.4f  (%.1f GiB/s)\n\n", npix / 1e6,
+         native.mean_ms, native.min_ms, native.mean_ms > 0 ? img_mb / 1024.0 / (native.mean_ms / 1000.0) : 0.0);
 
   std::ofstream csv;
   if (!opt.csv_path.empty()) {
     csv.open(opt.csv_path);
-    if (!csv) { fprintf(stderr, "Failed to open %s for writing\n", opt.csv_path.c_str()); return 1; }
+    if (!csv) {
+      fprintf(stderr, "Failed to open %s for writing\n", opt.csv_path.c_str());
+      return 1;
+    }
     csv << CSV_HEADER;
   }
 
   // incr_vs_native = native/incr (the N->inf speedup); breakeven_N = reseed
   // interval at which the amortized tiled cost first beats native ("never" if it
   // can't, regardless of N).
-  printf("%-7s %-7s %12s %12s | %10s %10s %10s | %14s %10s\n", "psf", "tile", "n_tiles",
-         "dirty_tiles", "native_ms", "full_ms", "incr_ms", "incr_vs_native", "breakeven_N");
+  printf("%-7s %-7s %12s %12s | %10s %10s %10s | %14s %10s\n", "psf", "tile", "n_tiles", "dirty_tiles", "native_ms",
+         "full_ms", "incr_ms", "incr_vs_native", "breakeven_N");
   for (int p : psfs) {
     for (int t : tiles) {
       const tile_result r = run_tile(sr, d_data, opt, t, p);
       const double su_incr = r.incr.mean_ms > 0 ? native.mean_ms / r.incr.mean_ms : 0.0;
       const double ben = breakeven_n(native, r);
-      printf("%-7d %-7d %12lld %12lld | %10.4f %10.4f %10.4f | %13.1fx ", r.psf, r.tile, r.n_tiles,
-             r.dirty_tiles, native.mean_ms, r.full.mean_ms, r.incr.mean_ms, su_incr);
-      if (ben < 0.0) printf("%10s\n", "never");
-      else printf("%10.1f\n", ben);
+      printf("%-7d %-7d %12lld %12lld | %10.4f %10.4f %10.4f | %13.1fx ", r.psf, r.tile, r.n_tiles, r.dirty_tiles,
+             native.mean_ms, r.full.mean_ms, r.incr.mean_ms, su_incr);
+      if (ben < 0.0)
+        printf("%10s\n", "never");
+      else
+        printf("%10.1f\n", ben);
       fflush(stdout);
-      if (csv.is_open()) { write_csv_row(csv, opt, native, r); csv.flush(); }
+      if (csv.is_open()) {
+        write_csv_row(csv, opt, native, r);
+        csv.flush();
+      }
     }
   }
 
