@@ -87,8 +87,8 @@ endforeach()
 
 add_library(fast_deconv STATIC
         src/fast_deconv/algorithm/scales.cu
-        src/fast_deconv/algorithm/wscms.cu
-        src/fast_deconv/algorithm/wscms_class.cu
+        src/fast_deconv/algorithm/ddmsc.cu
+        src/fast_deconv/algorithm/ddmsc_class.cu
         src/fast_deconv/common/mask.cu
         src/fast_deconv/common/gain.cu
         src/fast_deconv/common/clean.cu
@@ -156,7 +156,7 @@ if (SKBUILD)
   pybind11_add_module(_fast_deconv
     src/python/fast_deconv_module.cu
     src/python/bindings/core.cu
-    src/python/bindings/wscms.cu
+    src/python/bindings/ddmsc.cu
   )
 
   target_link_libraries(_fast_deconv PRIVATE fast_deconv)
@@ -181,11 +181,11 @@ if (NOT SKBUILD)
   add_executable(fast_deconv_app src/main.cu)
   target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
 
-  add_executable(example_wscms src/example_wscms.cu)
-  target_link_libraries(example_wscms PRIVATE fast_deconv)
+  add_executable(example_ddmsc src/example_ddmsc.cu)
+  target_link_libraries(example_ddmsc PRIVATE fast_deconv)
 
-  add_executable(bench_wscms src/bench_wscms.cu)
-  target_link_libraries(bench_wscms PRIVATE fast_deconv)
+  add_executable(bench_ddmsc src/bench_ddmsc.cu)
+  target_link_libraries(bench_ddmsc PRIVATE fast_deconv)
 
   add_executable(bench_tiled_argmax src/bench_tiled_argmax.cu)
   target_link_libraries(bench_tiled_argmax PRIVATE fast_deconv)
@@ -195,7 +195,7 @@ if (NOT SKBUILD)
     # Fedora — they ship only for the default gcc. Host-link the CUDA
     # executables with the CXX driver instead, like the test binaries.
     set_target_properties(
-      fast_deconv_app example_wscms bench_wscms bench_tiled_argmax
+      fast_deconv_app example_ddmsc bench_ddmsc bench_tiled_argmax
       PROPERTIES LINKER_LANGUAGE CXX
     )
   endif()

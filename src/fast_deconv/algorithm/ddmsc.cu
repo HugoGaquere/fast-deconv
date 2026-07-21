@@ -1,7 +1,7 @@
 #include <algorithm>
 #include <emu/submdspan.hpp>
+#include <fast_deconv/algorithm/ddmsc.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
-#include <fast_deconv/algorithm/wscms.hpp>
 #include <fast_deconv/common/clean.hpp>
 #include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/common/gain.hpp>
@@ -16,7 +16,7 @@
 #include <fast_deconv/util/dump.hpp>
 #include <fast_deconv/util/utils.hpp>
 
-namespace fast_deconv::algorithm::wscms {
+namespace fast_deconv::algorithm::ddmsc {
 
 namespace {
 
@@ -30,7 +30,7 @@ std::string format_run_banner(const params& p, std::size_t dirty_nrows, std::siz
 {
   constexpr const char* sep = "------------------------------------------------------------------------";
   return fmt::format(
-      "run_wscms: launching deconvolution\n"
+      "run_ddmsc: launching deconvolution\n"
       "  {}\n"
       "  image      | dirty={}x{}  n_freq={}  n_facets={}  psf={}x{}\n"
       "  scales     | n_scales={}  stall_threshold={:.6f}\n"
@@ -49,7 +49,7 @@ std::string format_run_banner(const params& p, std::size_t dirty_nrows, std::siz
 
 }  // namespace
 
-wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d<float>& dirty,
+ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d<float>& dirty,
                               const core::device_span3d<float>& jones_norm,
                               const core::device_vect<float>& weights_freq)
 {
@@ -106,7 +106,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   const float stop_flux = std::max({p.flux_threshold, fluxlimit_rms, fluxlimit_peak, fluxlimit_sidelobe});
 
   FD_LOG_INFO(
-      "run_wscms: initial pak_flux={:.8f} rms={:.8f} stop_flux={:.8f} "
+      "run_ddmsc: initial pak_flux={:.8f} rms={:.8f} stop_flux={:.8f} "
       "(rms_lim={:.8f} peak_lim={:.8f} sidelobe_lim={:.8f} floor={:.8f})",
       track_flux, track_rms, stop_flux, fluxlimit_rms, fluxlimit_peak, fluxlimit_sidelobe, p.flux_threshold);
 
@@ -155,14 +155,14 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   auto scale_kernels = stream_a.alloc_mdcontainer_async<float>(n_scales, scale_ctx.freq_nrow, scale_ctx.freq_ncol);
   scale::make_gaussian_kernels_async(stream_a, ws.scale_sigmas, scale_ctx.padded_ncol, scale_kernels);
 
-  FD_LOG_DEBUG("run_wscms: built {} scale kernels in freq domain ({}x{}, {} floats total)", n_scales,
+  FD_LOG_DEBUG("run_ddmsc: built {} scale kernels in freq domain ({}x{}, {} floats total)", n_scales,
                scale_ctx.freq_nrow, scale_ctx.freq_ncol, scale_kernels.size());
 
   auto scales_x_dirty = stream_a.alloc_mdcontainer_async<float>(n_scales, dirty_nrows, dirty_ncols);
 
   // TODO: fix that
   int total_iterations = 0;
-  wscms_result result{p.max_iteration, n_order};
+  ddmsc_result result{p.max_iteration, n_order};
 
   // We dont allocate memory for mask_per_scale while we didnt trigger the auto masking
   core::device_cont3d<bool> mask_per_scale;
@@ -174,7 +174,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   // Loop over scales
   while (!deconv_convergence.should_stop() && !scale_stall_tracker.all_stalled()) {
     FD_NVTX_RANGE("outer_iter");
-    FD_LOG_DEBUG("run_wscms: outer iter start total_iterations={} track_flux={:.8f} track_rms={:.8f}", total_iterations,
+    FD_LOG_DEBUG("run_ddmsc: outer iter start total_iterations={} track_flux={:.8f} track_rms={:.8f}", total_iterations,
                  track_flux, track_rms);
 
     float auto_mask_threshold =
@@ -218,7 +218,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     int selected_scale_idx =
         scale::scale_selection(stream_a, scales_x_dirty, ws.scale_bias, scale_stall_tracker.get_all_stalled());
 
-    // FD_LOG_INFO("run_wscms: selected scale {}, auto_mask {}", selected_scale_idx, activate_auto_mask);
+    // FD_LOG_INFO("run_ddmsc: selected scale {}, auto_mask {}", selected_scale_idx, activate_auto_mask);
 
     mean_residual = emu::submdspan(scales_x_dirty, selected_scale_idx);
 
@@ -238,7 +238,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     // peak_value/peak_index from the argmax above and use this purely to seed.
     matrix::argmax(tiled_ws, mean_residual.data_handle());
 
-    FD_LOG_DEBUG("run_wscms: clean loop start scale={} peak={:.8f} threshold={:.8f} max_clean_iter={}",
+    FD_LOG_DEBUG("run_ddmsc: clean loop start scale={} peak={:.8f} threshold={:.8f} max_clean_iter={}",
                  selected_scale_idx, peak_value, threshold, p.max_clean_iteration);
 
     FD_NVTX_MARK("clean_loop begin");
@@ -252,7 +252,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
 
       result.add_component(peak_coords, selected_scale_idx, gain);
 
-      FD_LOG_DEBUG("run_wscms:   [sub={}] peak={:.8f} at ({},{}) facet={} gain={:.6f}", n_clean_iter, peak_value,
+      FD_LOG_DEBUG("run_ddmsc:   [sub={}] peak={:.8f} at ({},{}) facet={} gain={:.6f}", n_clean_iter, peak_value,
                    peak_coords.first, peak_coords.second, facet_idx, gain);
 
       core::device_span3d<float> conv_psf = emu::submdspan(conv_psfs, facet_idx);
@@ -280,10 +280,10 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     stream_b.sync();
     FD_NVTX_MARK("clean_loop end");
 
-    // FD_LOG_INFO("run_wscms: scale {} produced {} clean iterations", selected_scale_idx, n_clean_iter);
+    // FD_LOG_INFO("run_ddmsc: scale {} produced {} clean iterations", selected_scale_idx, n_clean_iter);
 
     if (n_clean_iter == 0) {
-      FD_LOG_INFO("wscms_minor_cycles: no components found, stopping");
+      FD_LOG_INFO("ddmsc_minor_cycles: no components found, stopping");
       break;
     }
 
@@ -304,7 +304,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
 
     if (last_selected_scale != selected_scale_idx) {
       const float flux_to_go = this_flux - stop_flux;
-      FD_LOG_INFO("run_wscms: [iter={}] scale={} peak_flux={:.8f} rms={:.8f} flux_to_go={:.8f}", total_iterations,
+      FD_LOG_INFO("run_ddmsc: [iter={}] scale={} peak_flux={:.8f} rms={:.8f} flux_to_go={:.8f}", total_iterations,
                   selected_scale_idx, this_flux, this_rms, flux_to_go);
       last_selected_scale = selected_scale_idx;
     }
@@ -312,14 +312,14 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
     deconv_convergence.track_flux(this_flux, n_clean_iter);
     scale_stall_tracker.update(selected_scale_idx, this_rms);
 
-    FD_LOG_DEBUG("run_wscms: outer iter end delta_flux={:+.8f} delta_rms={:+.8f}", this_flux - track_flux,
+    FD_LOG_DEBUG("run_ddmsc: outer iter end delta_flux={:+.8f} delta_rms={:+.8f}", this_flux - track_flux,
                  this_rms - track_rms);
 
     track_flux = this_flux;
     track_rms = this_rms;
 
     if (scale_stall_tracker.is_stall(selected_scale_idx))
-      FD_LOG_INFO("wscms_minor_cycles: retired scale {} due to stall", selected_scale_idx);
+      FD_LOG_INFO("ddmsc_minor_cycles: retired scale {} due to stall", selected_scale_idx);
   }
 
   FD_NVTX_MARK("finalize begin");
@@ -327,7 +327,7 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   stream_b.sync();
 
   // TODO: deconv_convergence.status => log string
-  FD_LOG_INFO("run_wscms: completed ({} iterations, exit={})", deconv_convergence.iteration(),
+  FD_LOG_INFO("run_ddmsc: completed ({} iterations, exit={})", deconv_convergence.iteration(),
               static_cast<int>(deconv_convergence.status()));
 
   result.add_coeffs_from_device(core::device_span2d<float>{all_coeffs.data_handle(), total_iterations, n_order});
@@ -342,4 +342,4 @@ wscms_result run_wscms_cycles(context& ctx, const params& p, core::device_span3d
   return result;
 }
 
-}  // namespace fast_deconv::algorithm::wscms
+}  // namespace fast_deconv::algorithm::ddmsc

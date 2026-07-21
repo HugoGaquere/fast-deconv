@@ -2,8 +2,8 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
-#include <fast_deconv/algorithm/wscms_types.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <limits>
 #include <random>
@@ -16,7 +16,7 @@
 
 namespace core = fast_deconv::core;
 namespace scale = fast_deconv::scale;
-namespace wscms = fast_deconv::algorithm::wscms;
+namespace ddmsc = fast_deconv::algorithm::ddmsc;
 namespace fdtest = fast_deconv::test;
 
 using fdtest::flat;
@@ -94,7 +94,7 @@ TEST_F(ScalesTest, ConvolveWithScalesMatchesDirectConvolution)
   fdtest::fill_uniform(rng, dirty, -1.0f, 1.0f);
 
   const auto sr = res().make_stream();
-  wscms::scale_convolve_ctx ctx(sr, nrow, ncol, /*backward_batch_size=*/n_scales - 1, /*padding=*/1.5f);
+  ddmsc::scale_convolve_ctx ctx(sr, nrow, ncol, /*backward_batch_size=*/n_scales - 1, /*padding=*/1.5f);
   fdtest::scoped_work_area wa(res(), sr, ctx);
 
   fdtest::device_buffer<float> d_sigmas(res(), sr, sigmas);
@@ -221,7 +221,7 @@ TEST_F(ConvolvePsfs, ScaleZeroFastPathCopiesAndAveragesChannels)
   const std::vector<float> weights = {0.6f, 0.4f};
 
   const auto sr = res().make_stream();
-  wscms::psf_convolve_ctx ctx(sr, kH, kW, kFreq, 1.5f);
+  ddmsc::psf_convolve_ctx ctx(sr, kH, kW, kFreq, 1.5f);
   fdtest::scoped_work_area wa(res(), sr, ctx);
 
   fdtest::device_buffer<float> d_psfs(res(), sr, psfs);
@@ -258,7 +258,7 @@ TEST_F(ConvolvePsfs, DeltaPsfProducesGaussianAndSqrt2Gaussian)
   const double sigma = 1.2;
 
   const auto sr = res().make_stream();
-  wscms::psf_convolve_ctx ctx(sr, kH, kW, kFreq, 1.5f);
+  ddmsc::psf_convolve_ctx ctx(sr, kH, kW, kFreq, 1.5f);
   fdtest::scoped_work_area wa(res(), sr, ctx);
 
   fdtest::device_buffer<float> d_psfs(res(), sr, psfs);
@@ -302,7 +302,7 @@ TEST_F(ConvolvePsfs, AllScalesVariantSlicesPerScaleOutputs)
   const int n_scales = static_cast<int>(sigmas.size());
 
   const auto sr = res().make_stream();
-  wscms::psf_convolve_ctx ctx(sr, kH, kW, kFreq, 1.5f);
+  ddmsc::psf_convolve_ctx ctx(sr, kH, kW, kFreq, 1.5f);
   fdtest::scoped_work_area wa(res(), sr, ctx);
 
   fdtest::device_buffer<float> d_psfs(res(), sr, psfs);

@@ -6,8 +6,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <fast_deconv/algorithm/wscms.hpp>
-#include <fast_deconv/algorithm/wscms_types.hpp>
+#include <fast_deconv/algorithm/ddmsc.hpp>
+#include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -22,9 +22,9 @@
 #include "helpers/rng.hpp"
 
 // ============================================================================
-// Non-regression test: a full run_wscms_cycles pass on a fully synthetic,
+// Non-regression test: a full run_ddmsc_cycles pass on a fully synthetic,
 // seeded scene. Scalar METRICS of the run (not arrays) are compared against
-// the committed baseline tests/baselines/wscms_synthetic.json with loose,
+// the committed baseline tests/baselines/ddmsc_synthetic.json with loose,
 // per-metric tolerances so the test survives GPU / cuFFT-version drift while
 // still catching algorithmic regressions.
 //
@@ -34,7 +34,7 @@
 // ============================================================================
 
 namespace core = fast_deconv::core;
-namespace wscms = fast_deconv::algorithm::wscms;
+namespace ddmsc = fast_deconv::algorithm::ddmsc;
 namespace fdtest = fast_deconv::test;
 
 using json = nlohmann::ordered_json;
@@ -159,9 +159,9 @@ std::string format_table(const std::vector<metric_row>& rows)
 
 }  // namespace
 
-class WscmsNonReg : public fdtest::GpuTest {};
+class DdmscNonReg : public fdtest::GpuTest {};
 
-TEST_F(WscmsNonReg, SyntheticSceneMatchesBaselineMetrics)
+TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
 {
   // ---- Build the scene on the host.
   std::mt19937 rng(kSeed);
@@ -194,10 +194,10 @@ TEST_F(WscmsNonReg, SyntheticSceneMatchesBaselineMetrics)
   core::host_vect<float> bias_view(scale_bias.data(), kScales);
   core::host_span2d<int> map_view(map_pixel_facet.data(), kNrow, kNcol);
 
-  wscms::context ctx(/*exec_device=*/0, psfs_view, xdes_view, mask_view, sigmas_view, bias_view, map_view, kNrow, kNcol,
+  ddmsc::context ctx(/*exec_device=*/0, psfs_view, xdes_view, mask_view, sigmas_view, bias_view, map_view, kNrow, kNcol,
                      kFreq, /*fft_padding=*/1.5f);
 
-  const wscms::params p{
+  const ddmsc::params p{
       // Gaussian-component cleaning shrinks the residual by only ~5% of the
       // local peak per iteration on the largest scale, so give the run ample
       // headroom: it must stop on flux, never on this budget.
@@ -229,7 +229,7 @@ TEST_F(WscmsNonReg, SyntheticSceneMatchesBaselineMetrics)
   core::device_vect<float> weights_view(d_weights.get(), kFreq);
 
   // ---- Run the full minor-cycle driver. `dirty` is left as the residual.
-  const auto result = wscms::run_wscms_cycles(ctx, p, dirty_view, jones_view, weights_view);
+  const auto result = ddmsc::run_ddmsc_cycles(ctx, p, dirty_view, jones_view, weights_view);
 
   CHECK_CUDA(cudaMemcpyAsync(h_dirty.data(), d_dirty.get(), h_dirty.size() * sizeof(float), cudaMemcpyDeviceToHost,
                              sr.cuda_stream));
@@ -309,7 +309,7 @@ TEST_F(WscmsNonReg, SyntheticSceneMatchesBaselineMetrics)
   const char* update = std::getenv("FAST_DECONV_UPDATE_BASELINE");
   if (update != nullptr && std::string(update) != "0") {
     json out = {{"schema_version", 1},
-                {"note", "regenerate with FAST_DECONV_UPDATE_BASELINE=1; tolerances live in test_wscms_nonreg.cu"},
+                {"note", "regenerate with FAST_DECONV_UPDATE_BASELINE=1; tolerances live in test_ddmsc_nonreg.cu"},
                 {"config", config},
                 {"metrics", metrics}};
     std::ofstream f(baseline_path);

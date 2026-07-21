@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot per-cycle WSCMS stats from a CSV produced by example_wscms --csv=PATH.
+"""Plot per-cycle DDMSC stats from a CSV produced by example_ddmsc --csv=PATH.
 
 Renders two figures:
   - timing: bars of wallclock seconds, with minor-iter count on the right axis.
@@ -30,7 +30,7 @@ def main() -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("csv", type=Path, help="CSV from example_wscms --csv=PATH")
+    p.add_argument("csv", type=Path, help="CSV from example_ddmsc --csv=PATH")
     p.add_argument("--save", type=Path, help="Write to file instead of showing")
     args = p.parse_args()
 
@@ -57,7 +57,7 @@ def main() -> int:
     ax.set_ylabel("elapsed (s)", color="C0")
     ax.tick_params(axis="y", labelcolor="C0")
     ax.set_title(
-        f"WSCMS per-cycle timing — total {total_s:.2f} s, {total_iters} iters, {len(cycle_ids)} cycle(s)"
+        f"DDMSC per-cycle timing — total {total_s:.2f} s, {total_iters} iters, {len(cycle_ids)} cycle(s)"
     )
     for bar, sec, it in zip(bars, elapsed_s, iters):
         ax.text(
@@ -87,7 +87,7 @@ def main() -> int:
     axp.plot(labels, stop_flux, color="C2", linestyle="--", marker="x", label="stop_flux")
     axp.set_xlabel("cycle id")
     axp.set_ylabel("flux")
-    axp.set_title(f"WSCMS residual peak over {len(cycle_ids)} cycle(s)")
+    axp.set_title(f"DDMSC residual peak over {len(cycle_ids)} cycle(s)")
     if all(f > 0 for f in final_flux + stop_flux):
         axp.set_yscale("log")
     axp.grid(True, which="both", alpha=0.3)

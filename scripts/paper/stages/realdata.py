@@ -1,11 +1,11 @@
-"""Stage 5 -- real-data cycle timings + convergence via example_wscms.
+"""Stage 5 -- real-data cycle timings + convergence via example_ddmsc.
 
 Requires --dump-dir pointing at a FastDDFacet dump_ref export (init/ +
 cycle_<N>/ subdirectories). Produces per-cycle wall time, iteration counts,
 ms per minor iteration, and the convergence plot (residual peak vs the stop
 threshold).
 
-With --dump-gpu-output (or when --ref-dir is set), example_wscms additionally
+With --dump-gpu-output (or when --ref-dir is set), example_ddmsc additionally
 writes each cycle's component list and final residual under
 realdata/gpu_output/ for the fidelity stage. The residual is
 n_freq * nrow * ncol float32 -- several GiB for survey-size images -- which is
@@ -23,7 +23,7 @@ _INITIAL_FLUX_RE = re.compile(r"initial pak_flux=([-\d.eE+]+)")
 
 def _initial_fluxes(out) -> list[float]:
     """Per-cycle initial peak flux parsed, in cycle order, from the realdata run
-    log -- example_wscms logs one 'initial pak_flux=' line per cycle but does not
+    log -- example_ddmsc logs one 'initial pak_flux=' line per cycle but does not
     write it to the CSV. Empty when the log is absent."""
     log = Path(out).parent / "logs" / "realdata_run.log"
     if not log.exists():
@@ -38,7 +38,7 @@ def run(ctx: Ctx) -> dict:
     csv_path = out / "cycles.csv"
 
     cmd = [
-        ctx.binary("example_wscms"),
+        ctx.binary("example_ddmsc"),
         ctx.dump_dir,
         f"--cycles={ctx.cycles}",
         f"--device={ctx.device}",

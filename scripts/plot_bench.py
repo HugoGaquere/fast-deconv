@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Plot bench_wscms sweep results as image-size scaling curves.
+"""Plot bench_ddmsc sweep results as image-size scaling curves.
 
 The benchmark is a Cartesian product over many axes. This plots image size on the
 x-axis against each metric on the y-axis. The effect of every *other* swept axis
@@ -59,7 +59,7 @@ METRICS = [
 # Hold value for an axis when it is *not* the one being varied (its "median"
 # baseline). Auto-computed by mid() unless overridden here. An override must be a
 # value actually swept for that axis, and for --mode=ofat must match the baseline
-# in src/bench_wscms.cu so the generated cross still lines up.
+# in src/bench_ddmsc.cu so the generated cross still lines up.
 MEDIAN_OVERRIDE = {"n_freq": 2, "n_scales": 5, "n_facet": 100}
 INT_COLS = {
     "nrow", "ncol", "n_freq", "n_scales", "n_facet", "n_order", "psf_nrow",
@@ -132,7 +132,7 @@ def scaling_guide(sizes, x0, y0):
 def mid(values):
     """Representative element of a sorted distinct list (middle element).
 
-    This must match the OFAT baseline in src/bench_wscms.cu (median_value: sort,
+    This must match the OFAT baseline in src/bench_ddmsc.cu (median_value: sort,
     dedup, take index len//2). If the two diverge, --mode=ofat stops generating
     the rows this plotter selects and every panel silently empties out.
     """

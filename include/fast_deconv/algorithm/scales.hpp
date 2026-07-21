@@ -1,5 +1,5 @@
 #pragma once
-#include <fast_deconv/algorithm/wscms_types.hpp>
+#include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/core/span_types.hpp>
 
@@ -14,9 +14,8 @@ namespace fast_deconv::scale {
  * @param[out] scales          Output kernels, device,
  *                             shape (n_scales, scale_nrow, scale_ncol_half).
  */
-void make_gaussian_kernels_async(const core::stream_resources& stream_res,
-                                 core::device_vect<float> sigmas, int scale_ncol_full,
-                                 core::device_span3d<float> scales);
+void make_gaussian_kernels_async(const core::stream_resources& stream_res, core::device_vect<float> sigmas,
+                                 int scale_ncol_full, core::device_span3d<float> scales);
 
 /**
  * @brief   Convolve a 2D mean residual image with Gaussian scale kernels.
@@ -28,24 +27,19 @@ void make_gaussian_kernels_async(const core::stream_resources& stream_res,
  * @param[out] out_scaled_dirty Per-scale convolved output, device,
  *                              shape (n_scales, nrow, ncol).
  */
-void convolve_with_scales(const algorithm::wscms::scale_convolve_ctx& ctx,
-                          core::device_span2d<float> dirty,
-                          core::device_span3d<float> scales,
-                          core::device_span3d<float> out_scaled_dirty);
+void convolve_with_scales(const algorithm::ddmsc::scale_convolve_ctx& ctx, core::device_span2d<float> dirty,
+                          core::device_span3d<float> scales, core::device_span3d<float> out_scaled_dirty);
 
 /**
  * @brief   Finds the best scale and peak pixel via biased peak-finding.
-*
+ *
  * @param[in,out] scaled_dirty   Per-scale residuals, device, shape (n_scales, nrow, ncol).
  * @param[in]     bias           Per-scale bias, host, shape (n_scales,).
  * @param[in]     retired_scales Scale indices to exclude from selection.
  * @return Unbiased peak value and pixel coordinates of the selected scale.
  */
-int scale_selection(
-    const core::stream_resources& stream_res,
-    core::device_span3d<float> scaled_dirty, core::host_vect<float> bias,
-    const std::vector<int>& retired_scales);
-
+int scale_selection(const core::stream_resources& stream_res, core::device_span3d<float> scaled_dirty,
+                    core::host_vect<float> bias, const std::vector<int>& retired_scales);
 
 /**
  * @brief   Convolve PSFs with Gaussian(sigma) for all facets, producing
@@ -66,15 +60,12 @@ int scale_selection(
  * @param[out] out_conv2_mean Double-convolved weighted-mean PSFs, device,
  *                            shape (n_facets, psf_h, psf_w), pre-allocated.
  */
-void convolve_psfs_with_scale_async(const algorithm::wscms::psf_convolve_ctx& ctx,
-                                    core::device_span4d<float> psfs, core::device_vect<float> d_sigma,
-                                    int scale_idx, core::device_vect<float> weights,
-                                    core::device_span4d<float> out_conv_psf,
-                                    core::device_span3d<float> out_conv2_mean);
+void convolve_psfs_with_scale_async(const algorithm::ddmsc::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
+                                    core::device_vect<float> d_sigma, int scale_idx, core::device_vect<float> weights,
+                                    core::device_span4d<float> out_conv_psf, core::device_span3d<float> out_conv2_mean);
 
-void convolve_psfs_with_scales_async(const algorithm::wscms::psf_convolve_ctx& ctx,
-                                     core::device_span4d<float> psfs, core::device_vect<float> d_sigmas,
-                                     core::device_vect<float> weights,
+void convolve_psfs_with_scales_async(const algorithm::ddmsc::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
+                                     core::device_vect<float> d_sigmas, core::device_vect<float> weights,
                                      core::device_span5d<float> out_conv_psf,
                                      core::device_span4d<float> out_conv2_mean);
 
