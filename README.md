@@ -25,7 +25,7 @@ uv sync          # editable install for development
 pip install .
 ```
 
-Runtime deps: `numpy`, `cupy-cuda12x`.
+Runtime deps: `numpy`.
 
 ## Build (C++ only)
 
