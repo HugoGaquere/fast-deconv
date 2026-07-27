@@ -31,26 +31,22 @@ class DdmscClass : public fdtest::GpuTest {
     fdtest::GpuTest::SetUp();
     if (IsSkipped()) return;
 
-    sr_ = std::make_unique<holder>(res());
+    psfs_.assign(kFacets * kFreq * kSize * kSize, 0.0f);
+    for (int f = 0; f < kFreq; ++f) psfs_.at(f * kSize * kSize + (kSize / 2) * kSize + kSize / 2) = 1.0f;
 
-    std::vector<float> psfs(kFacets * kFreq * kSize * kSize, 0.0f);
-    for (int f = 0; f < kFreq; ++f) psfs.at(f * kSize * kSize + (kSize / 2) * kSize + kSize / 2) = 1.0f;
-    d_psfs_ = std::make_unique<fdtest::device_buffer<float>>(res(), sr_->sr, psfs);
-
-    d_xdes_ =
-        std::make_unique<fdtest::device_buffer<float>>(res(), sr_->sr, std::vector<float>{1.0f, 0.0f, 1.0f, 0.1f});
-    d_mask_ = std::make_unique<fdtest::device_buffer<bool>>(res(), sr_->sr, std::vector<bool>(kSize * kSize, false));
-    d_sigmas_ = std::make_unique<fdtest::device_buffer<float>>(res(), sr_->sr, std::vector<float>{0.0f, 1.5f});
+    xdes_ = {1.0f, 0.0f, 1.0f, 0.1f};
+    mask_ = std::make_unique<bool[]>(kSize * kSize);  // value-initialized to false
+    sigmas_ = {0.0f, 1.5f};
     scale_bias_ = {1.0f, 0.8f};
     map_pixel_facet_ = std::vector<int>(kSize * kSize, 0);
   }
 
   ddmsc::Ddmsc make_ddmsc()
   {
-    core::device_span4d<float> psf_view(d_psfs_->get(), kFacets, kFreq, kSize, kSize);
-    core::device_span2d<float> xdes_view(d_xdes_->get(), kFreq, kOrder);
-    core::device_span2d<bool> mask_view(d_mask_->get(), kSize, kSize);
-    core::device_vect<float> sigma_view(d_sigmas_->get(), kScales);
+    core::host_span4d<float> psf_view(psfs_.data(), kFacets, kFreq, kSize, kSize);
+    core::host_span2d<float> xdes_view(xdes_.data(), kFreq, kOrder);
+    core::host_span2d<bool> mask_view(mask_.get(), kSize, kSize);
+    core::host_vect<float> sigma_view(sigmas_.data(), kScales);
     core::host_vect<float> bias_view(scale_bias_.data(), kScales);
     core::host_span2d<int> map_view(map_pixel_facet_.data(), kSize, kSize);
 
@@ -59,17 +55,11 @@ class DdmscClass : public fdtest::GpuTest {
   }
 
  private:
-  // stream_resources is non-movable; hold it behind a pointer so SetUp can
-  // create it after the GPU check.
-  struct holder {
-    explicit holder(core::resources& r) : sr(r.make_stream()) {}
-    core::stream_resources sr;
-  };
-  std::unique_ptr<holder> sr_;
-  std::unique_ptr<fdtest::device_buffer<float>> d_psfs_;
-  std::unique_ptr<fdtest::device_buffer<float>> d_xdes_;
-  std::unique_ptr<fdtest::device_buffer<bool>> d_mask_;
-  std::unique_ptr<fdtest::device_buffer<float>> d_sigmas_;
+  // Static inputs live on the host; the Ddmsc constructor stages them to device.
+  std::vector<float> psfs_;
+  std::vector<float> xdes_;
+  std::unique_ptr<bool[]> mask_;
+  std::vector<float> sigmas_;
   std::vector<float> scale_bias_;
   std::vector<int> map_pixel_facet_;
 };

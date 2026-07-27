@@ -18,20 +18,22 @@ namespace fast_deconv::algorithm::ddmsc {
  *          `run()` accepts only the per-call inputs that change between major
  *          cycles: the dirty image, jones normalization, and per-frequency
  *          weights. All algorithm parameters are tunable.
+ *
+ *          All array inputs are host views: the constructor and `run()` copy
+ *          them host->device internally. `dirty` is in/out — its residual is
+ *          copied back into the caller's host buffer when `run()` returns.
  */
 class Ddmsc {
  public:
-  Ddmsc(const core::device_span4d<float>& raw_psfs, const core::device_span2d<float>& xdes,
-        const core::device_span2d<bool>& mask, const core::device_vect<float>& scale_sigmas,
+  Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
+        const core::host_span2d<bool>& mask, const core::host_vect<float>& scale_sigmas,
         const core::host_vect<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
         int dirty_ncol, int n_freq, float fft_padding, int exec_device = 0);
 
-  /// Run one full deconvolution session.
-  ddmsc_result run(core::device_span3d<float>& dirty, const core::device_span3d<float>& jones_norm,
-                   const core::device_vect<float>& weights_freq);
-
-  /// Hot-swap the mask between runs
-  void set_scale_mask(const core::device_span2d<bool>& mask) { ctx_.workspace.mask = mask; }
+  /// Run one full deconvolution session. The updated residual is written back
+  /// into @p dirty (host, in/out) before returning.
+  ddmsc_result run(core::host_span3d<float>& dirty, const core::host_span3d<float>& jones_norm,
+                   const core::host_vect<float>& weights_freq);
 
   bool clean_negative() const { return params_.clean_negative; }
   void set_clean_negative(bool v) { params_.clean_negative = v; }

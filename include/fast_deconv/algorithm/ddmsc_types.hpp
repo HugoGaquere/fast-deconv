@@ -6,6 +6,7 @@
 #include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "fast_deconv/linalg/fft.hpp"
@@ -113,37 +114,72 @@ struct context {
   // per-channel fit/subtract path that overlaps with the main stream.
   core::stream_resources compute_stream;
   core::stream_resources aux_stream;
+  // Device copies of the static inputs, staged host->device at construction.
+  // The workspace holds non-owning views into these buffers, so they must be
+  // declared after the streams (which mint them) but before the workspace.
+  core::device_cont4d<float> raw_psfs_d;
+  core::device_cont2d<float> xdes_d;
+  core::device_cont2d<bool> mask_d;
+  core::device_cont<float> scale_sigmas_d;
   // Single cuFFT workspace shared by both FFT contexts: their plans all run
   // sequentially on compute_stream, so one buffer of the max required size
   // suffices. Owned here, freed on compute_stream at destruction.
   void* fft_work_area = nullptr;
   ddmsc::workspace workspace;
 
+  /// Allocate a device buffer matching @p src and copy it host->device on
+  /// @p stream (stream-ordered; the caller syncs before the host source dies).
+  /// Templated on the host span type: rank/element type can't be deduced
+  /// through the h_mdspan alias (N is non-deduced inside dextents).
+  template <typename T, typename HostSpan, std::size_t... I>
+  static core::mdcontainer<T, sizeof...(I)> stage_h2d_impl(const core::stream_resources& stream, const HostSpan& src,
+                                                           std::index_sequence<I...>)
+  {
+    auto dst = stream.alloc_mdcontainer_async<T>(src.extent(I)...);
+    CHECK_CUDA(cudaMemcpyAsync(dst.data_handle(), src.data_handle(), src.size() * sizeof(T), cudaMemcpyHostToDevice,
+                               stream.cuda_stream));
+    return dst;
+  }
+
+  template <typename HostSpan>
+  static auto stage_h2d(const core::stream_resources& stream, const HostSpan& src)
+  {
+    using T = typename HostSpan::element_type;
+    return stage_h2d_impl<T>(stream, src, std::make_index_sequence<HostSpan::rank()>{});
+  }
+
   /**
-   * @brief Build the GPU memory pool and streams, the cuFFT plans for scale
-   *        and PSF convolutions (bound to compute_stream and sharing one work
-   *        area), and bind the user-provided spans into the workspace.
+   * @brief Build the GPU memory pool and streams, stage the static inputs
+   *        host->device, build the cuFFT plans for scale and PSF convolutions
+   *        (bound to compute_stream and sharing one work area), and bind the
+   *        device copies into the workspace.
    *
-   * Spans are stored as views — the caller must keep their backing memory alive
-   * for the lifetime of the context.
+   * The raw_psfs/xdes/mask/scale_sigmas inputs are copied into device buffers
+   * owned by the context; the caller need only keep them alive for the duration
+   * of this constructor. scale_bias/map_pixel_facet stay host views — the
+   * caller must keep their backing memory alive for the lifetime of the context.
    */
-  context(int exec_device, const core::device_span4d<float>& raw_psfs, const core::device_span2d<float>& xdes,
-          const core::device_span2d<bool>& mask, const core::device_vect<float>& scale_sigmas,
+  context(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
+          const core::host_span2d<bool>& mask, const core::host_vect<float>& scale_sigmas,
           const core::host_vect<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
           int dirty_ncol, int n_freq, float fft_padding)
       : exec_resources(exec_device),
         compute_stream(exec_resources.make_stream()),
         aux_stream(exec_resources.make_stream()),
+        raw_psfs_d(stage_h2d(compute_stream, raw_psfs)),
+        xdes_d(stage_h2d(compute_stream, xdes)),
+        mask_d(stage_h2d(compute_stream, mask)),
+        scale_sigmas_d(stage_h2d(compute_stream, scale_sigmas)),
         workspace{
             .scale_convolve =
                 scale_convolve_ctx(compute_stream, dirty_nrow, dirty_ncol,
-                                   /*backward_batch_size=*/static_cast<int>(scale_sigmas.size()) - 1, fft_padding),
+                                   /*backward_batch_size=*/static_cast<int>(scale_sigmas_d.size()) - 1, fft_padding),
             .psf_convolve =
-                psf_convolve_ctx(compute_stream, raw_psfs.extent(2), raw_psfs.extent(3), n_freq, fft_padding),
-            .raw_psfs = raw_psfs,
-            .xdes = xdes,
-            .mask = mask,
-            .scale_sigmas = scale_sigmas,
+                psf_convolve_ctx(compute_stream, raw_psfs_d.extent(2), raw_psfs_d.extent(3), n_freq, fft_padding),
+            .raw_psfs = raw_psfs_d,
+            .xdes = xdes_d,
+            .mask = mask_d,
+            .scale_sigmas = scale_sigmas_d,
             .scale_bias = scale_bias,
             .map_pixel_facet = map_pixel_facet,
         }
@@ -152,8 +188,10 @@ struct context {
         std::max(workspace.scale_convolve.required_work_size(), workspace.psf_convolve.required_work_size());
     if (shared_work_size > 0) {
       fft_work_area = compute_stream.alloc_async(shared_work_size);
-      compute_stream.sync();
     }
+    // Completes the static-input staging copies (above) and the work-area alloc
+    // before the host sources can be released.
+    compute_stream.sync();
     workspace.scale_convolve.bind_work_area(fft_work_area);
     workspace.psf_convolve.bind_work_area(fft_work_area);
   }

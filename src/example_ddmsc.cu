@@ -219,26 +219,19 @@ int main(int argc, char** argv)
   printf("  image: %dx%d  psf: %dx%d  freq: %d  order: %d  facets: %d  scales: %d  cycles_to_run: %zu\n", nrow, ncol,
          psf_nrow, psf_ncol, n_freq, n_order, n_facet, n_scales, cycle_ids.size());
 
-  // ----- Upload constant (init) arrays to device -----
-  float* d_raw_psfs = device_upload(npy_raw_psfs.as_float32(), npy_raw_psfs.size());
-  float* d_xdes = device_upload(npy_xdes.as_float32(), npy_xdes.size());
-  float* d_scale_sig = device_upload(npy_scale_sigmas.as_float32(), npy_scale_sigmas.size());
-  // First cycle's mask is uploaded up front so the context ctor receives a
-  // valid span. d_mask_current then tracks whichever mask buffer is currently
-  // bound to ctx.workspace.mask; cycles after the first free the previous
-  // buffer and upload a fresh one.
-  bool* d_mask_current = device_upload(npy_mask0.as_bool(), npy_mask0.size());
-
-  // Host arrays (no device upload)
+  // ----- Build host mdspan views for the static inputs -----
+  // The context stages raw_psfs/xdes/scale_sigmas/mask to the device itself, so
+  // no static-input device buffers are needed here. The mask is fixed for the
+  // whole run (staged once at construction).
   float* h_scale_bias = npy_scale_bias.as_float32();
   int* h_map_pixel = npy_map_pixel.as_int32();
 
-  // ----- Build mdspan views for constant inputs -----
-  core::device_span4d<float> raw_psfs(d_raw_psfs, n_facet, n_freq, psf_nrow, psf_ncol);
-  core::device_span2d<float> xdes(d_xdes, n_freq, n_order);
-  core::device_span2d<bool> mask0(d_mask_current, static_cast<int>(npy_mask0.shape[0]),
-                                  static_cast<int>(npy_mask0.shape[1]));
-  core::device_vect<float> scale_sigmas(d_scale_sig, n_scales);
+  core::host_span4d<float> raw_psfs(npy_raw_psfs.as_float32(), n_facet, n_freq, psf_nrow, psf_ncol);
+  core::host_span2d<float> xdes(npy_xdes.as_float32(), n_freq, n_order);
+  const int mask_nrow = static_cast<int>(npy_mask0.shape[0]);
+  const int mask_ncol = static_cast<int>(npy_mask0.shape[1]);
+  core::host_span2d<bool> mask0(npy_mask0.as_bool(), mask_nrow, mask_ncol);
+  core::host_vect<float> scale_sigmas(npy_scale_sigmas.as_float32(), n_scales);
   core::host_vect<float> scale_bias(h_scale_bias, n_scales);
   core::host_span2d<int> map_pixel_facet(h_map_pixel, nrow, ncol);
 
@@ -282,12 +275,11 @@ int main(int argc, char** argv)
     const int cid = cycle_ids[idx];
     printf("\n===== cycle %d (%zu/%zu) =====\n", cid, idx + 1, cycle_ids.size());
 
-    // Reuse the pre-loaded cycle-0 dirty/mask on the first iteration to avoid
-    // a redundant disk read.
+    // Reuse the pre-loaded cycle-0 dirty on the first iteration to avoid a
+    // redundant disk read.
     auto npy_dirty = (idx == 0) ? std::move(npy_dirty0) : load_cycle(cid, "dirty");
     auto npy_jones_norm = load_cycle(cid, "jones_norm");
     auto npy_weights_freq = load_cycle(cid, "weights_freq");
-    auto npy_mask = (idx == 0) ? std::move(npy_mask0) : load_cycle(cid, "mask");
 
     auto npy_max_iteration = load_cycle(cid, "max_iteration");
     auto npy_max_sub_iter = load_cycle(cid, "max_sub_iteration");
@@ -310,26 +302,15 @@ int main(int argc, char** argv)
       return 1;
     }
 
-    // Per-cycle device uploads. The mask is special-cased so iter 0 reuses
-    // the buffer already uploaded for the context ctor.
+    // Per-cycle device uploads for the inputs run_ddmsc_cycles consumes on the
+    // device. The mask is fixed and was staged once at construction.
     float* d_dirty = device_upload(npy_dirty.as_float32(), npy_dirty.size());
     float* d_jones_norm = device_upload(npy_jones_norm.as_float32(), npy_jones_norm.size());
     float* d_weights = device_upload(npy_weights_freq.as_float32(), npy_weights_freq.size());
-    if (idx > 0) {
-      cudaFree(d_mask_current);
-      d_mask_current = device_upload(npy_mask.as_bool(), npy_mask.size());
-    }
-
-    const int mask_nrow = static_cast<int>(npy_mask.shape[0]);
-    const int mask_ncol = static_cast<int>(npy_mask.shape[1]);
 
     core::device_span3d<float> dirty(d_dirty, n_freq, nrow, ncol);
     core::device_span3d<float> jones_norm(d_jones_norm, n_freq, nrow, ncol);
     core::device_vect<float> weights_freq(d_weights, n_freq);
-    core::device_span2d<bool> mask_cycle(d_mask_current, mask_nrow, mask_ncol);
-
-    // Hot-swap the mask for this cycle.
-    ctx.workspace.mask = mask_cycle;
 
     // --force-auto-mask-last forces auto-masking on the final cycle of the
     // set regardless of the dump's per-cycle force_auto_mask flag.
@@ -451,12 +432,6 @@ int main(int argc, char** argv)
     }
     printf("Wrote %s\n", csv_path.c_str());
   }
-
-  // ----- Cleanup -----
-  cudaFree(d_mask_current);
-  cudaFree(d_raw_psfs);
-  cudaFree(d_xdes);
-  cudaFree(d_scale_sig);
 
   return 0;
 }
