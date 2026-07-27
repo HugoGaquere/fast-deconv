@@ -18,7 +18,7 @@ void bind_ddmsc(py::module_& m)
 {
   auto ddmsc_module = m.def_submodule("ddmsc", "DDMSC module");
 
-  py::class_<ddmsc::ddmsc_result>(ddmsc_module, "DdmscResult")
+  py::class_<ddmsc::ddmsc_result>(ddmsc_module, "DDMSCResult")
       .def_readonly("peak_coords", &ddmsc::ddmsc_result::peak_coords)
       .def_readonly("scales", &ddmsc::ddmsc_result::scales)
       .def_readonly("gains", &ddmsc::ddmsc_result::gains)
@@ -27,21 +27,19 @@ void bind_ddmsc(py::module_& m)
       .def_readonly("stop_flux", &ddmsc::ddmsc_result::stop_flux)
       .def_readonly("total_iterations", &ddmsc::ddmsc_result::total_iterations);
 
-  py::class_<ddmsc::Ddmsc>(ddmsc_module, "Ddmsc")
-      .def(py::init<const core::device_span4d<float>&, const core::device_span2d<float>&,
-                    const core::device_span2d<bool>&, const core::device_vect<float>&, const core::host_vect<float>&,
-                    const core::host_span2d<int>&, int, int, int, float, int>(),
+  py::class_<ddmsc::Ddmsc>(ddmsc_module, "DDMSC")
+      .def(py::init<const core::host_span4d<float>&, const core::host_span2d<float>&, const core::host_span2d<bool>&,
+                    const core::host_vect<float>&, const core::host_vect<float>&, const core::host_span2d<int>&, int,
+                    int, int, float, int>(),
            py::arg("raw_psfs"), py::arg("xdes"), py::arg("scale_mask"), py::arg("scale_sigmas"), py::arg("scale_bias"),
            py::arg("map_pixel_facet"), py::arg("dirty_nrow"), py::arg("dirty_ncol"), py::arg("n_freq"),
-           py::arg("fft_padding"), py::arg("exec_device") = 0, py::keep_alive<1, 2>(),  // raw_psfs
-           py::keep_alive<1, 3>(),                                                      // xdes
-           py::keep_alive<1, 4>(),                                                      // scale_mask
-           py::keep_alive<1, 5>(),                                                      // scale_sigmas
-           py::keep_alive<1, 6>(),                                                      // scale_bias
-           py::keep_alive<1, 7>())                                                      // map_pixel_facet
+           py::arg("fft_padding"), py::arg("exec_device") = 0,
+           // raw_psfs/xdes/scale_mask/scale_sigmas are copied host->device; only the host-view inputs must outlive the
+           // object.
+           py::keep_alive<1, 6>(),  // scale_bias
+           py::keep_alive<1, 7>())  // map_pixel_facet
       .def("run", &ddmsc::Ddmsc::run, py::arg("dirty"), py::arg("jones_norm"), py::arg("weights_freq"),
            R"pbdoc(Run the DDMSC minor-cycle loop with stall/divergence checks.)pbdoc")
-      .def("set_scale_mask", &ddmsc::Ddmsc::set_scale_mask, py::arg("scale_mask"), py::keep_alive<1, 2>())
       .def_property("clean_negative", &ddmsc::Ddmsc::clean_negative, &ddmsc::Ddmsc::set_clean_negative)
       .def_property("peak_factor", &ddmsc::Ddmsc::peak_factor, &ddmsc::Ddmsc::set_peak_factor)
       .def_property("gamma", &ddmsc::Ddmsc::gamma, &ddmsc::Ddmsc::set_gamma)

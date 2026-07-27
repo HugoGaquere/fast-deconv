@@ -429,12 +429,15 @@ static std::size_t estimate_bytes(const bench_config& c)
   const std::size_t psf_pad = static_cast<std::size_t>(psf_pr) * psf_pc;
   const std::size_t psf_freq = static_cast<std::size_t>(psf_pr) * (psf_pc / 2 + 1);
 
-  // (1) Standalone driver input buffers (cudaMalloc, outside the pool).
+  // (1) Driver input buffers. The static inputs (psfs/xdes/sigmas/mask) are
+  //   staged into the context pool by its constructor; the per-run
+  //   dirty/jones/weights remain standalone cudaMalloc. Both are live device
+  //   memory, so the total footprint is unchanged.
   std::size_t input_buffers = 0;
-  input_buffers += nfac * nf * psf_npix * F;  // d_psfs
-  input_buffers += nf * no * F;               // d_xdes
-  input_buffers += ns * F;                    // d_sigmas
-  input_buffers += npix * sizeof(bool);       // d_mask
+  input_buffers += nfac * nf * psf_npix * F;  // raw_psfs (context-staged)
+  input_buffers += nf * no * F;               // xdes (context-staged)
+  input_buffers += ns * F;                    // scale_sigmas (context-staged)
+  input_buffers += npix * sizeof(bool);       // scale_mask (context-staged)
   input_buffers += nf * npix * F;             // d_jones
   input_buffers += nf * F;                    // d_weights
   input_buffers += 2 * nf * npix * F;         // d_dirty + d_dirty_master
@@ -570,11 +573,8 @@ static config_result run_config(const bench_config& c, const bench_options& opt,
   const std::vector<unsigned char>& h_mask =
       cache_get(cache.mask, std::make_tuple(c.nrow, c.ncol), [&] { return std::vector<unsigned char>(npix, 0); });
 
-  // ----- Upload persistent device buffers (once) -----
-  float* d_psfs = device_upload(h_psfs.data(), h_psfs.size());
-  float* d_xdes = device_upload(h_xdes.data(), h_xdes.size());
-  float* d_sigmas = device_upload(h_sigmas.data(), h_sigmas.size());
-  bool* d_mask = device_upload(reinterpret_cast<const bool*>(h_mask.data()), h_mask.size());
+  // ----- Upload the per-run device buffers (once); the context stages its
+  // static inputs (psfs/xdes/sigmas/mask) from the host itself. -----
   float* d_jones = device_upload(h_jones.data(), h_jones.size());
   float* d_weights = device_upload(h_weights.data(), h_weights.size());
   float* d_dirty_master = device_upload(h_dirty.data(), h_dirty.size());  // pristine
@@ -582,10 +582,10 @@ static config_result run_config(const bench_config& c, const bench_options& opt,
   BENCH_CHECK_CUDA(cudaMalloc(reinterpret_cast<void**>(&d_dirty), h_dirty.size() * sizeof(float)));
 
   // ----- Views (host arrays kept alive for span validity) -----
-  core::device_span4d<float> raw_psfs(d_psfs, c.n_facet, c.n_freq, c.psf_nrow, c.psf_ncol);
-  core::device_span2d<float> xdes(d_xdes, c.n_freq, c.n_order);
-  core::device_span2d<bool> mask(d_mask, c.nrow, c.ncol);
-  core::device_vect<float> scale_sigmas(d_sigmas, c.n_scales);
+  core::host_span4d<float> raw_psfs(const_cast<float*>(h_psfs.data()), c.n_facet, c.n_freq, c.psf_nrow, c.psf_ncol);
+  core::host_span2d<float> xdes(const_cast<float*>(h_xdes.data()), c.n_freq, c.n_order);
+  core::host_span2d<bool> mask(reinterpret_cast<bool*>(const_cast<unsigned char*>(h_mask.data())), c.nrow, c.ncol);
+  core::host_vect<float> scale_sigmas(const_cast<float*>(h_sigmas.data()), c.n_scales);
   core::host_vect<float> scale_bias(const_cast<float*>(h_bias.data()), c.n_scales);
   core::host_span2d<int> map_pixel_facet(const_cast<int*>(h_map.data()), c.nrow, c.ncol);
   core::device_span3d<float> dirty(d_dirty, c.n_freq, c.nrow, c.ncol);
@@ -660,10 +660,6 @@ static config_result run_config(const bench_config& c, const bench_options& opt,
   cudaFree(d_dirty_master);
   cudaFree(d_weights);
   cudaFree(d_jones);
-  cudaFree(d_mask);
-  cudaFree(d_sigmas);
-  cudaFree(d_xdes);
-  cudaFree(d_psfs);
 
   return out;
 }

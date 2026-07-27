@@ -10,6 +10,7 @@
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fstream>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <random>
@@ -166,7 +167,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   // ---- Build the scene on the host.
   std::mt19937 rng(kSeed);
   auto h_dirty = make_dirty(rng);
-  const auto h_psfs = make_psfs();
+  auto h_psfs = make_psfs();
 
   std::vector<float> h_xdes(kFreq * kOrder);
   for (int f = 0; f < kFreq; ++f) {
@@ -174,23 +175,22 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
     h_xdes.at(f * kOrder + 1) = static_cast<float>(std::log(kNu.at(f) / kNu.at(0)));
   }
 
-  // ---- Upload. All spans stay alive for the whole run (context stores views).
+  // ---- Upload the per-run inputs; the context copies its static inputs itself.
   const auto sr = res().make_stream();
   fdtest::device_buffer<float> d_dirty(res(), sr, h_dirty);
-  fdtest::device_buffer<float> d_psfs(res(), sr, h_psfs);
   fdtest::device_buffer<float> d_jones(res(), sr, std::vector<float>(static_cast<std::size_t>(kFreq) * kNpix, 1.0f));
   fdtest::device_buffer<float> d_weights(res(), sr, std::vector<float>(kFreq, 1.0f / kFreq));
-  fdtest::device_buffer<float> d_xdes(res(), sr, h_xdes);
-  fdtest::device_buffer<float> d_sigmas(res(), sr, std::vector<float>(kScaleSigmas.begin(), kScaleSigmas.end()));
-  fdtest::device_buffer<bool> d_mask(res(), sr, std::vector<bool>(kNpix, false));
 
+  auto h_mask = std::make_unique<bool[]>(kNpix);
+  std::vector<float> h_sigmas(kScaleSigmas.begin(), kScaleSigmas.end());
   std::vector<float> scale_bias(kScaleBias.begin(), kScaleBias.end());
   std::vector<int> map_pixel_facet(kNpix, 0);
 
-  core::device_span4d<float> psfs_view(d_psfs.get(), kFacets, kFreq, kNrow, kNcol);
-  core::device_span2d<float> xdes_view(d_xdes.get(), kFreq, kOrder);
-  core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
-  core::device_vect<float> sigmas_view(d_sigmas.get(), kScales);
+  // Static inputs stay on the host; the context stages them to the device.
+  core::host_span4d<float> psfs_view(h_psfs.data(), kFacets, kFreq, kNrow, kNcol);
+  core::host_span2d<float> xdes_view(h_xdes.data(), kFreq, kOrder);
+  core::host_span2d<bool> mask_view(h_mask.get(), kNrow, kNcol);
+  core::host_vect<float> sigmas_view(h_sigmas.data(), kScales);
   core::host_vect<float> bias_view(scale_bias.data(), kScales);
   core::host_span2d<int> map_view(map_pixel_facet.data(), kNrow, kNcol);
 

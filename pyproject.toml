@@ -36,3 +36,6 @@ cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.{h,c,hpp,cpp}" }, 
 [tool.cibuildwheel]
 build-frontend = "build[uv]"
 
+[dependency-groups]
+dev = ["pybind11-stubgen"]
+

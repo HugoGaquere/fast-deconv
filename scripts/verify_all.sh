@@ -65,8 +65,6 @@ fi
 
 # ---------------------------------------------------------------------------
 banner "2/7  configure Release (conan install + cmake preset)"
-# No --output-folder: this recipe's cmake_layout already nests under
-# build/<build_type>, so passing build/Release would double-nest.
 conan install . --build=missing -s build_type=Release
 cmake --preset conan-release
 
