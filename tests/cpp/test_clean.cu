@@ -98,7 +98,7 @@ TEST_F(SubtractComponent, PeaksAtCornersAndEdgesClipWithoutOutOfBounds)
   std::vector<float> psf(5 * 5);
   fdtest::fill_uniform(rng, psf, 0.0f, 1.0f);
 
-  for (const auto peak : {std::pair<int, int>{0, 0}, {0, kW - 1}, {kH - 1, 0}, {kH - 1, kW - 1}}) {
+  for (const auto& peak : {std::pair<int, int>{0, 0}, {0, kW - 1}, {kH - 1, 0}, {kH - 1, kW - 1}}) {
     const auto got = run_2d(residual, psf, 5, 5, peak, 0.5f);
     const auto expected = host_subtract(residual, kH, kW, psf, 5, 5, peak, 0.5f);
     expect_matches_oracle(got, expected);
@@ -134,7 +134,7 @@ TEST_F(SubtractComponent, MultiFrequencyOverloadUsesPerChannelCoeffs)
 
   const auto sr = res().make_stream();
 
-  for (const auto peak : {std::pair<int, int>{8, 10}, {0, 0}, {kH - 1, kW - 1}}) {
+  for (const auto& peak : {std::pair<int, int>{8, 10}, {0, 0}, {kH - 1, kW - 1}}) {
     fdtest::device_buffer<float> d_res(res(), sr, residual);
     fdtest::device_buffer<float> d_psf(res(), sr, psf);
     fdtest::device_buffer<float> d_coeffs(res(), sr, coeffs);
