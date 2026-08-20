@@ -3,6 +3,7 @@
 #include <cufft.h>
 
 #include <algorithm>
+#include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <optional>
@@ -217,6 +218,7 @@ struct ddmsc_result {
   float final_flux = 0.0f;   // peak flux of the mean residual after the last outer iteration
   float stop_flux = 0.0f;    // composed stop-flux threshold used for this call (max of the four limits)
   int total_iterations = 0;  // total minor iterations consumed across all outer cycles
+  common::convergence_status status = common::convergence_status::running;  // why the outer loop ended
 
   ddmsc_result(int max_iter, int coeff_order)
   {

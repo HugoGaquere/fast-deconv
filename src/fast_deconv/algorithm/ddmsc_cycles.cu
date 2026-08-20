@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <emu/submdspan.hpp>
 #include <fast_deconv/algorithm/ddmsc_cycles.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
@@ -15,6 +16,7 @@
 #include <fast_deconv/matrix/tiled_argmax.hpp>
 #include <fast_deconv/util/dump.hpp>
 #include <fast_deconv/util/utils.hpp>
+#include <stdexcept>
 
 namespace fast_deconv::algorithm::ddmsc {
 
@@ -22,7 +24,7 @@ namespace {
 
 inline std::string fmt_optional(const std::optional<float>& v)
 {
-  return v.has_value() ? fmt::format("{:.6f}", *v) : std::string{"unset"};
+  return v.has_value() ? fmt::format("{:g}", *v) : std::string{"unset"};
 }
 
 std::string format_run_banner(const params& p, std::size_t dirty_nrows, std::size_t dirty_ncols, uint32_t n_freq,
@@ -33,7 +35,7 @@ std::string format_run_banner(const params& p, std::size_t dirty_nrows, std::siz
       "run_ddmsc: launching deconvolution\n"
       "  {}\n"
       "  image      | dirty={}x{}  n_freq={}  n_facets={}  psf={}x{}\n"
-      "  scales     | n_scales={}  stall_threshold={:.6f}\n"
+      "  scales     | n_scales={}  stall_threshold={:g}\n"
       "  outer loop | max_iteration={}  divergence_factor={:.4f}\n"
       "  stop crit  | flux_threshold={:.6e}  rms_factor={:.4f}  peak_factor={:.4f}\n"
       "             | cycle_factor={:.4f}  sidelobe_level={:.4f}\n"
@@ -95,6 +97,11 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
   auto [track_flux, track_rms] = matrix::compute_stats(stats_ws, mean_residual, ws.mask);
   FD_NVTX_MARK("init/initial_stats end");
 
+  // Overflowed in a previous cycle
+  if (!std::isfinite(track_flux) || !std::isfinite(track_rms))
+    throw std::invalid_argument(
+        fmt::format("run_ddmsc: input residual is not finite (peak={}, rms={})", track_flux, track_rms));
+
   // Compose the stop-flux threshold from the four limits.
   const float fluxlimit_rms = p.stop_rms_factor * track_rms;
   const float fluxlimit_peak = p.stop_peak_factor * track_flux;
@@ -111,11 +118,10 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
       track_flux, track_rms, stop_flux, fluxlimit_rms, fluxlimit_peak, fluxlimit_sidelobe, p.flux_threshold);
 
   // Init convergence and scales watchers
-  common::convergence deconv_convergence{p.max_iteration, stop_flux, 5, p.divergence_factor};
-  common::scale_stall_tracker scale_stall_tracker{n_scales, 5, p.scale_stall_threshold};
+  common::convergence deconv_convergence{p.max_iteration, stop_flux, 5, p.divergence_factor,
+                                         common::scale_stall_tracker{n_scales, 5, p.scale_stall_threshold}};
 
-  deconv_convergence.track_flux(track_flux);
-  scale_stall_tracker.init_rms(track_rms);
+  deconv_convergence.init(track_flux, track_rms);
 
   // Shared device buffer for all component coefficients across all outer
   // iterations. Written by fit_coefficients on stream_b, so it lives on
@@ -172,7 +178,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
 
   stream_a.sync();
   // Loop over scales
-  while (!deconv_convergence.should_stop() && !scale_stall_tracker.all_stalled()) {
+  while (!deconv_convergence.should_stop()) {
     FD_NVTX_RANGE("outer_iter");
     FD_LOG_DEBUG("run_ddmsc: outer iter start total_iterations={} track_flux={:.8f} track_rms={:.8f}", total_iterations,
                  track_flux, track_rms);
@@ -216,7 +222,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
 
     FD_NVTX_MARK("scale_selection");
     int selected_scale_idx =
-        scale::scale_selection(stream_a, scales_x_dirty, ws.scale_bias, scale_stall_tracker.get_all_stalled());
+        scale::scale_selection(stream_a, scales_x_dirty, ws.scale_bias, deconv_convergence.get_all_stalled());
 
     // FD_LOG_INFO("run_ddmsc: selected scale {}, auto_mask {}", selected_scale_idx, activate_auto_mask);
 
@@ -282,9 +288,11 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
 
     // FD_LOG_INFO("run_ddmsc: scale {} produced {} clean iterations", selected_scale_idx, n_clean_iter);
 
+    // The residual is untouched when no component was found, so the previous stats still hold.
     if (n_clean_iter == 0) {
       FD_LOG_INFO("ddmsc_minor_cycles: no components found, stopping");
-      break;
+      deconv_convergence.track(track_flux, track_rms, 0, selected_scale_idx);
+      continue;
     }
 
     total_iterations += n_clean_iter;
@@ -294,13 +302,13 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
     mean_residual = core::device_span2d<float>(mean_residual_buf.data_handle(), dirty_nrows, dirty_ncols);
     linalg::weighted_sum_async(stream_a, dirty, weights_freq, mean_residual);
 
+    // TODO(guards): stats use ws.mask while the sub-minor loop searches mask_per_scale when the
+    // auto-mask is active, so a bright pixel outside the auto-mask is never cleanable yet still
+    // sets track_flux and the stop_flux comparison (observed on a LOFAR run with AutoMask=True:
+    // peak_flux pinned at 0.03776400 for ~1700 iterations while rms kept falling). Consider
+    // computing the stats against the same mask the peak search is allowed to clean.
     auto [this_flux, this_rms] = matrix::compute_stats(stats_ws, mean_residual, ws.mask);
     FD_NVTX_MARK("post_iter_stats end");
-
-    // TODO(guards): abort the outer loop when !std::isfinite(this_flux) || !std::isfinite(this_rms).
-    // Once the residual overflows to inf/nan, the stall tracker (|inf - inf| < eps is false) and the
-    // per-iteration divergence check both go dead, and the loop grinds until max_iteration
-    // (observed: 1-MS run with stop_flux below the artifact floor overflowed to peak_flux~9.5e16, rms=inf).
 
     if (last_selected_scale != selected_scale_idx) {
       const float flux_to_go = this_flux - stop_flux;
@@ -309,8 +317,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
       last_selected_scale = selected_scale_idx;
     }
 
-    deconv_convergence.track_flux(this_flux, n_clean_iter);
-    scale_stall_tracker.update(selected_scale_idx, this_rms);
+    deconv_convergence.track(this_flux, this_rms, n_clean_iter, selected_scale_idx);
 
     FD_LOG_DEBUG("run_ddmsc: outer iter end delta_flux={:+.8f} delta_rms={:+.8f}", this_flux - track_flux,
                  this_rms - track_rms);
@@ -318,7 +325,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
     track_flux = this_flux;
     track_rms = this_rms;
 
-    if (scale_stall_tracker.is_stall(selected_scale_idx))
+    if (deconv_convergence.is_stall(selected_scale_idx))
       FD_LOG_INFO("ddmsc_minor_cycles: retired scale {} due to stall", selected_scale_idx);
   }
 
@@ -326,14 +333,14 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
   stream_a.sync();
   stream_b.sync();
 
-  // TODO: deconv_convergence.status => log string
   FD_LOG_INFO("run_ddmsc: completed ({} iterations, exit={})", deconv_convergence.iteration(),
-              static_cast<int>(deconv_convergence.status()));
+              common::to_string(deconv_convergence.status()));
 
   result.add_coeffs_from_device(core::device_span2d<float>{all_coeffs.data_handle(), total_iterations, n_order});
   result.final_flux = track_flux;
   result.stop_flux = stop_flux;
   result.total_iterations = total_iterations;
+  result.status = deconv_convergence.status();
 
   ws.historical_peak_coords.insert(ws.historical_peak_coords.end(), result.peak_coords.begin(),
                                    result.peak_coords.end());

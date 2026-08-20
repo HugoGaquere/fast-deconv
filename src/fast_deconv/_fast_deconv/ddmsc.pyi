@@ -2,10 +2,18 @@
 DDMSC module
 """
 from __future__ import annotations
+import enum
 import typing
 import numpy as np
 import numpy.typing as npt
-__all__: list[str] = ['DDMSC', 'DDMSCResult']
+__all__: list[str] = ['ConvergenceStatus', 'DDMSC', 'DDMSCResult']
+class ConvergenceStatus(enum.Enum):
+    running = 0
+    converged = 1
+    diverged = 2
+    max_iterations = 3
+    all_scales_stalled = 4
+    no_components = 5
 class DDMSC:
     auto_mask: bool
     clean_negative: bool
@@ -127,6 +135,9 @@ class DDMSCResult:
         ...
     @property
     def scales(self) -> list[int]:
+        ...
+    @property
+    def status(self) -> ConvergenceStatus:
         ...
     @property
     def stop_flux(self) -> float:

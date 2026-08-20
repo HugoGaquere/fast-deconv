@@ -1,3 +1,4 @@
+#include <pybind11/native_enum.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -18,6 +19,15 @@ void bind_ddmsc(py::module_& m)
 {
   auto ddmsc_module = m.def_submodule("ddmsc", "DDMSC module");
 
+  py::native_enum<fast_deconv::common::convergence_status>(ddmsc_module, "ConvergenceStatus", "enum.Enum")
+      .value("running", fast_deconv::common::convergence_status::running)
+      .value("converged", fast_deconv::common::convergence_status::converged)
+      .value("diverged", fast_deconv::common::convergence_status::diverged)
+      .value("max_iterations", fast_deconv::common::convergence_status::max_iterations)
+      .value("all_scales_stalled", fast_deconv::common::convergence_status::all_scales_stalled)
+      .value("no_components", fast_deconv::common::convergence_status::no_components)
+      .finalize();
+
   py::class_<ddmsc::ddmsc_result>(ddmsc_module, "DDMSCResult")
       .def_readonly("peak_coords", &ddmsc::ddmsc_result::peak_coords)
       .def_readonly("scales", &ddmsc::ddmsc_result::scales)
@@ -25,7 +35,8 @@ void bind_ddmsc(py::module_& m)
       .def_readonly("coeffs", &ddmsc::ddmsc_result::coeffs)
       .def_readonly("final_flux", &ddmsc::ddmsc_result::final_flux)
       .def_readonly("stop_flux", &ddmsc::ddmsc_result::stop_flux)
-      .def_readonly("total_iterations", &ddmsc::ddmsc_result::total_iterations);
+      .def_readonly("total_iterations", &ddmsc::ddmsc_result::total_iterations)
+      .def_readonly("status", &ddmsc::ddmsc_result::status);
 
   py::class_<ddmsc::Ddmsc>(ddmsc_module, "DDMSC")
       .def(py::init<const core::host_span4d<float>&, const core::host_span2d<float>&, const core::host_span2d<bool>&,

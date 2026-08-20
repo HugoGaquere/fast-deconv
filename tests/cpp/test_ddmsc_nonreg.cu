@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <fast_deconv/algorithm/ddmsc_cycles.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
+#include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fstream>
 #include <memory>
@@ -34,6 +35,7 @@
 // then review and commit the JSON diff.
 // ============================================================================
 
+namespace common = fast_deconv::common;
 namespace core = fast_deconv::core;
 namespace ddmsc = fast_deconv::algorithm::ddmsc;
 namespace fdtest = fast_deconv::test;
@@ -294,6 +296,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   json metrics = {
       {"n_components", n_components},
       {"total_iterations", result.total_iterations},
+      {"status", std::string(common::to_string(result.status))},
       {"final_flux", result.final_flux},
       {"stop_flux", result.stop_flux},
       {"residual_rms", residual_rms},
@@ -329,6 +332,10 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
                                               "(FAST_DECONV_UPDATE_BASELINE=1) and commit the diff";
 
   const json& base = baseline.at("metrics");
+
+  // Categorical, so it is compared exactly instead of through the tolerance table.
+  EXPECT_EQ(base.at("status").get<std::string>(), std::string(common::to_string(result.status)))
+      << "the run ended for a different reason than the baseline";
 
   // Tolerances are code, not baseline content: regeneration can never clobber
   // them. Loose on purpose — cross-GPU / cuFFT-version drift reorders near-tie

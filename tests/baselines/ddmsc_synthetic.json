@@ -20,6 +20,7 @@
   "metrics": {
     "n_components": 769,
     "total_iterations": 769,
+    "status": "converged",
     "final_flux": 0.05160550773143768,
     "stop_flux": 0.05999999865889549,
     "residual_rms": 0.01319298055022955,
