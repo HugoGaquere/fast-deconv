@@ -36,8 +36,7 @@ ddmsc_result Ddmsc::run(core::host_span3d<float>& dirty, const core::host_span3d
 {
   const core::stream_resources& stream = ctx_.compute_stream;
 
-  // Stage the per-call inputs host->device. These buffers live only for the
-  // duration of the run and free (stream-ordered) when they go out of scope.
+  // Copy the per-call inputs host->device.
   auto d_dirty = stream.alloc_mdcontainer_async<float>(dirty.extent(0), dirty.extent(1), dirty.extent(2));
   auto d_jones =
       stream.alloc_mdcontainer_async<float>(jones_norm.extent(0), jones_norm.extent(1), jones_norm.extent(2));
