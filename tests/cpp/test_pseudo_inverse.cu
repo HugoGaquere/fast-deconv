@@ -86,8 +86,9 @@ TEST_F(PseudoInverse, SquareMatrixGivesInverse)
 
 TEST_F(PseudoInverse, OverdeterminedMatchesNormalEquationsOracle)
 {
-  // Vandermonde-like design matrix (columns {1, log-frequency}), the same shape
-  // fit_coefficients feeds through this path.
+  // Vandermonde-like design matrix (columns {1, log-frequency}). fit_coefficients no
+  // longer routes through here — it solves in-kernel — so this only covers the
+  // standalone routine.
   const int n_rows = 4, n_cols = 2;
   const std::vector<double> a_d = {1.0, 0.0, 1.0, 0.1, 1.0, 0.2, 1.0, 0.3};
   const std::vector<float> a(a_d.begin(), a_d.end());

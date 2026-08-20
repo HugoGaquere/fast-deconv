@@ -82,6 +82,15 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
   FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_ctx.input_nrow,
                                       psf_ctx.input_ncol));
 
+  // The spectral fit needs about two bands per coefficient to be a fit rather than an
+  // interpolation; at or below one, it stops being identifiable and only the minimum-norm
+  // regulariser keeps the coefficients bounded. Matches DDFacet's own NBand check.
+  if (static_cast<int>(n_freq) < 2 * n_order)
+    FD_LOG_WARN(
+        "run_ddmsc: spectral fit is under-constrained (n_freq={} n_order={}); want n_freq >= 2*n_order. "
+        "Coefficients are extrapolated to the degrid frequencies, where the unconstrained directions dominate.",
+        n_freq, n_order);
+
   FD_NVTX_MARK("init/queue_residual_and_kernels");
   // Initial mean residual: owning buffer plus a mutable view that gets
   // re-seated onto scale slices during the loop.
