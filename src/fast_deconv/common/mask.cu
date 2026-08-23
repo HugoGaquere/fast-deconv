@@ -3,6 +3,7 @@
 #include <thrust/extrema.h>
 
 #include <cassert>
+#include <cstdint>
 #include <cub/cub.cuh>
 #include <emu/submdspan.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
@@ -33,7 +34,7 @@ using LoadMask = cub::BlockLoad<unsigned char, kMaskBlock, kMaskItemsPerThread, 
 }  // namespace detail
 
 __global__ void mask_and_abs_kernel(float* data, const bool* mask, float fill_value, bool abs, int n_per_batch,
-                                    int data_batch_stride, int mask_batch_stride)
+                                    std::int64_t data_batch_stride, std::int64_t mask_batch_stride)
 {
   float* d = data + blockIdx.y * data_batch_stride;
   const unsigned char* m = reinterpret_cast<const unsigned char*>(mask) + blockIdx.y * mask_batch_stride;
@@ -51,7 +52,7 @@ __global__ void mask_and_abs_kernel(float* data, const bool* mask, float fill_va
 }
 
 __global__ void mask_less_than_threshold_kernel(float* data, float threshold, float fill_value, int n_per_batch,
-                                                int batch_stride)
+                                                std::int64_t batch_stride)
 {
   float* d = data + blockIdx.y * batch_stride;
   const int tile = detail::kMaskTile;
@@ -71,7 +72,8 @@ __global__ void build_mask_per_scale_kernel(const int2* coords, const int* scale
 {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
   if (tid >= n_coords) return;
-  const int idx = scales[tid] * inter_scales_stride + coords[tid].x * inner_scale_stride + coords[tid].y;
+  const std::int64_t idx =
+      static_cast<std::int64_t>(scales[tid]) * inter_scales_stride + coords[tid].x * inner_scale_stride + coords[tid].y;
   out_mask_per_scale[idx] = true;
 }
 
@@ -83,10 +85,11 @@ __global__ void multiply_psf_gauss_sq_batched_kernel(const complex_type* freq_ps
   if (tid >= freq_total) return;
   const float g = gaussian[tid];
   const float g2_norm = g * g * norm;
-  for (int b = 0; b < n_batch; b++) {
-    const int idx = b * freq_total + tid;
-    const complex_type val = freq_psf[idx];
-    freq_out[idx] = {val.x * g2_norm, val.y * g2_norm};
+  const complex_type* in = freq_psf + tid;
+  complex_type* out = freq_out + tid;
+  for (int b = 0; b < n_batch; b++, in += freq_total, out += freq_total) {
+    const complex_type val = *in;
+    *out = {val.x * g2_norm, val.y * g2_norm};
   }
 }
 
@@ -105,10 +108,8 @@ __global__ void finalize_mask_kernel(bool* mask_per_scale, const bool* external_
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
   if (tid >= scale_npix) return;
   const bool ext = external_mask[tid];
-  for (int s = 0; s < n_scales; s++) {
-    bool* slice = mask_per_scale + s * scale_npix;
-    slice[tid] = (!slice[tid]) || ext;
-  }
+  bool* slice = mask_per_scale;
+  for (int s = 0; s < n_scales; s++, slice += scale_npix) slice[tid] = (!slice[tid]) || ext;
 }
 
 }  // namespace fast_deconv::kernel
@@ -133,7 +134,7 @@ void mask_and_abs_async(const core::stream_resources& stream_res, core::device_s
   assert(data.extent(1) == mask.extent(0) && data.extent(2) == mask.extent(1));
   const int n_per_batch = static_cast<int>(mask.size());
   const int nbatch = data.extent(0);
-  const int batch_stride = data.stride(0);
+  const std::int64_t batch_stride = data.stride(0);
   dim3 grid(CEIL_DIV(n_per_batch, kernel::detail::kMaskTile), nbatch);
   kernel::mask_and_abs_kernel<<<grid, kernel::detail::kMaskBlock, 0, stream_res.cuda_stream>>>(
       data.data_handle(), mask.data_handle(), fill_value, abs, n_per_batch, batch_stride, 0);
@@ -146,7 +147,7 @@ void mask_and_abs_async(const core::stream_resources& stream_res, core::device_s
   assert(data.extents() == mask.extents());
   const int n_per_batch = static_cast<int>(data.extent(1) * data.extent(2));
   const int nbatch = data.extent(0);
-  const int batch_stride = data.stride(0);
+  const std::int64_t batch_stride = data.stride(0);
   dim3 grid(CEIL_DIV(n_per_batch, kernel::detail::kMaskTile), nbatch);
   kernel::mask_and_abs_kernel<<<grid, kernel::detail::kMaskBlock, 0, stream_res.cuda_stream>>>(
       data.data_handle(), mask.data_handle(), fill_value, abs, n_per_batch, batch_stride, batch_stride);
@@ -243,8 +244,8 @@ void build_auto_mask(const core::stream_resources& stream, const std::vector<std
   for (int i = 0; i < n_scales; i++) {
     // 5a. Batched multiply by G^2 in freq domain (with norm)
     kernel::multiply_psf_gauss_sq_batched_kernel<<<CEIL_DIV(freq_total, 256), 256, 0, cuda_stream>>>(
-        freq_psf.data_handle(), gauss_kernels.data_handle() + i * freq_total, freq_conv2.data_handle(), freq_total,
-        n_freq, norm);
+        freq_psf.data_handle(), gauss_kernels.data_handle() + static_cast<std::int64_t>(i) * freq_total,
+        freq_conv2.data_handle(), freq_total, n_freq, norm);
 
     // 5b. Batched C2R back to space
     CUFFT_CALL(cufftExecC2R(ctx.plans_backward[0], freq_conv2.data_handle(), padded_conv2.data_handle()));
