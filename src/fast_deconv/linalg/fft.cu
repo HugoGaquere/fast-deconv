@@ -9,8 +9,8 @@ namespace fast_deconv::kernel {
 // Pads and ifftshifts a 2D image in one pass.
 // Input:  (nx, ny) real, origin at center
 // Output: (px, py) real, origin at (0,0), zero-padded
-__global__ void pad_ifftshift_kernel(const float* input, float* output, int nx, int ny, int px,
-                                     int py, int npad_x, int npad_y)
+__global__ void pad_ifftshift_kernel(const float* input, float* output, int nx, int ny, int px, int py, int npad_x,
+                                     int npad_y)
 {
   const int row = blockIdx.y * blockDim.y + threadIdx.y;
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -28,8 +28,8 @@ __global__ void pad_ifftshift_kernel(const float* input, float* output, int nx, 
 }
 
 // Pads and ifftshifts a batched 2D image in one pass.
-__global__ void pad_ifftshift_batched_kernel(const float* input, float* output, int nx, int ny,
-                                             int px, int py, int npad_x, int npad_y, int n_batch)
+__global__ void pad_ifftshift_batched_kernel(const float* input, float* output, int nx, int ny, int px, int py,
+                                             int npad_x, int npad_y, int n_batch)
 {
   const int row = blockIdx.y * blockDim.y + threadIdx.y;
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -43,17 +43,15 @@ __global__ void pad_ifftshift_batched_kernel(const float* input, float* output, 
 
   const int in_stride = nx * ny;
   const int out_stride = px * py;
-  const int in_idx = row * ny + col;
-  const int out_idx = out_row * py + out_col;
 
-  for (int b = 0; b < n_batch; b++) {
-    output[b * out_stride + out_idx] = input[b * in_stride + in_idx];
-  }
+  const float* in = input + row * ny + col;
+  float* out = output + out_row * py + out_col;
+  for (int b = 0; b < n_batch; b++, in += in_stride, out += out_stride) *out = *in;
 }
 
 // Fftshifts and crops a batched 2D image in one pass.
-__global__ void fftshift_crop_kernel(const float* input, float* output, int nx, int ny, int px,
-                                     int py, int npad_x, int npad_y, int n_batch)
+__global__ void fftshift_crop_kernel(const float* input, float* output, int nx, int ny, int px, int py, int npad_x,
+                                     int npad_y, int n_batch)
 {
   const int row = blockIdx.y * blockDim.y + threadIdx.y;
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -64,45 +62,42 @@ __global__ void fftshift_crop_kernel(const float* input, float* output, int nx, 
 
   const int out_stride = nx * ny;
   const int in_stride = px * py;
-  const int out_idx = row * ny + col;
-  const int in_idx = src_row * py + src_col;
 
-  for (int b = 0; b < n_batch; b++) {
-    output[b * out_stride + out_idx] = input[b * in_stride + in_idx];
-  }
+  const float* in = input + src_row * py + src_col;
+  float* out = output + row * ny + col;
+  for (int b = 0; b < n_batch; b++, in += in_stride, out += out_stride) *out = *in;
 }
 
 }  // namespace fast_deconv::kernel
 
 namespace fast_deconv::linalg {
 
-void pad_ifftshift(float* input, float* output, int nx, int ny, int px, int py, int npad_x,
-                   int npad_y, cudaStream_t stream)
+void pad_ifftshift(float* input, float* output, int nx, int ny, int px, int py, int npad_x, int npad_y,
+                   cudaStream_t stream)
 {
   cudaMemsetAsync(output, 0, sizeof(float) * px * py, stream);
   dim3 block_dim(16, 16);
   dim3 grid_dim(CEIL_DIV(ny, block_dim.x), CEIL_DIV(nx, block_dim.y));
-  kernel::pad_ifftshift_kernel<<<grid_dim, block_dim, 0, stream>>>(input, output, nx, ny, px, py,
-                                                                   npad_x, npad_y);
+  kernel::pad_ifftshift_kernel<<<grid_dim, block_dim, 0, stream>>>(input, output, nx, ny, px, py, npad_x, npad_y);
 }
 
-void pad_ifftshift_batched(float* input, float* output, int nx, int ny, int px, int py,
-                           int npad_x, int npad_y, int n_batch, cudaStream_t stream)
+void pad_ifftshift_batched(float* input, float* output, int nx, int ny, int px, int py, int npad_x, int npad_y,
+                           int n_batch, cudaStream_t stream)
 {
   cudaMemsetAsync(output, 0, sizeof(float) * px * py * n_batch, stream);
   dim3 block_dim(16, 16);
   dim3 grid_dim(CEIL_DIV(ny, block_dim.x), CEIL_DIV(nx, block_dim.y));
-  kernel::pad_ifftshift_batched_kernel<<<grid_dim, block_dim, 0, stream>>>(
-      input, output, nx, ny, px, py, npad_x, npad_y, n_batch);
+  kernel::pad_ifftshift_batched_kernel<<<grid_dim, block_dim, 0, stream>>>(input, output, nx, ny, px, py, npad_x,
+                                                                           npad_y, n_batch);
 }
 
-void fftshift_crop(float* input, float* output, int nx, int ny, int px, int py, int npad_x,
-                   int npad_y, int n_batch, cudaStream_t stream)
+void fftshift_crop(float* input, float* output, int nx, int ny, int px, int py, int npad_x, int npad_y, int n_batch,
+                   cudaStream_t stream)
 {
   dim3 block_dim(16, 16);
   dim3 grid_dim(CEIL_DIV(ny, block_dim.x), CEIL_DIV(nx, block_dim.y));
-  kernel::fftshift_crop_kernel<<<grid_dim, block_dim, 0, stream>>>(input, output, nx, ny, px, py,
-                                                                   npad_x, npad_y, n_batch);
+  kernel::fftshift_crop_kernel<<<grid_dim, block_dim, 0, stream>>>(input, output, nx, ny, px, py, npad_x, npad_y,
+                                                                   n_batch);
 }
 
 std::pair<int, int> compute_padding(int npix_x, int npix_y, float padding)
@@ -116,14 +111,15 @@ int next_fast_size(int n)
   static constexpr int radices[] = {2, 3, 5, 7};
   while (true) {
     int m = n;
-    for (int r : radices) while (m % r == 0) m /= r;
+    for (int r : radices)
+      while (m % r == 0) m /= r;
     if (m == 1) return n;
     ++n;
   }
 }
 
-convolve_ctx::convolve_ctx(const core::stream_resources& stream, int input_nrow_, int input_ncol_,
-                           int forward_batch_, int backward_batch_, int n_backward_plans, float padding)
+convolve_ctx::convolve_ctx(const core::stream_resources& stream, int input_nrow_, int input_ncol_, int forward_batch_,
+                           int backward_batch_, int n_backward_plans, float padding)
     : stream_res(stream)
 {
   const auto [npad_row_min, npad_col_min] = compute_padding(input_nrow_, input_ncol_, padding);

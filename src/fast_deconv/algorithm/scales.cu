@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cub/cub.cuh>
 #include <emu/submdspan.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
@@ -28,10 +29,10 @@ __global__ void make_scales_kernel_half(const float* sigmas, int scale_nrow, int
   const int scale_size = scale_nrow * scale_ncol_half;
   const int tid = row * scale_ncol_half + col;
 
-  for (int i = 0; i < n_scales; i++) {
-    const uint idx = tid + i * scale_size;
+  float* out = scales + tid;
+  for (int i = 0; i < n_scales; i++, out += scale_size) {
     const float sigma = sigmas[i];
-    scales[idx] = exp(-2.0f * PI_SQUARRED * rhosq * sigma * sigma);
+    *out = exp(-2.0f * PI_SQUARRED * rhosq * sigma * sigma);
   }
 }
 
@@ -41,12 +42,12 @@ __global__ void make_scales_kernel_half(const float* sigmas, int scale_nrow, int
 __global__ void multiply_batched_kernel(complex_type* freq_dirty, float* scales, complex_type* scaled_dirty,
                                         int freq_total, int n_scales, float norm)
 {
-  const uint tid = blockIdx.x * blockDim.x + threadIdx.x;
-  const uint scale_id = blockIdx.y;
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const int scale_id = blockIdx.y;
   if (tid >= freq_total || scale_id >= n_scales) return;
 
   const complex_type dirty_val = freq_dirty[tid];
-  const int idx = tid + scale_id * freq_total;
+  const std::int64_t idx = tid + static_cast<std::int64_t>(scale_id) * freq_total;
   const float scale_norm = scales[idx] * norm;
   scaled_dirty[idx] = {dirty_val.x * scale_norm, dirty_val.y * scale_norm};
 }
@@ -77,11 +78,13 @@ __global__ void multiply_psf_scale_kernel(const complex_type* freq_psf, const fl
   const float g_norm = g * norm;
   const float g2_norm = g * g * norm;
 
-  for (int b = 0; b < n_batch; b++) {
-    const int idx = b * freq_total + tid;
-    const complex_type val = freq_psf[idx];
-    freq_conv[idx] = {val.x * g_norm, val.y * g_norm};
-    freq_conv2[idx] = {val.x * g2_norm, val.y * g2_norm};
+  const complex_type* in = freq_psf + tid;
+  complex_type* out_conv = freq_conv + tid;
+  complex_type* out_conv2 = freq_conv2 + tid;
+  for (int b = 0; b < n_batch; b++, in += freq_total, out_conv += freq_total, out_conv2 += freq_total) {
+    const complex_type val = *in;
+    *out_conv = {val.x * g_norm, val.y * g_norm};
+    *out_conv2 = {val.x * g2_norm, val.y * g2_norm};
   }
 }
 
@@ -148,12 +151,13 @@ void convolve_with_scales(const algorithm::ddmsc::scale_convolve_ctx& ctx, core:
 
     dim3 mul_grid(CEIL_DIV(freq_total, 256), chunk_batch);
     kernel::multiply_batched_kernel<<<mul_grid, 256, 0, cuda_stream>>>(
-        dirty_freq.data_handle(), scales.data_handle() + scale_idx_start * freq_total, scaled_dirty_freq.data_handle(),
-        freq_total, chunk_batch, norm);
+        dirty_freq.data_handle(), scales.data_handle() + static_cast<std::int64_t>(scale_idx_start) * freq_total,
+        scaled_dirty_freq.data_handle(), freq_total, chunk_batch, norm);
 
     CUFFT_CALL(cufftExecC2R(ctx.plan_backward(), scaled_dirty_freq.data_handle(), scaled_dirty.data_handle()));
 
-    linalg::fftshift_crop(scaled_dirty.data_handle(), out_scaled_dirty.data_handle() + scale_idx_start * npix,
+    linalg::fftshift_crop(scaled_dirty.data_handle(),
+                          out_scaled_dirty.data_handle() + static_cast<std::int64_t>(scale_idx_start) * npix,
                           ctx.input_nrow, ctx.input_ncol, ctx.padded_nrow, ctx.padded_ncol, ctx.padding_nrow,
                           ctx.padding_ncol, chunk_batch, cuda_stream);
   }
@@ -184,7 +188,7 @@ int scale_selection(const core::stream_resources& stream_res, core::device_span3
 
   for (int s = 0; s < n_scales; s++) {
     CHECK_CUDA(cub::DeviceReduce::Max(d_temp.data_handle(), temp_bytes,
-                                      scaled_dirty.data_handle() + static_cast<size_t>(s) * npix,
+                                      scaled_dirty.data_handle() + static_cast<std::int64_t>(s) * npix,
                                       d_maxes.data_handle() + s, npix, cuda_stream));
   }
 
@@ -250,11 +254,12 @@ void convolve_psfs_with_scale_async(const algorithm::ddmsc::psf_convolve_ctx& ct
 
   const float norm = 1.0f / static_cast<float>(padded_total);
 
-  for (int f = 0; f < n_facets; f++) {
-    float* src = psfs.data_handle() + f * facet_stride;
-    float* dst_conv = out_conv_psf.data_handle() + f * facet_stride;
-    float* dst_conv2_mean = out_conv2_mean.data_handle() + f * psf_npix;
+  // Advanced per facet: n_facets * facet_stride exceeds int32 at production sizes
+  float* src = psfs.data_handle();
+  float* dst_conv = out_conv_psf.data_handle();
+  float* dst_conv2_mean = out_conv2_mean.data_handle();
 
+  for (int f = 0; f < n_facets; f++) {
     // 1. Pad + ifftshift (batched over n_freq)
     linalg::pad_ifftshift_batched(src, padded_psf.data_handle(), ctx.input_nrow, ctx.input_ncol, ctx.padded_nrow,
                                   ctx.padded_ncol, ctx.padding_nrow, ctx.padding_ncol, n_freq, cuda_stream);
@@ -284,6 +289,10 @@ void convolve_psfs_with_scale_async(const algorithm::ddmsc::psf_convolve_ctx& ct
     // 8. Weighted mean over channels -> conv2_mean output
     core::device_span2d<float> dst_conv2_mean_view(dst_conv2_mean, ctx.input_nrow, ctx.input_ncol);
     linalg::weighted_sum_async(stream_res, conv2_cropped, weights, dst_conv2_mean_view);
+
+    src += facet_stride;
+    dst_conv += facet_stride;
+    dst_conv2_mean += psf_npix;
   }
 }
 
