@@ -6,6 +6,7 @@
 #include <fast_deconv/core/span_types.hpp>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <vector>
 
 #include "helpers/device_buffers.hpp"
@@ -15,9 +16,9 @@ namespace core = fast_deconv::core;
 namespace ddmsc = fast_deconv::algorithm::ddmsc;
 namespace fdtest = fast_deconv::test;
 
-// Minimal but real construction scene: the Ddmsc constructor allocates the
-// pool, both streams, and the cuFFT plans, so this is a GPU fixture. All spans
-// are stored as views by the class — the backing buffers live in the fixture.
+// Minimal but real construction scene: the pool, both streams and the cuFFT
+// plans are built on the first run(), so this is a GPU fixture. All spans are
+// stored as views by the class — the backing buffers live in the fixture.
 class DdmscClass : public fdtest::GpuTest {
  protected:
   static constexpr int kFacets = 1;
@@ -55,7 +56,7 @@ class DdmscClass : public fdtest::GpuTest {
   }
 
  private:
-  // Static inputs live on the host; the Ddmsc constructor stages them to device.
+  // Static inputs live on the host; the first run() stages them to device.
   std::vector<float> psfs_;
   std::vector<float> xdes_;
   std::unique_ptr<bool[]> mask_;
@@ -64,9 +65,9 @@ class DdmscClass : public fdtest::GpuTest {
   std::vector<int> map_pixel_facet_;
 };
 
-// The constructor builds the pool, both streams, the shared cuFFT work area and
-// all plans — surviving construction and destruction on a tiny scene is the
-// smoke test.
+// Construction is allocation-free now; the pool, both streams, the shared cuFFT
+// work area and all plans are built by the first run(). Surviving construction
+// and destruction on a tiny scene is still the smoke test.
 TEST_F(DdmscClass, ConstructsAndDestroysCleanly)
 {
   auto w = make_ddmsc();
@@ -154,4 +155,26 @@ TEST_F(DdmscClass, AddCoeffsFromDeviceSlicesRows)
     EXPECT_FLOAT_EQ(result.coeffs.at(i).at(0), coeffs.at(i * n_order + 0));
     EXPECT_FLOAT_EQ(result.coeffs.at(i).at(1), coeffs.at(i * n_order + 1));
   }
+}
+
+// Plane guard: the context validates its dimensions and allocates nothing, so
+// this runs without a GPU. 46341^2 = 2,147,488,281 is the first square past
+// INT32_MAX; the spans are never dereferenced before the first run.
+TEST(DdmscContextGuard, RejectsPlaneLargerThanInt32)
+{
+  constexpr int kBig = 46341;
+  constexpr int kSmall = 8;
+
+  core::host_span4d<float> psfs(static_cast<float*>(nullptr), 1, 1, kSmall, kSmall);
+  core::host_span4d<float> big_psfs(static_cast<float*>(nullptr), 1, 1, kBig, kBig);
+  core::host_span2d<float> xdes(static_cast<float*>(nullptr), 1, 2);
+  core::host_span2d<bool> mask(static_cast<bool*>(nullptr), kSmall, kSmall);
+  core::host_vect<float> sigmas(static_cast<float*>(nullptr), 1);
+  core::host_vect<float> bias(static_cast<float*>(nullptr), 1);
+  core::host_span2d<int> map(static_cast<int*>(nullptr), kSmall, kSmall);
+
+  EXPECT_THROW(ddmsc::context(0, psfs, xdes, mask, sigmas, bias, map, kBig, kBig, 1, 1.5f), std::invalid_argument);
+  EXPECT_THROW(ddmsc::context(0, big_psfs, xdes, mask, sigmas, bias, map, kSmall, kSmall, 1, 1.5f),
+               std::invalid_argument);
+  EXPECT_NO_THROW(ddmsc::context(0, psfs, xdes, mask, sigmas, bias, map, kSmall, kSmall, 1, 1.5f));
 }

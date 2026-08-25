@@ -611,6 +611,7 @@ static config_result run_config(const bench_config& c, const bench_options& opt,
   // excluded from the timed region anyway.
   ddmsc::context ctx(opt.device, raw_psfs, xdes, mask, scale_sigmas, scale_bias, map_pixel_facet, c.nrow, c.ncol,
                      c.n_freq, fft_padding);
+  ctx.state();  // build the device state here, not inside the first timed run
 
   const int total_runs = opt.warmup + opt.runs;
   for (int r = 0; r < total_runs; ++r) {
@@ -619,8 +620,8 @@ static config_result run_config(const bench_config& c, const bench_options& opt,
 
     // Auto-mask history is the only state carried between calls -> clear it so
     // each repetition does identical, deterministic work.
-    ctx.workspace.historical_peak_coords.clear();
-    ctx.workspace.historical_scales.clear();
+    ctx.historical_peak_coords.clear();
+    ctx.historical_scales.clear();
 
     BENCH_CHECK_CUDA(cudaDeviceSynchronize());  // exclude any pending work from timing
     BENCH_CHECK_CUDA(cudaEventRecord(ev_start));

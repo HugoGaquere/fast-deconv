@@ -45,8 +45,11 @@ void bind_ddmsc(py::module_& m)
            py::arg("raw_psfs"), py::arg("xdes"), py::arg("scale_mask"), py::arg("scale_sigmas"), py::arg("scale_bias"),
            py::arg("map_pixel_facet"), py::arg("dirty_nrow"), py::arg("dirty_ncol"), py::arg("n_freq"),
            py::arg("fft_padding"), py::arg("exec_device") = 0,
-           // raw_psfs/xdes/scale_mask/scale_sigmas are copied host->device; only the host-view inputs must outlive the
-           // object.
+           // Every array input stays a host view until the first run() stages it, so all six must outlive the object.
+           py::keep_alive<1, 2>(),  // raw_psfs
+           py::keep_alive<1, 3>(),  // xdes
+           py::keep_alive<1, 4>(),  // scale_mask
+           py::keep_alive<1, 5>(),  // scale_sigmas
            py::keep_alive<1, 6>(),  // scale_bias
            py::keep_alive<1, 7>())  // map_pixel_facet
       .def("run", &ddmsc::Ddmsc::run, py::arg("dirty"), py::arg("jones_norm"), py::arg("weights_freq"),
