@@ -3,6 +3,7 @@
 #include <thrust/extrema.h>
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cub/cub.cuh>
 #include <emu/submdspan.hpp>
@@ -211,9 +212,9 @@ void build_auto_mask(const core::stream_resources& stream, const std::vector<std
   linalg::convolve_ctx ctx(stream, psf_nrow, psf_ncol, /*forward_batch=*/n_freq, /*backward_batch=*/n_freq,
                            /*n_backward_plans=*/1, fft_padding);
 
-  core::device_cont<char> fft_work_area;
-  if (ctx.required_work_size() > 0) fft_work_area = stream.alloc_mdcontainer_async<char>(ctx.required_work_size());
-  ctx.bind_work_area(fft_work_area.data_handle());
+  core::device_ptr<std::byte> fft_work_area;
+  if (ctx.required_work_size() > 0) fft_work_area = stream.alloc_ptr_async<std::byte>(ctx.required_work_size());
+  ctx.bind_work_area(fft_work_area.get());
 
   const int padded_total = ctx.padded_nrow * ctx.padded_ncol;
   const int freq_total = ctx.freq_nrow * ctx.freq_ncol;
