@@ -2,22 +2,22 @@
 #include <cuda_runtime_api.h>
 #include <cufft.h>
 
+#include <cstdlib>
 #include <fast_deconv/core/resources.hpp>
 #include <iostream>
 #include <utility>
 #include <vector>
 
 #ifndef CUFFT_CALL
-#define CUFFT_CALL(call)                                               \
-  {                                                                    \
-    auto status = static_cast<cufftResult>(call);                      \
-    if (status != CUFFT_SUCCESS)                                       \
-      fprintf(stderr,                                                  \
-              "ERROR: CUFFT call \"%s\" in line %d of file %s failed " \
-              "with "                                                  \
-              "code (%d).\n",                                          \
-              #call, __LINE__, __FILE__, status);                      \
+#define CUFFT_CALL(val) check_cufft((val), #val, __FILE__, __LINE__)
+inline void check_cufft(cufftResult status, const char* const func, const char* const file, const int line)
+{
+  if (status != CUFFT_SUCCESS) {
+    std::cerr << "cuFFT Error at: " << file << ":" << line << std::endl;
+    std::cerr << "code (" << static_cast<int>(status) << ") " << func << std::endl;
+    std::exit(EXIT_FAILURE);
   }
+}
 #endif  // CUFFT_CALL
 
 using complex_type = cufftComplex;
