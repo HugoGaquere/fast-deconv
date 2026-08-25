@@ -3,9 +3,11 @@
 #include <cufft.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/core/span_types.hpp>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -57,23 +59,6 @@ struct psf_convolve_ctx : public linalg::convolve_ctx {
   cufftHandle plan_backward_2() const { return plans_backward[1]; }
 };
 
-struct workspace {
-  scale_convolve_ctx scale_convolve;
-  psf_convolve_ctx psf_convolve;
-  core::device_span4d<float> raw_psfs;
-  core::device_span2d<float> xdes;
-  core::device_span2d<bool> mask;
-  core::device_vect<float> scale_sigmas;
-  core::host_vect<float> scale_bias;
-  core::host_span2d<int> map_pixel_facet;
-
-  // Component history accumulated across run_ddmsc_cycles calls — feeds the
-  // auto-mask so neighborhoods of every previously-cleaned component
-  // (across all major cycles) stay valid.
-  std::vector<std::pair<int, int>> historical_peak_coords;
-  std::vector<int> historical_scales;
-};
-
 enum class auto_mask_threshold_type {
   peak_value,
   rms,
@@ -106,95 +91,80 @@ struct params {
   std::optional<float> auto_mask_rms_threshold;   // engage when residual peak <= this * running RMS
 };
 
-struct context {
+struct device_state {
   core::resources exec_resources;
-  // Named streams owned by the context. compute_stream drives the whole
-  // convolution path: both FFT contexts bind their plans to it, and
-  // run_ddmsc_cycles uses it as its main stream so the plans execute on the
-  // same stream as the surrounding kernels. aux_stream carries the clean-loop
-  // per-channel fit/subtract path that overlaps with the main stream.
-  core::stream_resources compute_stream;
-  core::stream_resources aux_stream;
-  // Device copies of the static inputs, staged host->device at construction.
-  // The workspace holds non-owning views into these buffers, so they must be
-  // declared after the streams (which mint them) but before the workspace.
+  core::stream_resources compute_stream;  // drives the convolution path; the FFT plans bind to it
+  core::stream_resources aux_stream;      // clean-loop fit/subtract, overlapping compute_stream
   core::device_cont4d<float> raw_psfs_d;
   core::device_cont2d<float> xdes_d;
   core::device_cont2d<bool> mask_d;
   core::device_cont<float> scale_sigmas_d;
-  // Single cuFFT workspace shared by both FFT contexts: their plans all run
-  // sequentially on compute_stream, so one buffer of the max required size
-  // suffices. Owned here, freed on compute_stream at destruction.
-  void* fft_work_area = nullptr;
-  ddmsc::workspace workspace;
+  core::device_ptr<std::byte> fft_work_area;  // shared by both plan sets, run sequentially
+  scale_convolve_ctx scale_convolve;
+  psf_convolve_ctx psf_convolve;
 
-  /// Allocate a device buffer matching @p src and copy it host->device on
-  /// @p stream (stream-ordered; the caller syncs before the host source dies).
-  /// Templated on the host span type: rank/element type can't be deduced
-  /// through the h_mdspan alias (N is non-deduced inside dextents).
-  template <typename T, typename HostSpan, std::size_t... I>
-  static core::mdcontainer<T, sizeof...(I)> stage_h2d_impl(const core::stream_resources& stream, const HostSpan& src,
-                                                           std::index_sequence<I...>)
+  device_state(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
+               const core::host_span2d<bool>& mask, const core::host_vect<float>& scale_sigmas, int dirty_nrow,
+               int dirty_ncol, int n_freq, float fft_padding)
+      : exec_resources(exec_device),
+        compute_stream(exec_resources.make_stream()),
+        aux_stream(exec_resources.make_stream()),
+        raw_psfs_d(compute_stream.copy_h2d_async(raw_psfs)),
+        xdes_d(compute_stream.copy_h2d_async(xdes)),
+        mask_d(compute_stream.copy_h2d_async(mask)),
+        scale_sigmas_d(compute_stream.copy_h2d_async(scale_sigmas)),
+        scale_convolve(compute_stream, dirty_nrow, dirty_ncol,
+                       /*backward_batch_size=*/static_cast<int>(scale_sigmas.size()) - 1, fft_padding),
+        psf_convolve(compute_stream, raw_psfs_d.extent(2), raw_psfs_d.extent(3), n_freq, fft_padding)
   {
-    auto dst = stream.alloc_mdcontainer_async<T>(src.extent(I)...);
-    CHECK_CUDA(cudaMemcpyAsync(dst.data_handle(), src.data_handle(), src.size() * sizeof(T), cudaMemcpyHostToDevice,
-                               stream.cuda_stream));
-    return dst;
+    const size_t shared_work_size = std::max(scale_convolve.required_work_size(), psf_convolve.required_work_size());
+    if (shared_work_size > 0) fft_work_area = compute_stream.alloc_ptr_async<std::byte>(shared_work_size);
+    compute_stream.sync();  // staging copies and the work-area alloc, before the host sources go
+    scale_convolve.bind_work_area(fft_work_area.get());
+    psf_convolve.bind_work_area(fft_work_area.get());
   }
 
-  template <typename HostSpan>
-  static auto stage_h2d(const core::stream_resources& stream, const HostSpan& src)
-  {
-    using T = typename HostSpan::element_type;
-    return stage_h2d_impl<T>(stream, src, std::make_index_sequence<HostSpan::rank()>{});
-  }
+  device_state(const device_state&) = delete;
+  device_state& operator=(const device_state&) = delete;
+  device_state(device_state&&) = delete;
+  device_state& operator=(device_state&&) = delete;
+};
 
-  /**
-   * @brief Build the GPU memory pool and streams, stage the static inputs
-   *        host->device, build the cuFFT plans for scale and PSF convolutions
-   *        (bound to compute_stream and sharing one work area), and bind the
-   *        device copies into the workspace.
-   *
-   * The raw_psfs/xdes/mask/scale_sigmas inputs are copied into device buffers
-   * owned by the context; the caller need only keep them alive for the duration
-   * of this constructor. scale_bias/map_pixel_facet stay host views — the
-   * caller must keep their backing memory alive for the lifetime of the context.
-   */
+struct context {
+  int exec_device;
+  core::host_span4d<float> raw_psfs;
+  core::host_span2d<float> xdes;
+  core::host_span2d<bool> mask;
+  core::host_vect<float> scale_sigmas;
+  core::host_vect<float> scale_bias;
+  core::host_span2d<int> map_pixel_facet;
+  int dirty_nrow;
+  int dirty_ncol;
+  int n_freq;
+  float fft_padding;
+
+  std::vector<std::pair<int, int>> historical_peak_coords;  // across runs; feeds the auto-mask
+  std::vector<int> historical_scales;                       // scale of each historical component
+
+  /// Validates the dimensions and stores the inputs; allocates nothing.
   context(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
           const core::host_span2d<bool>& mask, const core::host_vect<float>& scale_sigmas,
           const core::host_vect<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
           int dirty_ncol, int n_freq, float fft_padding)
-      : exec_resources(exec_device),
-        compute_stream(exec_resources.make_stream()),
-        aux_stream(exec_resources.make_stream()),
-        raw_psfs_d(stage_h2d(compute_stream, raw_psfs)),
-        xdes_d(stage_h2d(compute_stream, xdes)),
-        mask_d(stage_h2d(compute_stream, mask)),
-        scale_sigmas_d(stage_h2d(compute_stream, scale_sigmas)),
-        workspace{
-            .scale_convolve =
-                scale_convolve_ctx(compute_stream, dirty_nrow, dirty_ncol,
-                                   /*backward_batch_size=*/static_cast<int>(scale_sigmas_d.size()) - 1, fft_padding),
-            .psf_convolve =
-                psf_convolve_ctx(compute_stream, raw_psfs_d.extent(2), raw_psfs_d.extent(3), n_freq, fft_padding),
-            .raw_psfs = raw_psfs_d,
-            .xdes = xdes_d,
-            .mask = mask_d,
-            .scale_sigmas = scale_sigmas_d,
-            .scale_bias = scale_bias,
-            .map_pixel_facet = map_pixel_facet,
-        }
+      : exec_device(exec_device),
+        raw_psfs(raw_psfs),
+        xdes(xdes),
+        mask(mask),
+        scale_sigmas(scale_sigmas),
+        scale_bias(scale_bias),
+        map_pixel_facet(map_pixel_facet),
+        dirty_nrow(dirty_nrow),
+        dirty_ncol(dirty_ncol),
+        n_freq(n_freq),
+        fft_padding(fft_padding)
   {
-    const size_t shared_work_size =
-        std::max(workspace.scale_convolve.required_work_size(), workspace.psf_convolve.required_work_size());
-    if (shared_work_size > 0) {
-      fft_work_area = compute_stream.alloc_async(shared_work_size);
-    }
-    // Completes the static-input staging copies (above) and the work-area alloc
-    // before the host sources can be released.
-    compute_stream.sync();
-    workspace.scale_convolve.bind_work_area(fft_work_area);
-    workspace.psf_convolve.bind_work_area(fft_work_area);
+    core::check_plane_fits_int32(dirty_nrow, dirty_ncol, "dirty");
+    core::check_plane_fits_int32(raw_psfs.extent(2), raw_psfs.extent(3), "psf");
   }
 
   context(const context&) = delete;
@@ -202,12 +172,16 @@ struct context {
   context(context&&) = delete;
   context& operator=(context&&) = delete;
 
-  ~context()
+  device_state& state()
   {
-    // Stream-ordered after the last plan execution; compute_stream's own
-    // destructor synchronizes before the stream is destroyed.
-    if (fft_work_area != nullptr) compute_stream.free_async(fft_work_area);
+    if (state_ == nullptr)
+      state_ = std::make_unique<device_state>(exec_device, raw_psfs, xdes, mask, scale_sigmas, dirty_nrow, dirty_ncol,
+                                              n_freq, fft_padding);
+    return *state_;
   }
+
+ private:
+  std::unique_ptr<device_state> state_;
 };
 
 struct ddmsc_result {

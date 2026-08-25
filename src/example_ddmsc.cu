@@ -194,7 +194,7 @@ int main(int argc, char** argv)
   // We need the first listed cycle's dirty + mask up front: dirty to size the
   // FFT plans baked into the context, mask to provide a valid view to the
   // context constructor. Subsequent cycles reuse the same context, hot-
-  // swapping the mask via ctx.workspace.mask and feeding new params.
+  // swapping the mask via ctx.state().mask_d and feeding new params.
   const int first_cid = cycle_ids.front();
   auto npy_dirty0 = load_cycle(first_cid, "dirty");
   auto npy_mask0 = load_cycle(first_cid, "mask");
@@ -237,7 +237,7 @@ int main(int argc, char** argv)
 
   const float fft_padding = npy_fft_padding.scalar<float>();
 
-  // ----- Build DDMSC context (resources + workspace + FFT plans) -----
+  // ----- Build DDMSC context (validates dims; device state is built on first run) -----
   ddmsc::context ctx(device_id, raw_psfs, xdes, mask0, scale_sigmas, scale_bias, map_pixel_facet, nrow, ncol, n_freq,
                      fft_padding);
 
@@ -250,17 +250,16 @@ int main(int argc, char** argv)
     const int n_hist = static_cast<int>(npy_hist_scales.size());
     const int* hc = npy_hist_coords.as_int32();
     const int* hs = npy_hist_scales.as_int32();
-    auto& wsr = ctx.workspace;
-    wsr.historical_peak_coords.reserve(n_hist);
-    wsr.historical_scales.reserve(n_hist);
+    ctx.historical_peak_coords.reserve(n_hist);
+    ctx.historical_scales.reserve(n_hist);
     int n_kept = 0;
     for (int i = 0; i < n_hist; ++i) {
       const int r = hc[2 * i + 0];
       const int c = hc[2 * i + 1];
       if (r < 0 || r >= nrow || c < 0 || c >= ncol) continue;
       if (hs[i] < 0 || hs[i] >= n_scales) continue;
-      wsr.historical_peak_coords.emplace_back(r, c);
-      wsr.historical_scales.push_back(hs[i]);
+      ctx.historical_peak_coords.emplace_back(r, c);
+      ctx.historical_scales.push_back(hs[i]);
       ++n_kept;
     }
     printf("Seeded auto-mask history from %s: %d/%d components in-bounds\n", history_dir.c_str(), n_kept, n_hist);

@@ -58,26 +58,27 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
   FD_NVTX_RANGE_FN();
   // log::set_level(spdlog::level::debug);  // disabled for benchmarking
 
-  auto& ws = ctx.workspace;
-  auto& scale_ctx = ws.scale_convolve;
-  auto& psf_ctx = ws.psf_convolve;
+  // First call builds the device state: pool, streams, staged inputs, FFT plans.
+  auto& device = ctx.state();
+  auto& scale_ctx = device.scale_convolve;
+  auto& psf_ctx = device.psf_convolve;
 
   // stream_a is the context's compute stream — the FFT plans are bound to it,
   // so the convolutions and the surrounding kernels share one stream.
   // stream_b is the context's aux stream for the clean-loop per-channel
   // fit/subtract path; everything it touches (dirty, the coeff buffers) is
   // allocated and driven on it.
-  const auto& stream_a = ctx.compute_stream;
-  const auto& stream_b = ctx.aux_stream;
+  const auto& stream_a = device.compute_stream;
+  const auto& stream_b = device.aux_stream;
 
   const uint32_t n_freq = dirty.extent(0);
-  const uint32_t n_facets = ws.raw_psfs.extent(0);
+  const uint32_t n_facets = device.raw_psfs_d.extent(0);
   const size_t dirty_nrows = dirty.extent(1);
   const size_t dirty_ncols = dirty.extent(2);
   const size_t dirty_npix = dirty_nrows * dirty_ncols;
   const size_t mean_residual_n_items = dirty_npix;
-  const int n_order = ws.xdes.extent(1);
-  const int n_scales = static_cast<int>(ws.scale_sigmas.size());
+  const int n_order = device.xdes_d.extent(1);
+  const int n_scales = static_cast<int>(device.scale_sigmas_d.size());
 
   FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_ctx.input_nrow,
                                       psf_ctx.input_ncol));
@@ -103,7 +104,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
   matrix::stats_workspace stats_ws{stream_a, mean_residual_n_items, p.clean_negative};
 
   // Compute and track initial flux and RMS
-  auto [track_flux, track_rms] = matrix::compute_stats(stats_ws, mean_residual, ws.mask);
+  auto [track_flux, track_rms] = matrix::compute_stats(stats_ws, mean_residual, device.mask_d);
   FD_NVTX_MARK("init/initial_stats end");
 
   // Overflowed in a previous cycle
@@ -159,7 +160,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
       stream_a.alloc_mdcontainer_async<float>(n_scales, n_facets, n_freq, psf_ctx.input_nrow, psf_ctx.input_ncol);
   auto all_conv2_psfs =
       stream_a.alloc_mdcontainer_async<float>(n_scales, n_facets, psf_ctx.input_nrow, psf_ctx.input_ncol);
-  scale::convolve_psfs_with_scales_async(psf_ctx, ws.raw_psfs, ws.scale_sigmas, weights_freq, all_conv_psfs,
+  scale::convolve_psfs_with_scales_async(psf_ctx, device.raw_psfs_d, device.scale_sigmas_d, weights_freq, all_conv_psfs,
                                          all_conv2_psfs);
   FD_NVTX_MARK("init/precompute_psfs end");
   FD_NVTX_MARK("init/compute_gains begin");
@@ -168,7 +169,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
 
   // Loop-only buffers
   auto scale_kernels = stream_a.alloc_mdcontainer_async<float>(n_scales, scale_ctx.freq_nrow, scale_ctx.freq_ncol);
-  scale::make_gaussian_kernels_async(stream_a, ws.scale_sigmas, scale_ctx.padded_ncol, scale_kernels);
+  scale::make_gaussian_kernels_async(stream_a, device.scale_sigmas_d, scale_ctx.padded_ncol, scale_kernels);
 
   FD_LOG_DEBUG("run_ddmsc: built {} scale kernels in freq domain ({}x{}, {} floats total)", n_scales,
                scale_ctx.freq_nrow, scale_ctx.freq_ncol, scale_kernels.size());
@@ -202,18 +203,18 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
       FD_LOG_INFO("Start auto masking at threshold {}", auto_mask_threshold);
       mask_per_scale = stream_a.alloc_mdcontainer_async<bool>(n_scales, dirty_nrows, dirty_ncols);
 
-      const int central_facet_idx = ws.map_pixel_facet(dirty_nrows / 2, dirty_ncols / 2);
-      core::device_span3d<float> central_facet_psfs = emu::submdspan(ws.raw_psfs, central_facet_idx);
+      const int central_facet_idx = ctx.map_pixel_facet(dirty_nrows / 2, dirty_ncols / 2);
+      core::device_span3d<float> central_facet_psfs = emu::submdspan(device.raw_psfs_d, central_facet_idx);
 
       // Merge history-from-previous-calls with components found so far in this call.
-      std::vector<std::pair<int, int>> all_coords = ws.historical_peak_coords;
+      std::vector<std::pair<int, int>> all_coords = ctx.historical_peak_coords;
       all_coords.insert(all_coords.end(), result.peak_coords.begin(), result.peak_coords.end());
-      std::vector<int> all_scales = ws.historical_scales;
+      std::vector<int> all_scales = ctx.historical_scales;
       all_scales.insert(all_scales.end(), result.scales.begin(), result.scales.end());
 
       const float fft_padding = static_cast<float>(psf_ctx.padded_nrow) / psf_ctx.input_nrow;
-      common::build_auto_mask(stream_a, all_coords, all_scales, central_facet_psfs, weights_freq, ws.scale_sigmas,
-                              fft_padding, ws.mask, mask_per_scale);
+      common::build_auto_mask(stream_a, all_coords, all_scales, central_facet_psfs, weights_freq, device.scale_sigmas_d,
+                              fft_padding, device.mask_d, mask_per_scale);
 
       is_auto_mask_initialized = true;
     }
@@ -226,12 +227,12 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
       common::mask_and_abs_async(stream_a, scales_x_dirty, mask_per_scale, -std::numeric_limits<float>::infinity(),
                                  p.clean_negative);
     else
-      common::mask_and_abs_async(stream_a, scales_x_dirty, ws.mask, -std::numeric_limits<float>::infinity(),
+      common::mask_and_abs_async(stream_a, scales_x_dirty, device.mask_d, -std::numeric_limits<float>::infinity(),
                                  p.clean_negative);
 
     FD_NVTX_MARK("scale_selection");
     int selected_scale_idx =
-        scale::scale_selection(stream_a, scales_x_dirty, ws.scale_bias, deconv_convergence.get_all_stalled());
+        scale::scale_selection(stream_a, scales_x_dirty, ctx.scale_bias, deconv_convergence.get_all_stalled());
 
     // FD_LOG_INFO("run_ddmsc: selected scale {}, auto_mask {}", selected_scale_idx, activate_auto_mask);
 
@@ -262,7 +263,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
     while (peak_value > threshold && n_clean_iter < p.max_clean_iteration) {
       FD_NVTX_RANGE("minor_iter");
       const auto peak_coords = util::unravel_index_2D(peak_index, dirty_ncols);
-      const int facet_idx = ws.map_pixel_facet(peak_coords.first, peak_coords.second);
+      const int facet_idx = ctx.map_pixel_facet(peak_coords.first, peak_coords.second);
       const float gain = all_gains.at(gain_offset + facet_idx);
 
       result.add_component(peak_coords, selected_scale_idx, gain);
@@ -275,7 +276,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
 
       const std::size_t coeffs_offset = (total_iterations + n_clean_iter) * n_order;
       auto spectral_coeffs = core::device_vect<float>(all_coeffs.data_handle() + coeffs_offset, n_order);
-      multi_frequency::fit_coefficients(stream_b, dirty, jones_norm, weights_freq, ws.xdes, peak_coords,
+      multi_frequency::fit_coefficients(stream_b, dirty, jones_norm, weights_freq, device.xdes_d, peak_coords,
                                         spectral_coeffs, coeffs_per_chan);
 
       common::subtract_component_async(stream_b, dirty, conv_psf, coeffs_per_chan, peak_coords, gain);
@@ -311,12 +312,12 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
     mean_residual = core::device_span2d<float>(mean_residual_buf.data_handle(), dirty_nrows, dirty_ncols);
     linalg::weighted_sum_async(stream_a, dirty, weights_freq, mean_residual);
 
-    // TODO(guards): stats use ws.mask while the sub-minor loop searches mask_per_scale when the
+    // TODO(guards): stats use device.mask_d while the sub-minor loop searches mask_per_scale when the
     // auto-mask is active, so a bright pixel outside the auto-mask is never cleanable yet still
     // sets track_flux and the stop_flux comparison (observed on a LOFAR run with AutoMask=True:
     // peak_flux pinned at 0.03776400 for ~1700 iterations while rms kept falling). Consider
     // computing the stats against the same mask the peak search is allowed to clean.
-    auto [this_flux, this_rms] = matrix::compute_stats(stats_ws, mean_residual, ws.mask);
+    auto [this_flux, this_rms] = matrix::compute_stats(stats_ws, mean_residual, device.mask_d);
     FD_NVTX_MARK("post_iter_stats end");
 
     if (last_selected_scale != selected_scale_idx) {
@@ -351,9 +352,9 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d
   result.total_iterations = total_iterations;
   result.status = deconv_convergence.status();
 
-  ws.historical_peak_coords.insert(ws.historical_peak_coords.end(), result.peak_coords.begin(),
-                                   result.peak_coords.end());
-  ws.historical_scales.insert(ws.historical_scales.end(), result.scales.begin(), result.scales.end());
+  ctx.historical_peak_coords.insert(ctx.historical_peak_coords.end(), result.peak_coords.begin(),
+                                    result.peak_coords.end());
+  ctx.historical_scales.insert(ctx.historical_scales.end(), result.scales.begin(), result.scales.end());
 
   return result;
 }
