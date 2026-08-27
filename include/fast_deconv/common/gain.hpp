@@ -1,7 +1,7 @@
 #pragma once
 
-#include <fast_deconv/core/resources.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
+#include <vector>
 
 /**
  * @brief   Compute per-facet gains from single-convolved PSFs.
@@ -11,7 +11,7 @@
  *
  *          For scale 0 (delta), all gains are set to gamma directly.
  *
- * @param[in]  stream_res CUDA stream resources (also used for scratch allocations).
+ * @param[in]  ctx        Execution lane (also used for scratch allocations).
  * @param[in]  conv_psfs  Single-convolved PSFs, device,
  *                        layout (n_facets, nch, psf_npix), pre-computed by
  *                        convolve_psfs_for_scale.
@@ -27,11 +27,9 @@
 
 namespace fast_deconv::common {
 
-std::vector<float> compute_gain_batched(const core::stream_resources& stream_res,
-                                        const core::device_span4d<float>& psfs,
-                                        const core::device_vect<float>& weights_freq, float gamma);
+std::vector<float> compute_gain_batched(const core::exec_ctx& ctx, const core::span4d<float>& psfs,
+                                        const core::span1d<float>& weights_freq, float gamma);
 
-std::vector<float> compute_all_gains_batched(const core::stream_resources& stream_res,
-                                             const core::device_span5d<float>& psfs,
-                                             const core::device_vect<float>& weights_freq, float gamma);
+std::vector<float> compute_all_gains_batched(const core::exec_ctx& ctx, const core::span5d<float>& psfs,
+                                             const core::span1d<float>& weights_freq, float gamma);
 }  // namespace fast_deconv::common

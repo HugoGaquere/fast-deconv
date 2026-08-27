@@ -1,63 +1,19 @@
 #pragma once
 
-#include <cufft.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/core/resources.hpp>
 #include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/linalg/fft.hpp>
 #include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
 
-#include "fast_deconv/linalg/fft.hpp"
-
 namespace fast_deconv::algorithm::ddmsc {
 
 static constexpr int MAX_SPECTRAL_ORDER = 4;
-
-/// Image-domain scale convolution context: one R2C plan (batch=1, forward FFT
-/// of mean dirty) + one batched C2R plan (batch=backward_batch_size).
-/// `convolve_with_scales` loops over chunks of `backward_batch_size` scales
-/// per IFFT call — pick the batch size to balance throughput vs. memory.
-struct scale_convolve_ctx : public linalg::convolve_ctx {
-  /// Build plans for a single forward FFT and a batched backward FFT of
-  /// @p backward_batch_size at a time. The plans run on @p stream_res;
-  /// `convolve_with_scales` must drive the convolution on that same stream
-  /// and ensure (n_scales - 1) is a multiple of @p backward_batch_size. The
-  /// owner must bind_work_area() before the first convolution.
-  scale_convolve_ctx(const core::stream_resources& stream_res, int nrow, int ncol, int backward_batch_size,
-                     float padding)
-      : linalg::convolve_ctx(stream_res, nrow, ncol, /*forward_batch=*/1,
-                             /*backward_batch=*/std::max(1, backward_batch_size), /*n_backward_plans=*/1, padding)
-  {
-  }
-
-  cufftHandle& plan_forward() { return plans_forward[0]; }
-  cufftHandle plan_forward() const { return plans_forward[0]; }
-  cufftHandle& plan_backward() { return plans_backward[0]; }
-  cufftHandle plan_backward() const { return plans_backward[0]; }
-};
-
-/// PSF-domain convolution context: batched R2C + two C2R plans (one for conv, one for conv^2).
-struct psf_convolve_ctx : public linalg::convolve_ctx {
-  /// Build batched plans (over n_freq channels). The plans run on
-  /// @p stream_res; the owner must bind_work_area() before the first use.
-  psf_convolve_ctx(const core::stream_resources& stream_res, int psf_nrow, int psf_ncol, int nch, float padding)
-      : linalg::convolve_ctx(stream_res, psf_nrow, psf_ncol, /*forward_batch=*/nch, /*backward_batch=*/nch,
-                             /*n_backward_plans=*/2, padding)
-  {
-  }
-
-  cufftHandle& plan_forward() { return plans_forward[0]; }
-  cufftHandle plan_forward() const { return plans_forward[0]; }
-  cufftHandle& plan_backward() { return plans_backward[0]; }
-  cufftHandle plan_backward() const { return plans_backward[0]; }
-  cufftHandle& plan_backward_2() { return plans_backward[1]; }
-  cufftHandle plan_backward_2() const { return plans_backward[1]; }
-};
 
 enum class auto_mask_threshold_type {
   peak_value,
@@ -95,13 +51,15 @@ struct device_state {
   core::resources exec_resources;
   core::stream_resources compute_stream;  // drives the convolution path; the FFT plans bind to it
   core::stream_resources aux_stream;      // clean-loop fit/subtract, overlapping compute_stream
-  core::device_cont4d<float> raw_psfs_d;
-  core::device_cont2d<float> xdes_d;
-  core::device_cont2d<bool> mask_d;
-  core::device_cont<float> scale_sigmas_d;
-  core::device_ptr<std::byte> fft_work_area;  // shared by both plan sets, run sequentially
-  scale_convolve_ctx scale_convolve;
-  psf_convolve_ctx psf_convolve;
+  core::cont4d<float> raw_psfs_d;
+  core::cont2d<float> xdes_d;
+  core::cont2d<bool> mask_d;
+  core::cont1d<float> scale_sigmas_d;
+  core::owned_ptr<std::byte> fft_work_area;  // shared by both plan sets, run sequentially
+  // One R2C of the mean dirty, then batched C2R over the (n_scales - 1) non-trivial scales.
+  linalg::convolve_ctx scale_convolve;
+  // Batched over n_freq channels, with two C2R plans: one for conv, one for conv^2.
+  linalg::convolve_ctx psf_convolve;
 
   device_state(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
                const core::host_span2d<bool>& mask, const core::host_vect<float>& scale_sigmas, int dirty_nrow,
@@ -113,9 +71,11 @@ struct device_state {
         xdes_d(compute_stream.copy_h2d_async(xdes)),
         mask_d(compute_stream.copy_h2d_async(mask)),
         scale_sigmas_d(compute_stream.copy_h2d_async(scale_sigmas)),
-        scale_convolve(compute_stream, dirty_nrow, dirty_ncol,
-                       /*backward_batch_size=*/static_cast<int>(scale_sigmas.size()) - 1, fft_padding),
-        psf_convolve(compute_stream, raw_psfs_d.extent(2), raw_psfs_d.extent(3), n_freq, fft_padding)
+        scale_convolve(compute_stream, dirty_nrow, dirty_ncol, /*forward_batch=*/1,
+                       /*backward_batch=*/std::max(1, static_cast<int>(scale_sigmas.size()) - 1),
+                       /*n_backward_plans=*/1, fft_padding),
+        psf_convolve(compute_stream, raw_psfs_d.extent(2), raw_psfs_d.extent(3), /*forward_batch=*/n_freq,
+                     /*backward_batch=*/n_freq, /*n_backward_plans=*/2, fft_padding)
   {
     const size_t shared_work_size = std::max(scale_convolve.required_work_size(), psf_convolve.required_work_size());
     if (shared_work_size > 0) fft_work_area = compute_stream.alloc_ptr_async<std::byte>(shared_work_size);
@@ -209,14 +169,17 @@ struct ddmsc_result {
     gains.push_back(gain);
   };
 
-  void add_coeffs_from_device(core::device_span2d<float> d_coeffs)
+  /// @p ctx must be the lane @p d_coeffs was written on — the download is
+  /// stream-ordered against it.
+  void add_coeffs_from_device(const core::exec_ctx& ctx, core::span2d<float> d_coeffs)
   {
     const std::size_t n_components = d_coeffs.extent(0);
     const std::size_t n_order = d_coeffs.extent(1);
     const std::size_t n_total = n_components * n_order;
 
     std::vector<float> h_buffer(n_total);
-    cudaMemcpy(h_buffer.data(), d_coeffs.data_handle(), n_total * sizeof(float), cudaMemcpyDeviceToHost);
+    ctx.download(d_coeffs, h_buffer.data());
+    ctx.wait();
 
     for (std::size_t i = 0; i < n_components; ++i) {
       coeffs.emplace_back(h_buffer.begin() + i * n_order, h_buffer.begin() + (i + 1) * n_order);

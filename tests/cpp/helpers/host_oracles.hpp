@@ -96,7 +96,7 @@ inline std::pair<float, int> cpu_argmax(const std::vector<float>& img)
   return {img.at(best), best};
 }
 
-// sqrt(max(E[x^2] - E[x]^2, 0)) over ALL pixels — the matrix::compute_stats
+// sqrt(max(E[x^2] - E[x]^2, 0)) over ALL pixels — the matrix::stats_ctx::run
 // rms definition (its mask applies to the max only).
 inline float std_all(const std::vector<float>& data)
 {

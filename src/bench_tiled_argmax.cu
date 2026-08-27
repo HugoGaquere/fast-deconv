@@ -1,5 +1,5 @@
-/// Benchmark + profiling driver for the tiled argmax (matrix::argmax and
-/// matrix::argmax_incremental).
+/// Benchmark + profiling driver for the tiled argmax (matrix::tiled_argmax_ctx::run and
+/// run_incremental).
 ///
 /// Motivation: in the DDMSC clean loop a minor iteration subtracts a PSF stamp
 /// at the current peak, dirtying only a footprint-sized sub-region of the mean
@@ -9,10 +9,10 @@
 ///
 /// The key question is whether the incremental approach beats the *production*
 /// baseline, so this driver times three things on the same data:
-///   - native   : cub::DeviceReduce::ArgMax over the whole image (matrix::argmax)
+///   - native   : cub::DeviceReduce::ArgMax over the whole image (matrix::argmax_ctx)
 ///                -- exactly what the clean loop runs today; the reference.
-///   - full     : the tiled full pass (matrix::argmax over the workspace).
-///   - incr     : the tiled incremental pass (matrix::argmax_incremental).
+///   - full     : the tiled full pass (tiled_argmax_ctx::run).
+///   - incr     : the tiled incremental pass (tiled_argmax_ctx::run_incremental).
 /// Speedups in the CSV (speedup_incr, speedup_full) are taken against `native`,
 /// not against the tiled full pass -- the tiled full pass craters for tiny tiles
 /// and would otherwise report meaningless ratios.
@@ -191,7 +191,7 @@ struct tile_result {
 };
 
 // Run the full + incremental phases for one (tile, psf) pair over the shared image.
-static tile_result run_tile(const core::stream_resources& sr, const float* d_data, const options& opt, int tile,
+static tile_result run_tile(const core::stream_resources& sr, float* d_data, const options& opt, int tile,
                             int psf)
 {
   tile_result tr;
@@ -201,11 +201,8 @@ static tile_result run_tile(const core::stream_resources& sr, const float* d_dat
   tr.n_tiles_y = (opt.height + tile - 1) / tile;
   tr.n_tiles = static_cast<long long>(tr.n_tiles_x) * tr.n_tiles_y;
 
-  matrix::tiled_argmax_workspace ws{sr};
-  ws.image_width = opt.width;
-  ws.image_height = opt.height;
-  ws.tile_width = tile;
-  ws.tile_height = tile;
+  matrix::tiled_argmax_ctx ws{sr, core::dims<2>(opt.height, opt.width), tile};
+  const core::span2d<float> view(d_data, opt.height, opt.width);
 
   // The incremental pass dirties a footprint centered here; fixed across reps.
   const int peak_row = opt.height / 2;
@@ -222,9 +219,8 @@ static tile_result run_tile(const core::stream_resources& sr, const float* d_dat
   tr.dirty_tiles = static_cast<long long>(tx1 - tx0 + 1) * (ty1 - ty0 + 1);
 
   // Phase 1 (full) also seeds every tile, which argmax_incremental requires.
-  tr.full = time_phase(opt.warmup, opt.reps, [&] { matrix::argmax(ws, d_data); });
-  tr.incr =
-      time_phase(opt.warmup, opt.reps, [&] { matrix::argmax_incremental(ws, d_data, peak_row, peak_col, psf, psf); });
+  tr.full = time_phase(opt.warmup, opt.reps, [&] { ws.run(view); });
+  tr.incr = time_phase(opt.warmup, opt.reps, [&] { ws.run_incremental(view, peak_row, peak_col, psf, psf); });
 
   sr.sync();  // ws releases its device buffers in its destructor
   return tr;
@@ -273,27 +269,24 @@ static void validate(const core::stream_resources& sr, float* d_data, const opti
 {
   const int peak_row = opt.height / 2, peak_col = opt.width / 2;
 
-  matrix::tiled_argmax_workspace ws{sr};
-  ws.image_width = opt.width;
-  ws.image_height = opt.height;
-  ws.tile_width = tile;
-  ws.tile_height = tile;
+  matrix::tiled_argmax_ctx ws{sr, core::dims<2>(opt.height, opt.width), tile};
+  const core::span2d<float> view(d_data, opt.height, opt.width);
 
   // Plant a unique global peak (data is in [0,1)); the full pass must find it.
   const int gidx = peak_row * opt.width + peak_col;
   const float big = 5.0f;
   BENCH_CHECK_CUDA(cudaMemcpyAsync(d_data + gidx, &big, sizeof(float), cudaMemcpyHostToDevice, sr.cuda_stream));
-  auto [fv, fi] = matrix::argmax(ws, d_data);
-  printf("  [validate] FULL %s: peak %.3f at %d (want %.3f at %d)\n", (fv == big && fi == gidx) ? "ok" : "MISMATCH", fv,
-         fi, big, gidx);
+  auto [fv, fi] = ws.run(view);
+  printf("  [validate] FULL %s: peak %.3f at %lld (want %.3f at %d)\n", (fv == big && fi == gidx) ? "ok" : "MISMATCH",
+         fv, static_cast<long long>(fi), big, gidx);
 
   // Dirty the footprint: plant an even bigger peak inside it, refresh incrementally.
   const int bidx = (peak_row + 3) * opt.width + (peak_col + 5);
   const float bigger = 9.0f;
   BENCH_CHECK_CUDA(cudaMemcpyAsync(d_data + bidx, &bigger, sizeof(float), cudaMemcpyHostToDevice, sr.cuda_stream));
-  auto [iv, ii] = matrix::argmax_incremental(ws, d_data, peak_row, peak_col, psf, psf);
-  printf("  [validate] INCREMENTAL %s: peak %.3f at %d (want %.3f at %d)\n",
-         (iv == bigger && ii == bidx) ? "ok" : "MISMATCH", iv, ii, bigger, bidx);
+  auto [iv, ii] = ws.run_incremental(view, peak_row, peak_col, psf, psf);
+  printf("  [validate] INCREMENTAL %s: peak %.3f at %lld (want %.3f at %d)\n",
+         (iv == bigger && ii == bidx) ? "ok" : "MISMATCH", iv, static_cast<long long>(ii), bigger, bidx);
 
   sr.sync();  // ws releases its device buffers in its destructor
   fill_image(d_data, static_cast<uint64_t>(opt.width) * opt.height, opt.seed, sr);  // restore
@@ -389,7 +382,7 @@ int main(int argc, char** argv)
   printf("============================================================\n\n");
 
   // OOM pre-check with an actionable message: the image is by far the biggest
-  // allocation (tile workspaces are O(n_tiles) and tiny next to it), so a
+  // allocation (tile buffers are O(n_tiles) and tiny next to it), so a
   // small slack factor over the image bytes is enough.
   {
     size_t free_b = 0, total_b = 0;
@@ -407,7 +400,7 @@ int main(int argc, char** argv)
   core::resources res(opt.device);
   const core::stream_resources sr = res.make_stream();
 
-  float* d_data = res.alloc_async<float>(npix, sr);
+  float* d_data = sr.alloc_async<float>(npix);
   fill_image(d_data, npix, opt.seed, sr);
 
   if (opt.validate) {
@@ -420,8 +413,9 @@ int main(int argc, char** argv)
   // incremental approach must beat. Independent of tile/psf, so measured once.
   timing native;
   {
-    matrix::argmax_workspace native_ws{sr, npix};
-    native = time_phase(opt.warmup, opt.reps, [&] { matrix::argmax(native_ws, d_data); });
+    matrix::argmax_ctx native_ws{sr, npix};
+    native =
+        time_phase(opt.warmup, opt.reps, [&] { native_ws.run(core::span2d<float>(d_data, opt.height, opt.width)); });
   }
   printf("native argmax (cub ArgMax over %.0f Mpix): mean %.4f ms  min %.4f  (%.1f GiB/s)\n\n", npix / 1e6,
          native.mean_ms, native.min_ms, native.mean_ms > 0 ? img_mb / 1024.0 / (native.mean_ms / 1000.0) : 0.0);

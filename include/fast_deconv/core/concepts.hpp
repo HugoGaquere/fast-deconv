@@ -1,6 +1,6 @@
 #pragma once
 #include <emu/concepts.hpp>
-#include <emu/cuda/device/mdspan.hpp>
+#include <emu/detail/mdspan_types.hpp>
 
 #include <type_traits>
 

@@ -3,11 +3,33 @@
 #-------------------------------------------------------------------#
 cmake_minimum_required(VERSION 3.26)
 
-set(CMAKE_CUDA_ARCHITECTURES "native")
+# Selects include/fast_deconv/backend/<name> (headers) and
+# src/fast_deconv/backend/<name> (implementations). Read before project()
+# because it decides whether CUDA is enabled as a language at all.
+set(FAST_DECONV_BACKEND "cuda" CACHE STRING "Compute backend: cuda | host")
+set_property(CACHE FAST_DECONV_BACKEND PROPERTY STRINGS cuda host)
 
-project(fast_deconv LANGUAGES CXX CUDA)
+if(NOT FAST_DECONV_BACKEND MATCHES "^(cuda|host)$")
+  message(FATAL_ERROR "FAST_DECONV_BACKEND must be 'cuda' or 'host', got '${FAST_DECONV_BACKEND}'")
+endif()
 
-find_package(CUDAToolkit REQUIRED)
+if(FAST_DECONV_BACKEND STREQUAL "cuda")
+  set(FAST_DECONV_WITH_CUDA ON)
+else()
+  set(FAST_DECONV_WITH_CUDA OFF)
+endif()
+
+set(_fd_languages CXX)
+if(FAST_DECONV_WITH_CUDA)
+  set(CMAKE_CUDA_ARCHITECTURES "native")
+  list(APPEND _fd_languages CUDA)
+endif()
+
+project(fast_deconv LANGUAGES ${_fd_languages})
+
+if(FAST_DECONV_WITH_CUDA)
+  find_package(CUDAToolkit REQUIRED)
+endif()
 
 # Build all objects as PIC so executables link cleanly on toolchains that
 # default to PIE (conda-forge, recent Debian/Ubuntu/Fedora).
@@ -72,6 +94,7 @@ foreach(_tp_target IN ITEMS
     fmt::fmt
     spdlog::spdlog
     emu::emu
+    emu::core
     CUDA::cublas
     CUDA::cufft
     CUDA::cudart
@@ -85,37 +108,37 @@ endforeach()
 # Core library
 #-------------------------------------------------------------------#
 
+# Implementations for the selected backend. Globbed because the file set churns
+# while the matrix/linalg modules migrate; swap for an explicit list once it settles.
+file(GLOB_RECURSE FAST_DECONV_BACKEND_SOURCES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/fast_deconv/backend/${FAST_DECONV_BACKEND}/*.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/fast_deconv/backend/${FAST_DECONV_BACKEND}/*.cpp
+)
+
 add_library(fast_deconv STATIC
-        src/fast_deconv/algorithm/scales.cu
-        src/fast_deconv/algorithm/ddmsc_cycles.cu
-        src/fast_deconv/algorithm/ddmsc.cu
-        src/fast_deconv/common/mask.cu
-        src/fast_deconv/common/gain.cu
-        src/fast_deconv/common/clean.cu
-        src/fast_deconv/common/multi_frequency.cu
+        src/fast_deconv/algorithm/ddmsc_cycles.cpp
+        src/fast_deconv/algorithm/ddmsc.cpp
         src/fast_deconv/common/convergence.cpp
-        src/fast_deconv/linalg/fft.cu
-        src/fast_deconv/linalg/linalg.cu
-        src/fast_deconv/linalg/pseudo_inverse.cu
-        src/fast_deconv/matrix/argmax.cu
-        src/fast_deconv/matrix/tiled_argmax.cu
-        src/fast_deconv/matrix/max.cu
-        src/fast_deconv/matrix/rms.cu
-        src/fast_deconv/matrix/stats.cu
-        src/fast_deconv/morphology/dilation.cu
-        src/fast_deconv/morphology/roi.cu
+        ${FAST_DECONV_BACKEND_SOURCES}
 )
 
 target_link_libraries(fast_deconv PUBLIC
   fmt::fmt
   spdlog::spdlog
-  emu::emu
-  CUDA::cublas
-  CUDA::cufft
 )
+
+if(FAST_DECONV_WITH_CUDA)
+  target_link_libraries(fast_deconv PUBLIC emu::emu CUDA::cublas CUDA::cufft)
+else()
+  # emu::emu aggregates emu::cuda, which links cudart; emu::core is the CUDA-free half.
+  target_link_libraries(fast_deconv PUBLIC emu::core)
+  # nvtx3 ships with the CUDA toolkit, so the probes cannot compile without it.
+  target_compile_definitions(fast_deconv PUBLIC FD_NVTX_DISABLE)
+endif()
 
 target_include_directories(fast_deconv PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/fast_deconv/backend/${FAST_DECONV_BACKEND}>
 )
 
 target_compile_features(fast_deconv PUBLIC cxx_std_20)
@@ -148,6 +171,10 @@ target_compile_options(fast_deconv PUBLIC
 # Python extension
 #-------------------------------------------------------------------#
 
+if (SKBUILD AND NOT FAST_DECONV_WITH_CUDA)
+  message(FATAL_ERROR "The python extension has CUDA-only sources; build it with FAST_DECONV_BACKEND=cuda")
+endif()
+
 if (SKBUILD)
   # Let pybind11 find the python interpreter by itself.
   set(PYBIND11_FINDPYTHON ON)
@@ -177,7 +204,8 @@ endif()
 #-------------------------------------------------------------------#
 # Example executable
 #-------------------------------------------------------------------#
-if (NOT SKBUILD)
+# Sources here are all .cu, so they only build for the cuda backend.
+if (NOT SKBUILD AND FAST_DECONV_WITH_CUDA)
   add_executable(fast_deconv_app src/main.cu)
   target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
 

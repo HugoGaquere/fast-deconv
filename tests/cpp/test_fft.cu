@@ -84,6 +84,22 @@ std::vector<float> host_pad_ifftshift(const std::vector<float>& in, int nx, int 
   return out;
 }
 
+// The layout kernels only read the geometry, so set it explicitly — these cases
+// pick padded sizes the padding-factor constructor would not produce.
+linalg::fft_dims explicit_dims(int nx, int ny, int px, int py)
+{
+  linalg::fft_dims d;
+  d.input_nrow = nx;
+  d.input_ncol = ny;
+  d.padded_nrow = px;
+  d.padded_ncol = py;
+  d.padding_nrow = (px - nx) / 2;
+  d.padding_ncol = (py - ny) / 2;
+  d.freq_nrow = px;
+  d.freq_ncol = py / 2 + 1;
+  return d;
+}
+
 // Distinct, order-revealing values so any permutation of the layout shows up.
 std::vector<float> iota_image(int n, float offset = 0.0f)
 {
@@ -109,7 +125,7 @@ TEST_F(FftLayout, PadIfftshiftMatchesHostOracle)
   fdtest::device_buffer<float> d_in(res(), sr, in);
   fdtest::device_buffer<float> d_out(res(), sr, static_cast<std::size_t>(px) * py);
 
-  linalg::pad_ifftshift(d_in.get(), d_out.get(), nx, ny, px, py, npad_x, npad_y, sr.cuda_stream);
+  linalg::pad_ifftshift_async(sr, explicit_dims(nx, ny, px, py), d_in.get(), d_out.get());
   sr.sync();
 
   const auto out = d_out.to_host();
@@ -134,7 +150,7 @@ TEST_F(FftLayout, PadIfftshiftBatchedMatchesSingleImageOracle)
   fdtest::device_buffer<float> d_in(res(), sr, in);
   fdtest::device_buffer<float> d_out(res(), sr, static_cast<std::size_t>(n_batch) * out_stride);
 
-  linalg::pad_ifftshift_batched(d_in.get(), d_out.get(), nx, ny, px, py, npad_x, npad_y, n_batch, sr.cuda_stream);
+  linalg::pad_ifftshift_batched_async(sr, explicit_dims(nx, ny, px, py), d_in.get(), d_out.get(), n_batch);
   sr.sync();
 
   const auto out = d_out.to_host();
@@ -162,16 +178,15 @@ TEST_F(FftLayout, PadThenCropRoundTripIsIdentity)
   const auto sr = res().make_stream();
 
   for (const auto& cs : cases) {
-    const int npad_x = (cs.px - cs.nx) / 2, npad_y = (cs.py - cs.ny) / 2;
     const auto in = iota_image(cs.nx * cs.ny);
 
     fdtest::device_buffer<float> d_in(res(), sr, in);
     fdtest::device_buffer<float> d_pad(res(), sr, static_cast<std::size_t>(cs.px) * cs.py);
     fdtest::device_buffer<float> d_back(res(), sr, static_cast<std::size_t>(cs.nx) * cs.ny);
 
-    linalg::pad_ifftshift(d_in.get(), d_pad.get(), cs.nx, cs.ny, cs.px, cs.py, npad_x, npad_y, sr.cuda_stream);
-    linalg::fftshift_crop(d_pad.get(), d_back.get(), cs.nx, cs.ny, cs.px, cs.py, npad_x, npad_y, /*n_batch=*/1,
-                          sr.cuda_stream);
+    const auto dims = explicit_dims(cs.nx, cs.ny, cs.px, cs.py);
+    linalg::pad_ifftshift_async(sr, dims, d_in.get(), d_pad.get());
+    linalg::fftshift_crop_async(sr, dims, d_pad.get(), d_back.get(), /*n_batch=*/1);
     sr.sync();
 
     const auto back = d_back.to_host();
@@ -184,7 +199,6 @@ TEST_F(FftLayout, PadThenCropRoundTripIsIdentity)
 TEST_F(FftLayout, BatchedRoundTripIsIdentityPerSlice)
 {
   const int nx = 5, ny = 6, px = 8, py = 9, n_batch = 3;
-  const int npad_x = (px - nx) / 2, npad_y = (py - ny) / 2;
   const int in_stride = nx * ny, pad_stride = px * py;
 
   std::vector<float> in(n_batch * in_stride);
@@ -198,8 +212,9 @@ TEST_F(FftLayout, BatchedRoundTripIsIdentityPerSlice)
   fdtest::device_buffer<float> d_pad(res(), sr, static_cast<std::size_t>(n_batch) * pad_stride);
   fdtest::device_buffer<float> d_back(res(), sr, static_cast<std::size_t>(n_batch) * in_stride);
 
-  linalg::pad_ifftshift_batched(d_in.get(), d_pad.get(), nx, ny, px, py, npad_x, npad_y, n_batch, sr.cuda_stream);
-  linalg::fftshift_crop(d_pad.get(), d_back.get(), nx, ny, px, py, npad_x, npad_y, n_batch, sr.cuda_stream);
+  const auto dims = explicit_dims(nx, ny, px, py);
+  linalg::pad_ifftshift_batched_async(sr, dims, d_in.get(), d_pad.get(), n_batch);
+  linalg::fftshift_crop_async(sr, dims, d_pad.get(), d_back.get(), n_batch);
   sr.sync();
 
   const auto back = d_back.to_host();
