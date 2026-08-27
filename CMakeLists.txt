@@ -44,7 +44,7 @@ set(
 )
 
 if(SKBUILD)
-  set(CONAN_INSTALL_ARGS "--build=missing;--options=fast_deconv/*:python_module=True;${CONAN_ARGS}")
+  set(CONAN_INSTALL_ARGS "--build=missing;--options=fast-deconv/*:python_module=True;${CONAN_ARGS}")
 endif()
 
 #-------------------------------------------------------------------#

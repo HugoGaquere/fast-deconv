@@ -4,7 +4,7 @@ from conan.tools.cmake import cmake_layout, CMake, CMakeToolchain
 
 class Recipe(ConanFile):
     name = "fast-deconv"
-    version = "0.6.0"
+    version = "0.7.0"
 
     # Keep as it is
     settings = "os", "compiler", "build_type", "arch"
