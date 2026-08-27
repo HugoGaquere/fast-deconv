@@ -60,7 +60,7 @@ stats_ctx::stats_ctx(const core::exec_ctx& ctx, std::size_t n_elements, bool use
   CHECK_CUDA(cub::DeviceReduce::Reduce(nullptr, temp_bytes_, it_query, d_state_.get(), static_cast<int>(n_elements_),
                                        stats_combine{}, kIdentity, ctx_.cuda_stream));
 
-  d_temp_ = ctx_.alloc_ptr_async<std::byte>(temp_bytes_);
+  d_temp_ = ctx_.alloc_ptr_async<std::byte>(std::max<std::size_t>(temp_bytes_, 1));
 }
 
 void stats_ctx::run_async(core::span2d<float> data, core::span2d<bool> mask)

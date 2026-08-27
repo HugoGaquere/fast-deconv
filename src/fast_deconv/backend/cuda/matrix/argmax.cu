@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 #include <cub/device/device_reduce.cuh>
 #include <fast_deconv/matrix/argmax.hpp>
@@ -20,7 +21,7 @@ argmax_ctx::argmax_ctx(const core::exec_ctx& ctx, std::size_t n_elements) : ctx_
                                        n_elements_, ctx_.cuda_stream));
 #endif
 
-  d_temp_ = ctx_.alloc_ptr_async<std::byte>(temp_bytes_);
+  d_temp_ = ctx_.alloc_ptr_async<std::byte>(std::max<std::size_t>(temp_bytes_, 1));
 }
 
 void argmax_ctx::run_async(core::span2d<float> data)
