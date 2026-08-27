@@ -37,6 +37,8 @@ Each backend gets its own tree, so the two never clobber each other.
 ./scripts/build.sh host         # host, Release
 ./scripts/build.sh all          # both backends, Release
 ./scripts/build.sh all -t       # both backends, Release, then ctest
+./scripts/build.sh --python     # cuda wheel into dist/cuda
+./scripts/build.sh all --python # both wheels, into dist/<backend>/
 ```
 
 Or by hand:
