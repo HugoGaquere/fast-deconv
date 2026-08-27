@@ -64,15 +64,15 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-banner "2/7  configure Release (conan install + cmake preset)"
-conan install . --build=missing -s build_type=Release
-cmake --preset conan-release
+banner "2/7  configure Release cuda (conan install + cmake preset)"
+conan install . -o "fast-deconv/*:backend=cuda" --build=missing -s build_type=Release
+cmake --preset conan-release-backend_cuda
 
 # ---------------------------------------------------------------------------
 banner "3/7  clang-tidy (advisory — does not abort the pipeline)"
 if ((RUN_TIDY)) && ((${#CHANGED_TU[@]})); then
   # -p points at the compile database produced by the configure step above.
-  if clang-tidy -p build/Release --quiet "${CHANGED_TU[@]}"; then
+  if clang-tidy -p build/release-backend_cuda --quiet "${CHANGED_TU[@]}"; then
     note "clang-tidy clean"
   else
     note "clang-tidy reported findings (see above) — pipeline continues"
@@ -85,12 +85,12 @@ fi
 
 # ---------------------------------------------------------------------------
 banner "4/7  compile Release"
-cmake --build build/Release
+cmake --build build/release-backend_cuda
 
 # ---------------------------------------------------------------------------
 banner "5/7  tests (UNIT + NONREG)"
-ctest --test-dir build/Release -L UNIT   --output-on-failure
-ctest --test-dir build/Release -L NONREG --output-on-failure
+ctest --test-dir build/release-backend_cuda -L UNIT   --output-on-failure
+ctest --test-dir build/release-backend_cuda -L NONREG --output-on-failure
 
 # ---------------------------------------------------------------------------
 banner "6/7  compute-sanitizer (device memcheck + racecheck on the UNIT binary)"
@@ -100,9 +100,9 @@ if ((RUN_MEMCHECK)); then
   elif ! command -v nvidia-smi >/dev/null || ! nvidia-smi -L >/dev/null 2>&1; then
     note "no CUDA device — skipping"
   else
-    unit_bin="$(find build/Release -type f -name fast_deconv_unit_tests -print -quit)"
+    unit_bin="$(find build/release-backend_cuda -type f -name fast_deconv_unit_tests -print -quit)"
     if [[ -z "$unit_bin" ]]; then
-      note "unit test binary not found under build/Release — skipping"
+      note "unit test binary not found under build/release-backend_cuda — skipping"
     else
       # No --leak-check full: the memory pool retains device allocations by
       # design and would be reported as leaks. memcheck catches OOB/misaligned
@@ -116,9 +116,9 @@ if ((RUN_MEMCHECK)); then
       # thing that exercises the end-to-end minor-cycle orchestration. Run it
       # directly, not through ctest, so its 300s ctest timeout doesn't apply.
       # racecheck is skipped here — too slow on the full run.
-      nonreg_bin="$(find build/Release -type f -name fast_deconv_nonreg_tests -print -quit)"
+      nonreg_bin="$(find build/release-backend_cuda -type f -name fast_deconv_nonreg_tests -print -quit)"
       if [[ -z "$nonreg_bin" ]]; then
-        note "nonreg test binary not found under build/Release — skipping"
+        note "nonreg test binary not found under build/release-backend_cuda — skipping"
       else
         banner "compute-sanitizer --tool memcheck (NONREG binary)"
         compute-sanitizer --tool memcheck --error-exitcode 1 "$nonreg_bin"
@@ -135,16 +135,16 @@ if ((RUN_SANITIZE)); then
   # Always turn the option back off, even if the build or run fails.
   reset_sanitize() {
     banner "reset FAST_DECONV_SANITIZE=OFF"
-    cmake --preset conan-debug -DFAST_DECONV_SANITIZE=OFF >/dev/null
+    cmake --preset conan-debug-backend_cuda -DFAST_DECONV_SANITIZE=OFF >/dev/null
   }
   trap reset_sanitize EXIT
 
-  conan install . --build=missing -s build_type=Debug
-  cmake --preset conan-debug -DFAST_DECONV_SANITIZE=ON
-  cmake --build build/Debug
+  conan install . -o "fast-deconv/*:backend=cuda" --build=missing -s build_type=Debug
+  cmake --preset conan-debug-backend_cuda -DFAST_DECONV_SANITIZE=ON
+  cmake --build build/debug-backend_cuda
   ASAN_OPTIONS=protect_shadow_gap=0 \
     LSAN_OPTIONS="suppressions=$REPO/tests/lsan_suppressions.txt" \
-    ctest --test-dir build/Debug -L UNIT --output-on-failure
+    ctest --test-dir build/debug-backend_cuda -L UNIT --output-on-failure
 else
   note "skipped (--no-sanitize)"
 fi

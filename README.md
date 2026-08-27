@@ -29,32 +29,50 @@ Runtime deps: `numpy`.
 
 ## Build (C++ only)
 
+`FAST_DECONV_BACKEND` selects the compute backend: `cuda` (default) or `host`.
+Each backend gets its own tree, so the two never clobber each other.
+
 ```bash
-conan install . --output-folder=build/Release --build=missing -s build_type=Release
-cmake --preset conan-release
-cmake --build build/Release
-ctest --test-dir build/Release
+./scripts/build.sh              # cuda, Release
+./scripts/build.sh host         # host, Release
+./scripts/build.sh all          # both backends, Release
+./scripts/build.sh all -t       # both backends, Release, then ctest
 ```
+
+Or by hand:
+
+```bash
+conan install . -o "fast-deconv/*:backend=cuda" --build=missing -s build_type=Release
+cmake --preset conan-release-backend_cuda
+cmake --build build/release-backend_cuda
+ctest --test-dir build/release-backend_cuda
+```
+
+**The `host` backend does not compute anything yet.** Every kernel is a stub
+that throws `"host backend not implemented yet"`; only the CPU-only tests
+(`test_convergence`) run, and the CUDA apps, benches and tests are skipped. It
+exists so the backend seam stays honest — build it to check that a change keeps
+the tree backend-agnostic, not to run a deconvolution.
 
 Notable outputs: `libfast_deconv.a`, the `example_ddmsc` driver (runs against FastDDFacet `dump_ref` exports), and the GoogleTest binaries `fast_deconv_unit_tests` / `fast_deconv_nonreg_tests`.
 
 ## Tests
 
 ```bash
-ctest --test-dir build/Release -L UNIT      # unit tests (CPU-oracle based; GPU tests skip if no device)
-ctest --test-dir build/Release -L NONREG    # synthetic DDMSC non-regression run vs JSON baseline
+ctest --test-dir build/release-backend_cuda -L UNIT      # unit tests (CPU-oracle based; GPU tests skip if no device)
+ctest --test-dir build/release-backend_cuda -L NONREG    # synthetic DDMSC non-regression run vs JSON baseline
 ```
 
 The non-regression test compares scalar metrics of a full synthetic DDMSC run
 against `tests/baselines/ddmsc_synthetic.json`. After an intentional
 algorithmic change, regenerate with `FAST_DECONV_UPDATE_BASELINE=1 ctest
---test-dir build/Release -L NONREG` and commit the reviewed JSON diff.
+--test-dir build/release-backend_cuda -L NONREG` and commit the reviewed JSON diff.
 
 ## Layout
 
 ```
 include/fast_deconv/   public headers (algorithm, common, core, linalg, matrix, morphology)
-src/fast_deconv/       CUDA implementations
+src/fast_deconv/       shared sources; backend/<cuda|host>/ per-backend implementations
 src/python/bindings/   pybind11 wrappers
 tests/cpp/             GoogleTest unit tests
 ```

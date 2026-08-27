@@ -12,11 +12,13 @@ class Recipe(ConanFile):
     # List of files to export to the conan cache when creating package.
     exports_sources = "CMakeLists.txt", "include/*", "src/*", "tests/*"
 
-    options = {"python_module": [True, False]}
-    default_options = {"python_module": False}
+    options = {"python_module": [True, False], "backend": ["cuda", "host"]}
+    default_options = {"python_module": False, "backend": "cuda"}
 
     options_descriptions = {
         "python_module": "Tells conan to adapt to the python module build",
+        "backend": "Compute backend to build: cuda | host. Drives FAST_DECONV_BACKEND "
+                   "and whether emu is pulled in with its CUDA extension.",
     }
 
     def requirements(self):
@@ -24,7 +26,10 @@ class Recipe(ConanFile):
         self.requires("spdlog/1.15.3")
         self.requires(
             "emu/0.1.0-rc.7",
-            options={"python": self.options.python_module, "cuda": True},
+            options={
+                "python": self.options.python_module,
+                "cuda": self.options.backend == "cuda",
+            },
         )
         self.requires("gtest/1.15.0")
         self.requires("nlohmann_json/3.11.3")
@@ -35,7 +40,9 @@ class Recipe(ConanFile):
             # We don't want to pollute the build folder with conan. We put everything in "generators"
             self.folders.generators = "generators"
         else:
-            # Otherwise, we use the default cmake layout
+            # One tree per backend so cuda and host builds don't clobber each
+            # other: build/release-cuda, build/release-host, and so on.
+            self.folders.build_folder_vars = ["settings.build_type", "options.backend"]
             cmake_layout(self)
 
     generators = "CMakeConfigDeps"
@@ -43,6 +50,7 @@ class Recipe(ConanFile):
     def generate(self):
         if not self.options.python_module:
             tc = CMakeToolchain(self)
+            tc.cache_variables["FAST_DECONV_BACKEND"] = str(self.options.backend)
             tc.generate()
 
     def build(self):
