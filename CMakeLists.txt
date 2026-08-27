@@ -44,7 +44,10 @@ set(
 )
 
 if(SKBUILD)
-  set(CONAN_INSTALL_ARGS "--build=missing;--options=fast-deconv/*:python_module=True;${CONAN_ARGS}")
+  # The provider runs conan install from inside CMake, so the backend has to be
+  # forwarded or emu would be resolved for the wrong one.
+  set(CONAN_INSTALL_ARGS
+      "--build=missing;--options=fast-deconv/*:python_module=True;--options=fast-deconv/*:backend=${FAST_DECONV_BACKEND};${CONAN_ARGS}")
 endif()
 
 #-------------------------------------------------------------------#
@@ -171,19 +174,16 @@ target_compile_options(fast_deconv PUBLIC
 # Python extension
 #-------------------------------------------------------------------#
 
-if (SKBUILD AND NOT FAST_DECONV_WITH_CUDA)
-  message(FATAL_ERROR "The python extension has CUDA-only sources; build it with FAST_DECONV_BACKEND=cuda")
-endif()
-
 if (SKBUILD)
   # Let pybind11 find the python interpreter by itself.
   set(PYBIND11_FINDPYTHON ON)
   find_package(pybind11 CONFIG REQUIRED)
 
+  # Plain C++: the bindings only touch the backend-agnostic public API.
   pybind11_add_module(_fast_deconv
-    src/python/fast_deconv_module.cu
-    src/python/bindings/core.cu
-    src/python/bindings/ddmsc.cu
+    src/python/fast_deconv_module.cpp
+    src/python/bindings/core.cpp
+    src/python/bindings/ddmsc.cpp
   )
 
   target_link_libraries(_fast_deconv PRIVATE fast_deconv)
