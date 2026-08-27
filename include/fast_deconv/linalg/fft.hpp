@@ -1,123 +1,33 @@
 #pragma once
-#include <cuda_runtime_api.h>
-#include <cufft.h>
+#include <fast_deconv/core/exec_ctx.hpp>
+#include <fast_deconv/linalg/fft_dims.hpp>
 
-#include <cstdlib>
-#include <fast_deconv/core/resources.hpp>
-#include <iostream>
-#include <utility>
-#include <vector>
-
-#ifndef CUFFT_CALL
-#define CUFFT_CALL(val) check_cufft((val), #val, __FILE__, __LINE__)
-inline void check_cufft(cufftResult status, const char* const func, const char* const file, const int line)
-{
-  if (status != CUFFT_SUCCESS) {
-    std::cerr << "cuFFT Error at: " << file << ":" << line << std::endl;
-    std::cerr << "code (" << static_cast<int>(status) << ") " << func << std::endl;
-    std::exit(EXIT_FAILURE);
-  }
-}
-#endif  // CUFFT_CALL
-
-using complex_type = cufftComplex;
+// Resolved by the include path: CMake puts backend/${FAST_DECONV_BACKEND}
+// on it, and every backend provides this file.
+#include <fd_backend/linalg/fft.hpp>
 
 namespace fast_deconv::linalg {
 
-/**
- * @brief Generic cuFFT convolution context.
- *
- * Builds 2D R2C/C2R FFT plans over a padded grid (one R2C, N C2R) with cuFFT
- * auto-allocation disabled and binds every plan to a caller-provided stream.
- * The constructor allocates nothing: the caller queries required_work_size()
- * and provides a workspace buffer via bind_work_area() before any exec. The
- * buffer may be shared with other contexts whose plans run on the same stream,
- * since executions are then serialized.
- *
- * All plans execute on the bound stream, so the caller must drive the
- * convolution on that same stream. The stream resources and the work-area
- * buffer must outlive the context.
- */
-struct convolve_ctx {
-  int input_nrow = 0, input_ncol = 0;       // unpadded input size
-  int padding_nrow = 0, padding_ncol = 0;   // input start offset within padded buffer
-                                            // (= (padded - input) / 2; far side gets one extra
-                                            // zero pixel when the difference is odd)
-  int padded_nrow = 0, padded_ncol = 0;     // padded spatial size (rounded up to next 7-smooth)
-  int freq_nrow = 0, freq_ncol = 0;         // half-complex frequency size
-  int forward_batch = 0;                    // batch size for the R2C plan
-  int backward_batch = 0;                   // batch size for the C2R plan(s)
-  std::vector<cufftHandle> plans_forward;   // forward (R2C) plans
-  std::vector<cufftHandle> plans_backward;  // backward (C2R) plans
-  size_t work_size = 0;                     // max workspace size across all plans (bytes)
-
-  // Stream the plans run on
-  const core::stream_resources& stream_res;
-
-  /**
-   * @brief Create plans for a padded 2D grid and bind the stream to every plan.
-   *
-   * Forward and backward plans can have different batch sizes, e.g. forward=1
-   * to FFT a single image once, backward=N to IFFT N filtered spectra in a
-   * single batched call. No workspace is allocated here — the caller must call
-   * bind_work_area() with a buffer of at least required_work_size() bytes
-   * before executing any plan.
-   *
-   * @param stream            Stream resources the plans run on. Must outlive this ctx.
-   * @param input_nrow        Unpadded input rows.
-   * @param input_ncol        Unpadded input cols.
-   * @param forward_batch     Batch size for the R2C plan.
-   * @param backward_batch    Batch size shared by all C2R plans.
-   * @param n_backward_plans  Number of C2R plans to create (e.g. 1 for conv, 2 for conv + conv^2).
-   * @param padding           FFT padding factor (e.g. 1.5).
-   */
-  convolve_ctx(const core::stream_resources& stream, int input_nrow, int input_ncol, int forward_batch,
-               int backward_batch, int n_backward_plans, float padding);
-
-  convolve_ctx(const convolve_ctx&) = delete;
-  convolve_ctx& operator=(const convolve_ctx&) = delete;
-  convolve_ctx(convolve_ctx&&) = delete;
-  convolve_ctx& operator=(convolve_ctx&&) = delete;
-
-  ~convolve_ctx()
-  {
-    for (auto p : plans_forward) CUFFT_CALL(cufftDestroy(p));
-    for (auto p : plans_backward) CUFFT_CALL(cufftDestroy(p));
-  }
-
-  /// Bind a caller-owned workspace buffer (>= required_work_size() bytes) to
-  /// every plan. The context does not take ownership; the buffer must stay
-  /// alive until the last plan execution.
-  void bind_work_area(void* work_area);
-
-  /// Required size in bytes of the shared workspace buffer.
-  size_t required_work_size() const { return work_size; }
-};
+// The padded and frequency buffers below are opaque scratch: flat, exhaustive,
+// and sized from @p dims, so they are passed as raw pointers rather than spans.
 
 // Pads and ifftshifts a 2D image in one pass.
-// Input:  (nx, ny) real, origin at center
-// Output: (px, py) real, origin at (0,0), zero-padded
+// Input:  (input_nrow, input_ncol) real, origin at center
+// Output: (padded_nrow, padded_ncol) real, origin at (0,0), zero-padded
 // Output is zeroed before launch.
-void pad_ifftshift(float* input, float* output, int nx, int ny, int px, int py, int npad_x, int npad_y,
-                   cudaStream_t stream);
+void pad_ifftshift_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output);
 
 // Pads and ifftshifts a batched 2D image in one pass.
-// Input:  (n_batch, nx, ny) real, origin at center
-// Output: (n_batch, px, py) real, origin at (0,0), zero-padded
+// Input:  (n_batch, input_nrow, input_ncol) real, origin at center
+// Output: (n_batch, padded_nrow, padded_ncol) real, origin at (0,0), zero-padded
 // Output is zeroed before launch.
-void pad_ifftshift_batched(float* input, float* output, int nx, int ny, int px, int py, int npad_x, int npad_y,
-                           int n_batch, cudaStream_t stream);
+void pad_ifftshift_batched_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output,
+                                 int n_batch);
 
 // Fftshifts and crops a batched 2D image in one pass.
-// Input:  (n_batch, px, py) real, origin at (0,0) (FFT output)
-// Output: (n_batch, nx, ny) real, origin at center, cropped
-void fftshift_crop(float* input, float* output, int nx, int ny, int px, int py, int npad_x, int npad_y, int n_batch,
-                   cudaStream_t stream);
-
-// Compute padding amounts (rows, cols) for a target padding factor.
-std::pair<int, int> compute_padding(int npix_x, int npix_y, float padding);
-
-// Smallest m >= n whose prime factors are all in {2, 3, 5, 7}.
-int next_fast_size(int n);
+// Input:  (n_batch, padded_nrow, padded_ncol) real, origin at (0,0) (FFT output)
+// Output: (n_batch, input_nrow, input_ncol) real, origin at center, cropped
+void fftshift_crop_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output,
+                         int n_batch);
 
 }  // namespace fast_deconv::linalg

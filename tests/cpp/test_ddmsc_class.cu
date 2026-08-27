@@ -147,7 +147,7 @@ TEST_F(DdmscClass, AddCoeffsFromDeviceSlicesRows)
   core::device_span2d<float> view(d_coeffs.get(), n_components, n_order);
 
   ddmsc::ddmsc_result result(/*max_iter=*/10, n_order);
-  result.add_coeffs_from_device(view);
+  result.add_coeffs_from_device(sr, view);
 
   ASSERT_EQ(result.coeffs.size(), static_cast<std::size_t>(n_components));
   for (int i = 0; i < n_components; ++i) {

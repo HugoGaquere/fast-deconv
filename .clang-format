@@ -3,5 +3,6 @@ BasedOnStyle: Google
 AlignTrailingComments: 'true'
 BreakBeforeBraces: WebKit
 ColumnLimit: '120'
+BreakTemplateDeclarations: Leave
 
 ...

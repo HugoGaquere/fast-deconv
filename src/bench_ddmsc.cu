@@ -456,7 +456,7 @@ static std::size_t estimate_bytes(const bench_config& c)
   live += coeffs_cap * F;                 // d_all_coeffs
   live += ns * nfac * psf_npix * F;       // conv2_psfs
   live += ns * nfac * nf * psf_npix * F;  // conv_psfs
-  live += 2 * kCubTemp;                   // stats_workspace + argmax (peak) workspace
+  live += 2 * kCubTemp;                   // stats_ctx + argmax_ctx (peak) scratch
 
   // Allocated only after the PSF precompute, then live for the rest of the call:
   std::size_t scale_loop = 0;

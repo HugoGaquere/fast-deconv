@@ -16,8 +16,10 @@ namespace fast_deconv::test {
 template <typename T>
 class device_buffer {
  public:
-  device_buffer(const core::resources& res, const core::stream_resources& sr, std::size_t n)
-      : res_(res), sr_(sr), n_(n), ptr_(res.alloc_async<T>(n, sr))
+  // `res` is kept in the signature (110 call sites) but unused: allocation moved
+  // from the pool owner onto the lane when exec_ctx landed.
+  device_buffer(const core::resources& /*res*/, const core::stream_resources& sr, std::size_t n)
+      : sr_(sr), n_(n), ptr_(sr.alloc_async<T>(n))
   {
   }
 
@@ -38,7 +40,7 @@ class device_buffer {
 
   ~device_buffer()
   {
-    res_.free_async(ptr_, sr_);
+    sr_.free_async(ptr_);
     sr_.sync();
   }
 
@@ -76,7 +78,6 @@ class device_buffer {
   }
 
  private:
-  const core::resources& res_;
   const core::stream_resources& sr_;
   std::size_t n_;
   T* ptr_;
@@ -106,16 +107,16 @@ inline std::vector<uint8_t> download_bool(const core::stream_resources& sr, cons
 // commits b0bfdca and 65addc8).
 class scoped_work_area {
  public:
-  scoped_work_area(const core::resources& res, const core::stream_resources& sr, linalg::convolve_ctx& ctx)
-      : res_(res), sr_(sr)
+  scoped_work_area(const core::resources& /*res*/, const core::stream_resources& sr, linalg::convolve_ctx& conv)
+      : sr_(sr)
   {
-    if (ctx.required_work_size() > 0) ptr_ = res.alloc_async(ctx.required_work_size(), sr);
-    ctx.bind_work_area(ptr_);
+    if (conv.required_work_size() > 0) ptr_ = sr.alloc_async(conv.required_work_size());
+    conv.bind_work_area(ptr_);
   }
 
   ~scoped_work_area()
   {
-    res_.free_async(ptr_, sr_);
+    sr_.free_async(ptr_);
     sr_.sync();
   }
 
@@ -123,7 +124,6 @@ class scoped_work_area {
   scoped_work_area& operator=(const scoped_work_area&) = delete;
 
  private:
-  const core::resources& res_;
   const core::stream_resources& sr_;
   void* ptr_ = nullptr;
 };

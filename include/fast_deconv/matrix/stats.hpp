@@ -1,26 +1,18 @@
 #pragma once
 
-#include <cub/cub.cuh>
-#include <fast_deconv/core/resources.hpp>
-#include <fast_deconv/core/span_types.hpp>
-#include <fast_deconv/util/cuda_macros.hpp>
+#include <cstddef>
+#include <fast_deconv/core/exec_ctx.hpp>
 
 namespace fast_deconv::matrix {
 
 /// Packed reduction state combining the four contributions needed to compute
-/// max + rms in a single CUB sweep.
+/// max + rms in a single sweep. Public because run_async() leaves it on
+/// backend memory for the caller to finalize.
 struct stats_acc {
   float max_v;
   float sum;
   float sum_sq;
   int count;
-};
-
-struct stats_combine {
-  __host__ __device__ __forceinline__ stats_acc operator()(const stats_acc& a, const stats_acc& b) const
-  {
-    return {fmaxf(a.max_v, b.max_v), a.sum + b.sum, a.sum_sq + b.sum_sq, a.count + b.count};
-  }
 };
 
 /// Result returned to the host after a fused max + rms reduction.
@@ -29,36 +21,40 @@ struct stats_result {
   float rms;  ///< sqrt(max(E[x^2] - E[x]^2, 0)) over all pixels (mask not applied)
 };
 
-/// Pre-allocated workspace for the fused max + rms reduction over a 2D image
-/// with a boolean mask. Mirrors the shape of @ref argmax_workspace: temp
-/// storage and the packed-state output are allocated once at construction and
-/// reused across calls.
+/// Reusable state for the fused max + rms reduction over a 2D image with a
+/// boolean mask. The constructor runs the temp-storage sizing query once so
+/// the minor-cycle loop only pays for the reduction itself.
 ///
 /// `use_abs` is fixed at construction so the iterator type stays stable and
-/// the CUB temp-bytes query computed in the constructor stays valid for every
+/// the temp-bytes query computed in the constructor stays valid for every
 /// subsequent call.
-struct stats_workspace {
-  const core::stream_resources& stream_res;
-  size_t n_elements = 0;
-  bool use_abs = false;
+class stats_ctx {
+ public:
+  stats_ctx(const core::exec_ctx& ctx, std::size_t n_elements, bool use_abs);
 
-  core::device_cont<stats_acc> d_state;
-  core::device_cont<char> d_temp;
-  size_t temp_storage_bytes = 0;
+  stats_ctx(const stats_ctx&) = delete;
+  stats_ctx& operator=(const stats_ctx&) = delete;
 
-  stats_acc h_state{};
+  /// Issue the fused reduction. No host sync; the result stays in backend
+  /// memory, reachable through device_state().
+  void run_async(core::span2d<float> data, core::span2d<bool> mask);
 
-  stats_workspace(const core::stream_resources& stream_res, size_t n_elements, bool use_abs);
+  /// Async issue + D2H copy + lane sync. Returns {max, rms} on host.
+  stats_result run(core::span2d<float> data, core::span2d<bool> mask);
 
-  stats_workspace(const stats_workspace&) = delete;
-  stats_workspace& operator=(const stats_workspace&) = delete;
+  /// The packed accumulator left by run_async(), in backend memory.
+  const stats_acc* device_state() const { return d_state_.get(); }
+
+  std::size_t size() const { return n_elements_; }
+
+ private:
+  const core::exec_ctx& ctx_;
+  std::size_t n_elements_;
+  bool use_abs_;
+  std::size_t temp_bytes_ = 0;
+  core::owned_ptr<std::byte> d_temp_;
+  core::owned_ptr<stats_acc> d_state_;
+  stats_acc h_state_{};
 };
-
-/// Issue the fused reduction onto `ws.stream_res`. No host sync; the result
-/// lands in `ws.d_state` on device.
-void compute_stats_async(stats_workspace& ws, core::device_span2d<float> data, core::device_span2d<bool> mask);
-
-/// Async issue + D2H copy + stream sync. Returns {max, rms} on host.
-stats_result compute_stats(stats_workspace& ws, core::device_span2d<float> data, core::device_span2d<bool> mask);
 
 }  // namespace fast_deconv::matrix

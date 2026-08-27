@@ -1,7 +1,6 @@
 #pragma once
 
-#include <fast_deconv/core/resources.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
 
 namespace fast_deconv::linalg {
 
@@ -20,7 +19,6 @@ namespace fast_deconv::linalg {
 // fails with info != 0.
 //
 // cuBLAS sees row-major A as col-major A_cm = A^T with shape [n_order, n_freq].
-void compute_pseudo_inverse(const core::stream_resources& stream_res, const float* d_A,
-                            float* d_A_pinv, int n_rows, int n_cols);
+void compute_pseudo_inverse(const core::exec_ctx& ctx, const float* d_A, float* d_A_pinv, int n_rows, int n_cols);
 
 }  // namespace fast_deconv::linalg
