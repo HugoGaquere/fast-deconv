@@ -54,8 +54,7 @@ std::vector<float> compute_all_gains_batched(const core::exec_ctx& ctx, const co
   all_gains.reserve(n_scales * n_facets);
 
   // For scale 0, gains is equal to gamma
-  auto gains = std::vector<float>(n_facets, gamma);
-  all_gains.insert(all_gains.end(), gains.begin(), gains.end());
+  all_gains.insert(all_gains.end(), n_facets, gamma);
 
   for (int i = 1; i < n_scales; i++) {
     core::span4d<float> current_psf = emu::submdspan(psfs, i);
