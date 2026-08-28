@@ -1,15 +1,15 @@
 #pragma once
 
 #include <cstdint>
-#include <utility>
+#include <fast_deconv/common/region.hpp>
 
 namespace fast_deconv::util {
 
-inline auto unravel_index_2D(std::int64_t flat_index, int width) -> std::pair<int, int>
+inline auto unravel_index_2D(std::int64_t flat_index, int ncol) -> common::index2d
 {
-  const auto y = flat_index / width;
-  const auto x = flat_index % width;
-  return {static_cast<int>(y), static_cast<int>(x)};
+  const auto row = flat_index / ncol;
+  const auto col = flat_index % ncol;
+  return {static_cast<int>(row), static_cast<int>(col)};
 }
 
 }  // namespace fast_deconv::util

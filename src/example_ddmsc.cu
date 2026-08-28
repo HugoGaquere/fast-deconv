@@ -258,7 +258,7 @@ int main(int argc, char** argv)
       const int c = hc[2 * i + 1];
       if (r < 0 || r >= nrow || c < 0 || c >= ncol) continue;
       if (hs[i] < 0 || hs[i] >= n_scales) continue;
-      ctx.historical_peak_coords.emplace_back(r, c);
+      ctx.historical_peak_coords.push_back({r, c});
       ctx.historical_scales.push_back(hs[i]);
       ++n_kept;
     }

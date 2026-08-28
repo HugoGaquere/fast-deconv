@@ -73,8 +73,8 @@ __global__ void build_mask_per_scale_kernel(const int2* coords, const int* scale
 {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
   if (tid >= n_coords) return;
-  const std::int64_t idx =
-      static_cast<std::int64_t>(scales[tid]) * inter_scales_stride + coords[tid].x * inner_scale_stride + coords[tid].y;
+  const std::int64_t idx = static_cast<std::int64_t>(scales[tid]) * inter_scales_stride +
+                           coords[tid].x * inner_scale_stride + coords[tid].y;  // int2: x is the row, y the column
   out_mask_per_scale[idx] = true;
 }
 
@@ -163,10 +163,10 @@ void mask_less_than_threshold(const core::exec_ctx& ctx, core::span2d<float> dat
       data.data_handle(), threshold, fill_value, n, 0);
 }
 
-void build_auto_mask(const core::exec_ctx& ctx, const std::vector<std::pair<int, int>>& coords,
-                     const std::vector<int>& scales, core::span3d<float> central_facet_psfs,
-                     core::span1d<const float> weights_freq, core::span1d<float> scale_sigmas, float fft_padding,
-                     core::span2d<bool> external_mask, core::span3d<bool> mask_per_scale)
+void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coords, const std::vector<int>& scales,
+                     core::span3d<float> central_facet_psfs, core::span1d<const float> weights_freq,
+                     core::span1d<float> scale_sigmas, float fft_padding, core::span2d<bool> external_mask,
+                     core::span3d<bool> mask_per_scale)
 {
   assert(mask_per_scale.is_exhaustive());
   assert(external_mask.is_exhaustive());
@@ -191,7 +191,7 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<std::pair<int,
 
   if (n_coords > 0) {
     std::vector<int2> h_coords(n_coords);
-    for (int i = 0; i < n_coords; i++) h_coords[i] = make_int2(coords[i].first, coords[i].second);
+    for (int i = 0; i < n_coords; i++) h_coords[i] = make_int2(coords[i].row, coords[i].col);
 
     auto d_coords = ctx.alloc_mdcontainer_async<int2>(n_coords);
     auto d_scales = ctx.alloc_mdcontainer_async<int>(n_coords);
@@ -270,11 +270,7 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<std::pair<int,
         conv2_psf.data_handle(), psf_max * 0.5f, fwhm_mask.data_handle(), psf_npix);
 
     // 5g. Bounding box of FWHM (synchronous host-side reduction)
-    morphology::roi structure_roi = morphology::compute_mask_roi(ctx, fwhm_mask);
-
-    // Convert inclusive bounds (compute_mask_roi) to exclusive (binary_dilation expects exclusive max).
-    structure_roi.xmax += 1;
-    structure_roi.ymax += 1;
+    const roi structure_roi = morphology::compute_mask_roi(ctx, fwhm_mask);
 
     // 5h. Dilate mask_per_scale[i] using FWHM as structuring element
     // binary_dilation only writes out[tid]=true on matches; zero the buffer first.

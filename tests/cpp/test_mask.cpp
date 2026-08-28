@@ -148,7 +148,7 @@ class BuildAutoMask : public fdtest::BackendTest {
   // Run build_auto_mask on a single-channel scene and return the host mask.
   // The output buffer is pre-filled with @p prefill so the internal memset is
   // exercised; @p psf is a full (psf_h, psf_w) plane.
-  std::vector<uint8_t> run(const std::vector<std::pair<int, int>>& coords, const std::vector<int>& scales,
+  std::vector<uint8_t> run(const std::vector<common::index2d>& coords, const std::vector<int>& scales,
                            const std::vector<float>& psf, int psf_h, int psf_w, const std::vector<float>& sigmas,
                            const std::vector<bool>& external, int nrow, int ncol, int prefill = 0xff)
   {
@@ -194,7 +194,7 @@ TEST_F(BuildAutoMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
   const int n_scales = 3, nrow = 4, ncol = 5;
   const int plane = nrow * ncol;
 
-  const std::vector<std::pair<int, int>> coords = {{0, 0}, {1, 2}, {3, 4}};
+  const std::vector<common::index2d> coords = {{0, 0}, {1, 2}, {3, 4}};
   const std::vector<int> scales = {0, 2, 1};
 
   // sigma = 0 → freq-domain Gaussian is identically 1, conv2_psf == the PSF.
@@ -205,7 +205,7 @@ TEST_F(BuildAutoMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
   // Peak coords are the only "near component" pixels → mask=0 there, 1 elsewhere.
   std::vector<uint8_t> expected(static_cast<std::size_t>(n_scales) * plane, 1);
   for (std::size_t k = 0; k < coords.size(); ++k)
-    expected.at(scales.at(k) * plane + coords.at(k).first * ncol + coords.at(k).second) = 0;
+    expected.at(scales.at(k) * plane + coords.at(k).row * ncol + coords.at(k).col) = 0;
 
   for (std::size_t i = 0; i < expected.size(); ++i)
     EXPECT_EQ(h_mask.at(i), expected.at(i)) << "Mismatch at flat idx " << i;

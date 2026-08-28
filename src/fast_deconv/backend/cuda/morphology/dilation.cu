@@ -3,7 +3,7 @@
 
 namespace fast_deconv::kernel {
 
-__global__ void binary_dilation(bool* data, bool* structure, morphology::roi structure_roi, bool* out, int data_stride,
+__global__ void binary_dilation(bool* data, bool* structure, common::roi structure_roi, bool* out, int data_stride,
                                 int structure_stride, int n)
 {
   const int tix = blockIdx.x * blockDim.x + threadIdx.x;
@@ -15,8 +15,8 @@ __global__ void binary_dilation(bool* data, bool* structure, morphology::roi str
 
   const int tid = tiy * data_stride + tix;
 
-  const int height = structure_roi.xmax - structure_roi.xmin;
-  const int width = structure_roi.ymax - structure_roi.ymin;
+  const int nrow_se = structure_roi.rmax - structure_roi.rmin;
+  const int ncol_se = structure_roi.cmax - structure_roi.cmin;
 
   // fast path, check if data is true
   if (data[tid]) {
@@ -24,14 +24,14 @@ __global__ void binary_dilation(bool* data, bool* structure, morphology::roi str
     return;
   }
 
-  const int struct_start_offset = structure_roi.xmin * structure_stride + structure_roi.ymin;
-  const int row_start = tiy - height / 2;
-  const int col_start = tix - width / 2;
+  const int struct_start_offset = structure_roi.rmin * structure_stride + structure_roi.cmin;
+  const int row_start = tiy - nrow_se / 2;
+  const int col_start = tix - ncol_se / 2;
 
-  for (int i = 0; i < height; i++) {
+  for (int i = 0; i < nrow_se; i++) {
     const int rr = row_start + i;
     if (rr < 0 || rr >= nrow) continue;
-    for (int j = 0; j < width; j++) {
+    for (int j = 0; j < ncol_se; j++) {
       const int cc = col_start + j;
       if (cc < 0 || cc >= ncol) continue;
       const int structure_idx = struct_start_offset + i * structure_stride + j;
@@ -48,7 +48,7 @@ __global__ void binary_dilation(bool* data, bool* structure, morphology::roi str
 namespace fast_deconv::morphology {
 
 void binary_dilation(const core::exec_ctx& ctx, core::span2d<bool> data, core::span2d<bool> structure,
-                     roi structure_roi, core::span2d<bool> out)
+                     common::roi structure_roi, core::span2d<bool> out)
 {
   const int n = data.extent(0) * data.extent(1);
   dim3 block(32, 8);

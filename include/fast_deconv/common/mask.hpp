@@ -1,7 +1,7 @@
 #pragma once
 
+#include <fast_deconv/common/region.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
-#include <utility>
 #include <vector>
 
 namespace fast_deconv::common {
@@ -48,9 +48,9 @@ void mask_less_than_threshold(const core::exec_ctx& ctx, core::span2d<float> dat
  * @param[in]    external_mask       Externally-supplied 2D mask (true=masked) OR'd into every scale slice.
  * @param[out]   mask_per_scale      (n_scales, dirty_h, dirty_w) bool, written entirely.
  */
-void build_auto_mask(const core::exec_ctx& ctx, const std::vector<std::pair<int, int>>& coords,
-                     const std::vector<int>& scales, core::span3d<float> central_facet_psfs,
-                     core::span1d<const float> weights_freq, core::span1d<float> scale_sigmas, float fft_padding,
-                     core::span2d<bool> external_mask, core::span3d<bool> mask_per_scale);
+void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coords, const std::vector<int>& scales,
+                     core::span3d<float> central_facet_psfs, core::span1d<const float> weights_freq,
+                     core::span1d<float> scale_sigmas, float fft_padding, core::span2d<bool> external_mask,
+                     core::span3d<bool> mask_per_scale);
 
 }  // namespace fast_deconv::common

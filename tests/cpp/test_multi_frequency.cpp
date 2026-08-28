@@ -11,6 +11,7 @@
 #include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
+namespace common = fast_deconv::common;
 
 namespace core = fast_deconv::core;
 namespace mfs = fast_deconv::multi_frequency;
@@ -166,7 +167,7 @@ std::vector<double> power_design(const std::vector<double>& nu, double nu0, int 
   return xdes;
 }
 
-scene make_scene(std::vector<double> xdes_d, const std::vector<double>& y, std::pair<int, int> peak,
+scene make_scene(std::vector<double> xdes_d, const std::vector<double>& y, common::index2d peak,
                  float background = 0.0f)
 {
   const int n_freq = static_cast<int>(y.size());
@@ -175,7 +176,7 @@ scene make_scene(std::vector<double> xdes_d, const std::vector<double>& y, std::
   sc.xdes.assign(sc.xdes_d.begin(), sc.xdes_d.end());
   sc.dirty.assign(static_cast<std::size_t>(n_freq) * kNpix, background);
   for (int f = 0; f < n_freq; ++f)
-    sc.dirty.at(f * kNpix + flat(peak.first, peak.second, kNcol)) = static_cast<float>(y.at(f));
+    sc.dirty.at(f * kNpix + flat(peak.row, peak.col, kNcol)) = static_cast<float>(y.at(f));
   return sc;
 }
 
@@ -197,7 +198,7 @@ class FitCoefficients : public fdtest::BackendTest {
   // constant per channel (value jn[f] at every pixel).
   std::pair<std::vector<float>, std::vector<float>> run(const std::vector<float>& xdes, const std::vector<float>& jn,
                                                         const std::vector<float>& weights,
-                                                        const std::vector<float>& dirty, std::pair<int, int> peak,
+                                                        const std::vector<float>& dirty, common::index2d peak,
                                                         int n_order = kOrder)
   {
     const int n_freq = static_cast<int>(weights.size());
@@ -261,7 +262,7 @@ TEST_F(FitCoefficients, WeightedJonesFitMatchesHostLeastSquares)
   const std::vector<double> w = {0.5, 1.0, 0.75, 1.25};
   const std::vector<double> y = {3.1, 2.7, 2.9, 2.4};  // deliberately not an exact model fit
 
-  const std::pair<int, int> peak{4, 6};  // bottom-right corner pixel
+  const common::index2d peak{4, 6};  // bottom-right corner pixel
   const auto sc = make_scene(log_design(log_nu), y, peak, /*background=*/0.1f);
   const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak);
   const auto expected = host_fit(sc.xdes_d, jn, w, y, kOrder);
@@ -280,7 +281,7 @@ TEST_F(FitCoefficients, OverdeterminedNoisyFitMatchesHostLeastSquares)
   std::vector<double> y;
   for (const double l : log_nu) y.push_back(alpha.at(0) + l * alpha.at(1) + 0.05 * fdtest::normal01(rng));
 
-  const std::pair<int, int> peak{0, 0};  // top-left corner pixel
+  const common::index2d peak{0, 0};  // top-left corner pixel
   const auto sc = make_scene(log_design(log_nu), y, peak);
   const auto [compact, per_chan] =
       run(sc.xdes, std::vector<float>(n_freq, 1.0f), std::vector<float>(n_freq, 1.0f), sc.dirty, peak);
@@ -305,7 +306,7 @@ TEST_F(FitCoefficients, PreservesBandWeightedMeanAtSteepJones)
   const std::vector<double> w = {0.2, 0.2, 0.2, 0.2, 0.2};
   const std::vector<double> y = {0.02, -0.015, 0.01, -0.005, 0.002};
 
-  const std::pair<int, int> peak{1, 2};
+  const common::index2d peak{1, 2};
   const auto sc = make_scene(power_design(nu, /*nu0=*/1480.0, kFitOrder), y, peak);
   const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak, kFitOrder);
   const auto expected = host_fit(sc.xdes_d, jn, w, y, kFitOrder);
@@ -328,7 +329,7 @@ TEST_F(FitCoefficients, ConstraintIsInactiveAtFlatJones)
   const std::vector<double> w = {0.25, 0.25, 0.25, 0.25};
   const std::vector<double> y = {3.1, 2.7, 2.9, 2.4};
 
-  const std::pair<int, int> peak{3, 1};
+  const common::index2d peak{3, 1};
   const auto sc = make_scene(log_design(log_nu), y, peak);
   const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak);
 
@@ -348,7 +349,7 @@ TEST_F(FitCoefficients, MinimumNormFitWhenFewerBandsThanOrder)
   const std::vector<double> w = {0.5, 0.5};
   const std::vector<double> y = {0.0193, -0.0989};
 
-  const std::pair<int, int> peak{2, 4};
+  const common::index2d peak{2, 4};
   const auto sc = make_scene(power_design(nu, /*nu0=*/143.650818e6, kFitOrder), y, peak);
   const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak, kFitOrder);
   const auto expected = host_fit_min_norm(sc.xdes_d, jn, y, kFitOrder);
@@ -378,7 +379,7 @@ TEST_F(FitCoefficients, ExactFitAtSquareSystem)
   const std::vector<double> w = {1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0};
   const std::vector<double> y = {0.05, -0.02, 0.011};
 
-  const std::pair<int, int> peak{1, 3};
+  const common::index2d peak{1, 3};
   const auto sc = make_scene(power_design(nu, /*nu0=*/144.0e6, kFitOrder), y, peak);
   const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak, kFitOrder);
   const auto expected = host_fit_min_norm(sc.xdes_d, jn, y, kFitOrder);
