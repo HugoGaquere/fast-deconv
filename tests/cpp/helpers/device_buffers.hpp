@@ -3,7 +3,7 @@
 #include <cuda_runtime.h>
 
 #include <cstdint>
-#include <fast_deconv/core/resources.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
 #include <type_traits>
@@ -18,14 +18,14 @@ class device_buffer {
  public:
   // `res` is kept in the signature (110 call sites) but unused: allocation moved
   // from the pool owner onto the lane when exec_ctx landed.
-  device_buffer(const core::resources& /*res*/, const core::stream_resources& sr, std::size_t n)
+  device_buffer(const core::exec_resources& /*res*/, const core::exec_ctx& sr, std::size_t n)
       : sr_(sr), n_(n), ptr_(sr.alloc_async<T>(n))
   {
   }
 
   // Upload constructor. std::vector<bool> is bit-packed, so it goes through a
   // uint8_t staging buffer; either way the copy completes before returning.
-  device_buffer(const core::resources& res, const core::stream_resources& sr, const std::vector<T>& host)
+  device_buffer(const core::exec_resources& res, const core::exec_ctx& sr, const std::vector<T>& host)
       : device_buffer(res, sr, host.size())
   {
     if constexpr (std::is_same_v<T, bool>) {
@@ -78,14 +78,14 @@ class device_buffer {
   }
 
  private:
-  const core::stream_resources& sr_;
+  const core::exec_ctx& sr_;
   std::size_t n_;
   T* ptr_;
 };
 
 // Blocking download of a raw device pointer written by library code.
 template <typename T>
-std::vector<T> download(const core::stream_resources& sr, const T* d_ptr, std::size_t n)
+std::vector<T> download(const core::exec_ctx& sr, const T* d_ptr, std::size_t n)
 {
   std::vector<T> host(n);
   CHECK_CUDA(cudaMemcpyAsync(host.data(), d_ptr, n * sizeof(T), cudaMemcpyDeviceToHost, sr.cuda_stream));
@@ -93,7 +93,7 @@ std::vector<T> download(const core::stream_resources& sr, const T* d_ptr, std::s
   return host;
 }
 
-inline std::vector<uint8_t> download_bool(const core::stream_resources& sr, const bool* d_ptr, std::size_t n)
+inline std::vector<uint8_t> download_bool(const core::exec_ctx& sr, const bool* d_ptr, std::size_t n)
 {
   std::vector<uint8_t> host(n);
   CHECK_CUDA(cudaMemcpyAsync(host.data(), d_ptr, n * sizeof(bool), cudaMemcpyDeviceToHost, sr.cuda_stream));
@@ -107,8 +107,7 @@ inline std::vector<uint8_t> download_bool(const core::stream_resources& sr, cons
 // commits b0bfdca and 65addc8).
 class scoped_work_area {
  public:
-  scoped_work_area(const core::resources& /*res*/, const core::stream_resources& sr, linalg::convolve_ctx& conv)
-      : sr_(sr)
+  scoped_work_area(const core::exec_resources& /*res*/, const core::exec_ctx& sr, linalg::convolve_ctx& conv) : sr_(sr)
   {
     if (conv.required_work_size() > 0) ptr_ = sr.alloc_async(conv.required_work_size());
     conv.bind_work_area(ptr_);
@@ -124,7 +123,7 @@ class scoped_work_area {
   scoped_work_area& operator=(const scoped_work_area&) = delete;
 
  private:
-  const core::stream_resources& sr_;
+  const core::exec_ctx& sr_;
   void* ptr_ = nullptr;
 };
 

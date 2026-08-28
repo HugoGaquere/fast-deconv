@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <fast_deconv/common/convergence.hpp>
-#include <fast_deconv/core/resources.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <memory>
@@ -48,9 +48,9 @@ struct params {
 };
 
 struct device_state {
-  core::resources exec_resources;
-  core::stream_resources compute_stream;  // drives the convolution path; the FFT plans bind to it
-  core::stream_resources aux_stream;      // clean-loop fit/subtract, overlapping compute_stream
+  core::exec_resources resources;
+  core::exec_ctx compute_stream;  // drives the convolution path; the FFT plans bind to it
+  core::exec_ctx aux_stream;      // clean-loop fit/subtract, overlapping compute_stream
   core::cont4d<float> raw_psfs_d;
   core::cont2d<float> xdes_d;
   core::cont2d<bool> mask_d;
@@ -64,9 +64,9 @@ struct device_state {
   device_state(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
                const core::host_span2d<bool>& mask, const core::host_vect<float>& scale_sigmas, int dirty_nrow,
                int dirty_ncol, int n_freq, float fft_padding)
-      : exec_resources(exec_device),
-        compute_stream(exec_resources.make_stream()),
-        aux_stream(exec_resources.make_stream()),
+      : resources(exec_device),
+        compute_stream(resources.make_stream()),
+        aux_stream(resources.make_stream()),
         raw_psfs_d(compute_stream.copy_h2d_async(raw_psfs)),
         xdes_d(compute_stream.copy_h2d_async(xdes)),
         mask_d(compute_stream.copy_h2d_async(mask)),

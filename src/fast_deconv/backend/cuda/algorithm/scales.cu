@@ -92,8 +92,8 @@ __global__ void multiply_psf_scale_kernel(const linalg::complex_type* freq_psf, 
 }  // namespace fast_deconv::kernel
 
 namespace fast_deconv::scale {
-void make_gaussian_kernels_async(const core::stream_resources& stream_res, core::span1d<float> sigmas,
-                                 int scale_ncol_full, core::span3d<float> scales)
+void make_gaussian_kernels_async(const core::exec_ctx& stream_res, core::span1d<float> sigmas, int scale_ncol_full,
+                                 core::span3d<float> scales)
 {
   const int n_scales = scales.extent(0);
   const int scale_nrow = scales.extent(1);
@@ -164,8 +164,8 @@ void convolve_with_scales(const linalg::convolve_ctx& conv, core::span2d<float> 
   }
 }
 
-int scale_selection(const core::stream_resources& stream_res, core::span3d<float> scaled_dirty,
-                    core::host_vect<float> bias, const std::vector<int>& retired_scales)
+int scale_selection(const core::exec_ctx& stream_res, core::span3d<float> scaled_dirty, core::host_vect<float> bias,
+                    const std::vector<int>& retired_scales)
 {
   const auto cuda_stream = stream_res.cuda_stream;
 

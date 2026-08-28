@@ -1,9 +1,8 @@
 #pragma once
-#include "fast_deconv/core/resources.hpp"
-
 #include <emu/cuda/device/mdspan.hpp>
 #include <fast_deconv/core/access_policy.hpp>
 #include <fast_deconv/core/concepts.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/kernel_traits.hpp>
 
 #include <tuple>
@@ -37,7 +36,7 @@ AccessPolicy determine_policy_from_args([[maybe_unused]] const Args&... args)
 }  // namespace detail
 
 template <typename KernelTag, typename F, typename... Args>
-void dispatch(stream_resources& resources, F&& function, Args&&... args)
+void dispatch(exec_ctx& resources, F&& function, Args&&... args)
 {
   // TODO: Assert kernel trait validity
   using Traits = kernel_traits<KernelTag>;

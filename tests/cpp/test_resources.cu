@@ -1,7 +1,7 @@
 #include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
-#include <fast_deconv/core/resources.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <optional>
 
