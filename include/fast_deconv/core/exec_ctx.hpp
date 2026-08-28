@@ -93,15 +93,6 @@ class exec_ctx : public exec_ctx_impl {
     this->free_bytes(ptr);
   }
 
-  // Legacy spellings, retired as call sites migrate.
-  void sync() const { this->wait(); }
-
-  template <typename HostSpan>
-  auto copy_h2d_async(const HostSpan& src) const
-  {
-    return upload(src);
-  }
-
  private:
   friend class exec_resources;
   explicit exec_ctx(const exec_resources_impl& res) : impl(res) {}
@@ -114,9 +105,6 @@ class exec_resources : public exec_resources_impl {
   using impl::impl;
 
   exec_ctx make_ctx() const { return exec_ctx(*this); }
-
-  // Legacy spelling, retired as call sites migrate.
-  exec_ctx make_stream() const { return make_ctx(); }
 };
 
 }  // namespace fast_deconv::core

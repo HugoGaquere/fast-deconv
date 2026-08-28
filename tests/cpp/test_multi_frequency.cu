@@ -3,7 +3,7 @@
 
 #include <cmath>
 #include <fast_deconv/common/multi_frequency.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <utility>
 #include <vector>
 
@@ -154,7 +154,7 @@ class FitCoefficients : public fdtest::GpuTest {
     for (int f = 0; f < n_freq; ++f)
       for (int i = 0; i < kNpix; ++i) jn_image.at(f * kNpix + i) = jn.at(f);
 
-    const auto sr = res().make_stream();
+    const auto sr = res().make_ctx();
     fdtest::device_buffer<float> d_dirty(res(), sr, dirty);
     fdtest::device_buffer<float> d_jn(res(), sr, jn_image);
     fdtest::device_buffer<float> d_w(res(), sr, weights);
@@ -164,13 +164,13 @@ class FitCoefficients : public fdtest::GpuTest {
 
     core::device_span3d<float> dirty_view(d_dirty.get(), n_freq, kNrow, kNcol);
     core::device_span3d<float> jn_view(d_jn.get(), n_freq, kNrow, kNcol);
-    core::device_vect<float> w_view(d_w.get(), n_freq);
+    core::span1d<float> w_view(d_w.get(), n_freq);
     core::device_span2d<float> xdes_view(d_xdes.get(), n_freq, n_order);
-    core::device_vect<float> compact_view(d_compact.get(), n_order);
-    core::device_vect<float> per_chan_view(d_per_chan.get(), n_freq);
+    core::span1d<float> compact_view(d_compact.get(), n_order);
+    core::span1d<float> per_chan_view(d_per_chan.get(), n_freq);
 
     mfs::fit_coefficients(sr, dirty_view, jn_view, w_view, xdes_view, peak, compact_view, per_chan_view);
-    sr.sync();
+    sr.wait();
 
     return {d_compact.to_host(), d_per_chan.to_host()};
   }

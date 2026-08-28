@@ -24,7 +24,7 @@ void convolve_with_scales(const linalg::convolve_ctx& /*conv*/, core::span2d<flo
 }
 
 int scale_selection(const core::exec_ctx& /*ctx*/, core::span3d<float> /*scaled_dirty*/,
-                    core::host_vect<float> /*bias*/, const std::vector<int>& /*retired_scales*/)
+                    core::host_span1d<float> /*bias*/, const std::vector<int>& /*retired_scales*/)
 {
   not_implemented("scale::scale_selection");
 }

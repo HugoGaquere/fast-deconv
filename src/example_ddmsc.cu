@@ -40,7 +40,7 @@
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/util/dump.hpp>
 #include <filesystem>
 #include <fstream>
@@ -231,8 +231,8 @@ int main(int argc, char** argv)
   const int mask_nrow = static_cast<int>(npy_mask0.shape[0]);
   const int mask_ncol = static_cast<int>(npy_mask0.shape[1]);
   core::host_span2d<bool> mask0(npy_mask0.as_bool(), mask_nrow, mask_ncol);
-  core::host_vect<float> scale_sigmas(npy_scale_sigmas.as_float32(), n_scales);
-  core::host_vect<float> scale_bias(h_scale_bias, n_scales);
+  core::host_span1d<float> scale_sigmas(npy_scale_sigmas.as_float32(), n_scales);
+  core::host_span1d<float> scale_bias(h_scale_bias, n_scales);
   core::host_span2d<int> map_pixel_facet(h_map_pixel, nrow, ncol);
 
   const float fft_padding = npy_fft_padding.scalar<float>();
@@ -309,7 +309,7 @@ int main(int argc, char** argv)
 
     core::device_span3d<float> dirty(d_dirty, n_freq, nrow, ncol);
     core::device_span3d<float> jones_norm(d_jones_norm, n_freq, nrow, ncol);
-    core::device_vect<float> weights_freq(d_weights, n_freq);
+    core::span1d<float> weights_freq(d_weights, n_freq);
 
     // --force-auto-mask-last forces auto-masking on the final cycle of the
     // set regardless of the dump's per-cycle force_auto_mask flag.

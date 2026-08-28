@@ -3,8 +3,8 @@
 namespace fast_deconv::algorithm::ddmsc {
 
 Ddmsc::Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
-             const core::host_span2d<bool>& mask, const core::host_vect<float>& scale_sigmas,
-             const core::host_vect<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
+             const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
+             const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
              int dirty_ncol, int n_freq, float fft_padding, int exec_device)
     : ctx_(exec_device, raw_psfs, xdes, mask, scale_sigmas, scale_bias, map_pixel_facet, dirty_nrow, dirty_ncol, n_freq,
            fft_padding),
@@ -30,7 +30,7 @@ Ddmsc::Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<f
 }
 
 ddmsc_result Ddmsc::run(core::host_span3d<float>& dirty, const core::host_span3d<float>& jones_norm,
-                        const core::host_vect<float>& weights_freq)
+                        const core::host_span1d<float>& weights_freq)
 {
   const core::exec_ctx& stream = ctx_.state().compute_stream;
 
@@ -44,7 +44,7 @@ ddmsc_result Ddmsc::run(core::host_span3d<float>& dirty, const core::host_span3d
 
   // Copy the mutated residual back into the caller's host buffer (in/out).
   stream.download(d_dirty, dirty.data_handle());
-  stream.sync();
+  stream.wait();
   return result;
 }
 

@@ -3,7 +3,7 @@
 
 #include <cmath>
 #include <fast_deconv/algorithm/scales.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <limits>
 #include <random>
@@ -37,15 +37,15 @@ TEST_F(ScalesTest, GaussianKernelsMatchHostFormulaOnHalfComplexGrid)
   const int n_scales = static_cast<int>(sigmas.size());
   const int slice = nrow * ncol_half;
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_sigmas(res(), sr, sigmas);
   fdtest::device_buffer<float> d_scales(res(), sr, static_cast<std::size_t>(n_scales) * slice);
 
-  core::device_vect<float> sigma_view(d_sigmas.get(), n_scales);
+  core::span1d<float> sigma_view(d_sigmas.get(), n_scales);
   core::device_span3d<float> scales_view(d_scales.get(), n_scales, nrow, ncol_half);
 
   scale::make_gaussian_kernels_async(sr, sigma_view, ncol_full, scales_view);
-  sr.sync();
+  sr.wait();
 
   const auto got = d_scales.to_host();
   const double two_pi_sq = 2.0 * 9.869604401089358;  // 2 * pi^2
@@ -93,7 +93,7 @@ TEST_F(ScalesTest, ConvolveWithScalesMatchesDirectConvolution)
   std::vector<float> dirty(npix);
   fdtest::fill_uniform(rng, dirty, -1.0f, 1.0f);
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   linalg::convolve_ctx ctx(sr, nrow, ncol, /*forward_batch=*/1, /*backward_batch=*/n_scales - 1,
                            /*n_backward_plans=*/1, /*padding=*/1.5f);
   fdtest::scoped_work_area wa(res(), sr, ctx);
@@ -101,7 +101,7 @@ TEST_F(ScalesTest, ConvolveWithScalesMatchesDirectConvolution)
   fdtest::device_buffer<float> d_sigmas(res(), sr, sigmas);
   fdtest::device_buffer<float> d_kernels(
       res(), sr, static_cast<std::size_t>(n_scales) * ctx.dims().freq_nrow * ctx.dims().freq_ncol);
-  core::device_vect<float> sigma_view(d_sigmas.get(), n_scales);
+  core::span1d<float> sigma_view(d_sigmas.get(), n_scales);
   core::device_span3d<float> kernels_view(d_kernels.get(), n_scales, ctx.dims().freq_nrow, ctx.dims().freq_ncol);
   scale::make_gaussian_kernels_async(sr, sigma_view, ctx.dims().padded_ncol, kernels_view);
 
@@ -111,7 +111,7 @@ TEST_F(ScalesTest, ConvolveWithScalesMatchesDirectConvolution)
   core::device_span3d<float> out_view(d_out.get(), n_scales, nrow, ncol);
 
   scale::convolve_with_scales(ctx, dirty_view, kernels_view, out_view);
-  sr.sync();
+  sr.wait();
 
   const auto out = d_out.to_host();
 
@@ -133,7 +133,7 @@ TEST_F(ScalesTest, ConvolveWithScalesMatchesDirectConvolution)
 }
 
 // ============================================================================
-// scale_selection — biased peak-finding on host_vect bias
+// scale_selection — biased peak-finding on host_span1d bias
 // ============================================================================
 
 class ScaleSelection : public fdtest::GpuTest {
@@ -153,12 +153,12 @@ class ScaleSelection : public fdtest::GpuTest {
 
   int run(std::vector<float> planes, std::vector<float> bias, const std::vector<int>& retired)
   {
-    const auto sr = res().make_stream();
+    const auto sr = res().make_ctx();
     fdtest::device_buffer<float> d_planes(res(), sr, planes);
     core::device_span3d<float> planes_view(d_planes.get(), kScales, kNrow, kNcol);
-    core::host_vect<float> bias_view(bias.data(), kScales);
+    core::host_span1d<float> bias_view(bias.data(), kScales);
     const int best = scale::scale_selection(sr, planes_view, bias_view, retired);
-    sr.sync();
+    sr.wait();
     return best;
   }
 };
@@ -222,7 +222,7 @@ TEST_F(ConvolvePsfs, ScaleZeroFastPathCopiesAndAveragesChannels)
   fdtest::fill_uniform(rng, psfs, 0.0f, 1.0f);
   const std::vector<float> weights = {0.6f, 0.4f};
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   linalg::convolve_ctx ctx(sr, kH, kW, /*forward_batch=*/kFreq, /*backward_batch=*/kFreq,
                            /*n_backward_plans=*/2, /*padding=*/1.5f);
   fdtest::scoped_work_area wa(res(), sr, ctx);
@@ -234,13 +234,13 @@ TEST_F(ConvolvePsfs, ScaleZeroFastPathCopiesAndAveragesChannels)
   fdtest::device_buffer<float> d_conv2(res(), sr, static_cast<std::size_t>(kFacets) * kNpix);
 
   core::device_span4d<float> psf_view(d_psfs.get(), kFacets, kFreq, kH, kW);
-  core::device_vect<float> sigma_view(d_sigma.get(), 1);
-  core::device_vect<float> w_view(d_w.get(), kFreq);
+  core::span1d<float> sigma_view(d_sigma.get(), 1);
+  core::span1d<float> w_view(d_w.get(), kFreq);
   core::device_span4d<float> conv_view(d_conv.get(), kFacets, kFreq, kH, kW);
   core::device_span3d<float> conv2_view(d_conv2.get(), kFacets, kH, kW);
 
   scale::convolve_psfs_with_scale_async(ctx, psf_view, sigma_view, /*scale_idx=*/0, w_view, conv_view, conv2_view);
-  sr.sync();
+  sr.wait();
 
   const auto conv = d_conv.to_host();
   for (std::size_t i = 0; i < psfs.size(); ++i) ASSERT_EQ(conv.at(i), psfs.at(i)) << "conv_psf flat " << i;
@@ -260,7 +260,7 @@ TEST_F(ConvolvePsfs, DeltaPsfProducesGaussianAndSqrt2Gaussian)
   const std::vector<float> weights = {0.6f, 0.4f};
   const double sigma = 1.2;
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   linalg::convolve_ctx ctx(sr, kH, kW, /*forward_batch=*/kFreq, /*backward_batch=*/kFreq,
                            /*n_backward_plans=*/2, /*padding=*/1.5f);
   fdtest::scoped_work_area wa(res(), sr, ctx);
@@ -272,13 +272,13 @@ TEST_F(ConvolvePsfs, DeltaPsfProducesGaussianAndSqrt2Gaussian)
   fdtest::device_buffer<float> d_conv2(res(), sr, static_cast<std::size_t>(kFacets) * kNpix);
 
   core::device_span4d<float> psf_view(d_psfs.get(), kFacets, kFreq, kH, kW);
-  core::device_vect<float> sigma_view(d_sigma.get(), 1);
-  core::device_vect<float> w_view(d_w.get(), kFreq);
+  core::span1d<float> sigma_view(d_sigma.get(), 1);
+  core::span1d<float> w_view(d_w.get(), kFreq);
   core::device_span4d<float> conv_view(d_conv.get(), kFacets, kFreq, kH, kW);
   core::device_span3d<float> conv2_view(d_conv2.get(), kFacets, kH, kW);
 
   scale::convolve_psfs_with_scale_async(ctx, psf_view, sigma_view, /*scale_idx=*/1, w_view, conv_view, conv2_view);
-  sr.sync();
+  sr.wait();
 
   // conv_psf: delta ⊛ G(sigma) = sum-normalized Gaussian at the delta position.
   const auto g1 = fdtest::gaussian2d(kH, kW, kH / 2, kW / 2, sigma);
@@ -305,7 +305,7 @@ TEST_F(ConvolvePsfs, AllScalesVariantSlicesPerScaleOutputs)
   const std::vector<float> sigmas = {0.0f, 1.2f};
   const int n_scales = static_cast<int>(sigmas.size());
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   linalg::convolve_ctx ctx(sr, kH, kW, /*forward_batch=*/kFreq, /*backward_batch=*/kFreq,
                            /*n_backward_plans=*/2, /*padding=*/1.5f);
   fdtest::scoped_work_area wa(res(), sr, ctx);
@@ -317,13 +317,13 @@ TEST_F(ConvolvePsfs, AllScalesVariantSlicesPerScaleOutputs)
   fdtest::device_buffer<float> d_conv2(res(), sr, static_cast<std::size_t>(n_scales) * kFacets * kNpix);
 
   core::device_span4d<float> psf_view(d_psfs.get(), kFacets, kFreq, kH, kW);
-  core::device_vect<float> sigma_view(d_sigmas.get(), n_scales);
-  core::device_vect<float> w_view(d_w.get(), kFreq);
+  core::span1d<float> sigma_view(d_sigmas.get(), n_scales);
+  core::span1d<float> w_view(d_w.get(), kFreq);
   core::device_span5d<float> conv_view(d_conv.get(), n_scales, kFacets, kFreq, kH, kW);
   core::device_span4d<float> conv2_view(d_conv2.get(), n_scales, kFacets, kH, kW);
 
   scale::convolve_psfs_with_scales_async(ctx, psf_view, sigma_view, w_view, conv_view, conv2_view);
-  sr.sync();
+  sr.wait();
 
   const auto conv = d_conv.to_host();
   const auto conv2 = d_conv2.to_host();

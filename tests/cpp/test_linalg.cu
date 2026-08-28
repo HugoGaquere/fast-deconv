@@ -1,7 +1,7 @@
 #include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
 #include <random>
 #include <vector>
@@ -27,13 +27,13 @@ TEST_F(WeightedSum, RawPointerOverloadMatchesHostOracle)
   fdtest::fill_uniform(rng, a, -1.0f, 1.0f);
   const std::vector<float> weights = {0.2f, 0.5f, 1.3f};
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_a(res(), sr, a);
   fdtest::device_buffer<float> d_w(res(), sr, weights);
   fdtest::device_buffer<float> d_out(res(), sr, static_cast<std::size_t>(n));
 
   linalg::weighted_sum_async(sr, d_a.get(), d_w.get(), d_out.get(), w, n);
-  sr.sync();
+  sr.wait();
 
   const auto out = d_out.to_host();
   const auto expected = fdtest::weighted_sum(a, weights, n);
@@ -49,17 +49,17 @@ TEST_F(WeightedSum, MdspanOverloadOnNonSquareImage)
   fdtest::fill_uniform(rng, a, -2.0f, 2.0f);
   const std::vector<float> weights = {0.7f, 0.1f, 0.6f};
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_a(res(), sr, a);
   fdtest::device_buffer<float> d_w(res(), sr, weights);
   fdtest::device_buffer<float> d_out(res(), sr, static_cast<std::size_t>(npix));
 
   core::device_span3d<float> a_view(d_a.get(), n_freq, nrow, ncol);
-  core::device_vect<float> w_view(d_w.get(), n_freq);
+  core::span1d<float> w_view(d_w.get(), n_freq);
   core::device_span2d<float> out_view(d_out.get(), nrow, ncol);
 
   linalg::weighted_sum_async(sr, a_view, w_view, out_view);
-  sr.sync();
+  sr.wait();
 
   const auto out = d_out.to_host();
   const auto expected = fdtest::weighted_sum(a, weights, npix);

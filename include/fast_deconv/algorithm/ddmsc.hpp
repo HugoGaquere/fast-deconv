@@ -4,7 +4,7 @@
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 
 namespace fast_deconv::algorithm::ddmsc {
 
@@ -26,14 +26,14 @@ namespace fast_deconv::algorithm::ddmsc {
 class Ddmsc {
  public:
   Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
-        const core::host_span2d<bool>& mask, const core::host_vect<float>& scale_sigmas,
-        const core::host_vect<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
+        const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
+        const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
         int dirty_ncol, int n_freq, float fft_padding, int exec_device = 0);
 
   /// Run one full deconvolution session. The updated residual is written back
   /// into @p dirty (host, in/out) before returning.
   ddmsc_result run(core::host_span3d<float>& dirty, const core::host_span3d<float>& jones_norm,
-                   const core::host_vect<float>& weights_freq);
+                   const core::host_span1d<float>& weights_freq);
 
   bool clean_negative() const { return params_.clean_negative; }
   void set_clean_negative(bool v) { params_.clean_negative = v; }

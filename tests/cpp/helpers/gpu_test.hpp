@@ -20,7 +20,7 @@ namespace fast_deconv::test {
 // Base fixture for every GPU test: skips cleanly on machines without a CUDA
 // device, then provides per-test core::exec_resources on device 0. Streams are
 // deliberately not cached here — core::exec_ctx is non-movable, so tests create
-// theirs locally with `const auto sr = res().make_stream();`.
+// theirs locally with `const auto sr = res().make_ctx();`.
 class GpuTest : public ::testing::Test {
  protected:
   void SetUp() override

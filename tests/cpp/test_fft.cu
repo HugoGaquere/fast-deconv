@@ -120,13 +120,13 @@ TEST_F(FftLayout, PadIfftshiftMatchesHostOracle)
   const int npad_x = (px - nx) / 2, npad_y = (py - ny) / 2;
 
   const auto in = iota_image(nx * ny);
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
 
   fdtest::device_buffer<float> d_in(res(), sr, in);
   fdtest::device_buffer<float> d_out(res(), sr, static_cast<std::size_t>(px) * py);
 
   linalg::pad_ifftshift_async(sr, explicit_dims(nx, ny, px, py), d_in.get(), d_out.get());
-  sr.sync();
+  sr.wait();
 
   const auto out = d_out.to_host();
   const auto expected = host_pad_ifftshift(in, nx, ny, px, py, npad_x, npad_y);
@@ -146,12 +146,12 @@ TEST_F(FftLayout, PadIfftshiftBatchedMatchesSingleImageOracle)
     std::copy(slice.begin(), slice.end(), in.begin() + b * in_stride);
   }
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_in(res(), sr, in);
   fdtest::device_buffer<float> d_out(res(), sr, static_cast<std::size_t>(n_batch) * out_stride);
 
   linalg::pad_ifftshift_batched_async(sr, explicit_dims(nx, ny, px, py), d_in.get(), d_out.get(), n_batch);
-  sr.sync();
+  sr.wait();
 
   const auto out = d_out.to_host();
   for (int b = 0; b < n_batch; ++b) {
@@ -175,7 +175,7 @@ TEST_F(FftLayout, PadThenCropRoundTripIsIdentity)
       {7, 5, 7, 5},    // no padding at all
   };
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
 
   for (const auto& cs : cases) {
     const auto in = iota_image(cs.nx * cs.ny);
@@ -187,7 +187,7 @@ TEST_F(FftLayout, PadThenCropRoundTripIsIdentity)
     const auto dims = explicit_dims(cs.nx, cs.ny, cs.px, cs.py);
     linalg::pad_ifftshift_async(sr, dims, d_in.get(), d_pad.get());
     linalg::fftshift_crop_async(sr, dims, d_pad.get(), d_back.get(), /*n_batch=*/1);
-    sr.sync();
+    sr.wait();
 
     const auto back = d_back.to_host();
     for (int i = 0; i < cs.nx * cs.ny; ++i)
@@ -207,7 +207,7 @@ TEST_F(FftLayout, BatchedRoundTripIsIdentityPerSlice)
     std::copy(slice.begin(), slice.end(), in.begin() + b * in_stride);
   }
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_in(res(), sr, in);
   fdtest::device_buffer<float> d_pad(res(), sr, static_cast<std::size_t>(n_batch) * pad_stride);
   fdtest::device_buffer<float> d_back(res(), sr, static_cast<std::size_t>(n_batch) * in_stride);
@@ -215,7 +215,7 @@ TEST_F(FftLayout, BatchedRoundTripIsIdentityPerSlice)
   const auto dims = explicit_dims(nx, ny, px, py);
   linalg::pad_ifftshift_batched_async(sr, dims, d_in.get(), d_pad.get(), n_batch);
   linalg::fftshift_crop_async(sr, dims, d_pad.get(), d_back.get(), n_batch);
-  sr.sync();
+  sr.wait();
 
   const auto back = d_back.to_host();
   for (int i = 0; i < n_batch * in_stride; ++i) ASSERT_FLOAT_EQ(back.at(i), in.at(i)) << "flat index " << i;

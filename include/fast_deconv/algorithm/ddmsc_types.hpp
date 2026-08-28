@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <memory>
 #include <optional>
@@ -62,15 +62,15 @@ struct device_state {
   linalg::convolve_ctx psf_convolve;
 
   device_state(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
-               const core::host_span2d<bool>& mask, const core::host_vect<float>& scale_sigmas, int dirty_nrow,
+               const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas, int dirty_nrow,
                int dirty_ncol, int n_freq, float fft_padding)
       : resources(exec_device),
-        compute_stream(resources.make_stream()),
-        aux_stream(resources.make_stream()),
-        raw_psfs_d(compute_stream.copy_h2d_async(raw_psfs)),
-        xdes_d(compute_stream.copy_h2d_async(xdes)),
-        mask_d(compute_stream.copy_h2d_async(mask)),
-        scale_sigmas_d(compute_stream.copy_h2d_async(scale_sigmas)),
+        compute_stream(resources.make_ctx()),
+        aux_stream(resources.make_ctx()),
+        raw_psfs_d(compute_stream.upload(raw_psfs)),
+        xdes_d(compute_stream.upload(xdes)),
+        mask_d(compute_stream.upload(mask)),
+        scale_sigmas_d(compute_stream.upload(scale_sigmas)),
         scale_convolve(compute_stream, dirty_nrow, dirty_ncol, /*forward_batch=*/1,
                        /*backward_batch=*/std::max(1, static_cast<int>(scale_sigmas.size()) - 1),
                        /*n_backward_plans=*/1, fft_padding),
@@ -79,7 +79,7 @@ struct device_state {
   {
     const size_t shared_work_size = std::max(scale_convolve.required_work_size(), psf_convolve.required_work_size());
     if (shared_work_size > 0) fft_work_area = compute_stream.alloc_ptr_async<std::byte>(shared_work_size);
-    compute_stream.sync();  // staging copies and the work-area alloc, before the host sources go
+    compute_stream.wait();  // staging copies and the work-area alloc, before the host sources go
     scale_convolve.bind_work_area(fft_work_area.get());
     psf_convolve.bind_work_area(fft_work_area.get());
   }
@@ -95,8 +95,8 @@ struct context {
   core::host_span4d<float> raw_psfs;
   core::host_span2d<float> xdes;
   core::host_span2d<bool> mask;
-  core::host_vect<float> scale_sigmas;
-  core::host_vect<float> scale_bias;
+  core::host_span1d<float> scale_sigmas;
+  core::host_span1d<float> scale_bias;
   core::host_span2d<int> map_pixel_facet;
   int dirty_nrow;
   int dirty_ncol;
@@ -108,8 +108,8 @@ struct context {
 
   /// Validates the dimensions and stores the inputs; allocates nothing.
   context(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
-          const core::host_span2d<bool>& mask, const core::host_vect<float>& scale_sigmas,
-          const core::host_vect<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
+          const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
+          const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
           int dirty_ncol, int n_freq, float fft_padding)
       : exec_device(exec_device),
         raw_psfs(raw_psfs),

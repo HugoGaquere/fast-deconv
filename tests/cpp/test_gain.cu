@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <fast_deconv/common/gain.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <random>
 #include <vector>
 
@@ -50,12 +50,12 @@ TEST_F(GainBatched, PerFacetGainMatchesWeightedMeanMaxOracle)
   psfs.at(1 * kFreq * kPsfNpix + 1 * kPsfNpix + fdtest::flat(2, 6, kPsfW)) = 2.0f;
   const std::vector<float> weights = {0.5f, 0.3f, 0.2f};
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_psfs(res(), sr, psfs);
   fdtest::device_buffer<float> d_w(res(), sr, weights);
 
   core::device_span4d<float> psf_view(d_psfs.get(), kFacets, kFreq, kPsfH, kPsfW);
-  core::device_vect<float> w_view(d_w.get(), kFreq);
+  core::span1d<float> w_view(d_w.get(), kFreq);
 
   const auto gains = common::compute_gain_batched(sr, psf_view, w_view, kGamma);
   const auto expected = host_gains(psfs, weights, kFacets);
@@ -79,12 +79,12 @@ TEST_F(GainBatched, AllGainsScaleZeroFastPathAndScaleMajorOrdering)
       psfs.at(((s * kFacets + b) * kFreq + 0) * kPsfNpix + fdtest::flat(4, 4, kPsfW)) = 1.0f + s + 0.5f * b;
   const std::vector<float> weights = {0.5f, 0.3f, 0.2f};
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_psfs(res(), sr, psfs);
   fdtest::device_buffer<float> d_w(res(), sr, weights);
 
   core::device_span5d<float> psf_view(d_psfs.get(), n_scales, kFacets, kFreq, kPsfH, kPsfW);
-  core::device_vect<float> w_view(d_w.get(), kFreq);
+  core::span1d<float> w_view(d_w.get(), kFreq);
 
   const auto all_gains = common::compute_all_gains_batched(sr, psf_view, w_view, kGamma);
   ASSERT_EQ(all_gains.size(), static_cast<std::size_t>(n_scales * kFacets));

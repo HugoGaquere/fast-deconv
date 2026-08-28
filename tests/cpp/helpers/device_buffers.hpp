@@ -35,13 +35,13 @@ class device_buffer {
     } else {
       CHECK_CUDA(cudaMemcpyAsync(ptr_, host.data(), n_ * sizeof(T), cudaMemcpyHostToDevice, sr_.cuda_stream));
     }
-    sr_.sync();
+    sr_.wait();
   }
 
   ~device_buffer()
   {
     sr_.free_async(ptr_);
-    sr_.sync();
+    sr_.wait();
   }
 
   device_buffer(const device_buffer&) = delete;
@@ -59,12 +59,12 @@ class device_buffer {
     if constexpr (std::is_same_v<T, bool>) {
       std::vector<uint8_t> host(n_);
       CHECK_CUDA(cudaMemcpyAsync(host.data(), ptr_, n_ * sizeof(bool), cudaMemcpyDeviceToHost, sr_.cuda_stream));
-      sr_.sync();
+      sr_.wait();
       return host;
     } else {
       std::vector<T> host(n_);
       CHECK_CUDA(cudaMemcpyAsync(host.data(), ptr_, n_ * sizeof(T), cudaMemcpyDeviceToHost, sr_.cuda_stream));
-      sr_.sync();
+      sr_.wait();
       return host;
     }
   }
@@ -74,7 +74,7 @@ class device_buffer {
   {
     static_assert(!std::is_same_v<T, bool>, "use the upload constructor for bool buffers");
     CHECK_CUDA(cudaMemcpyAsync(ptr_, host.data(), host.size() * sizeof(T), cudaMemcpyHostToDevice, sr_.cuda_stream));
-    sr_.sync();
+    sr_.wait();
   }
 
  private:
@@ -89,7 +89,7 @@ std::vector<T> download(const core::exec_ctx& sr, const T* d_ptr, std::size_t n)
 {
   std::vector<T> host(n);
   CHECK_CUDA(cudaMemcpyAsync(host.data(), d_ptr, n * sizeof(T), cudaMemcpyDeviceToHost, sr.cuda_stream));
-  sr.sync();
+  sr.wait();
   return host;
 }
 
@@ -97,7 +97,7 @@ inline std::vector<uint8_t> download_bool(const core::exec_ctx& sr, const bool* 
 {
   std::vector<uint8_t> host(n);
   CHECK_CUDA(cudaMemcpyAsync(host.data(), d_ptr, n * sizeof(bool), cudaMemcpyDeviceToHost, sr.cuda_stream));
-  sr.sync();
+  sr.wait();
   return host;
 }
 
@@ -116,7 +116,7 @@ class scoped_work_area {
   ~scoped_work_area()
   {
     sr_.free_async(ptr_);
-    sr_.sync();
+    sr_.wait();
   }
 
   scoped_work_area(const scoped_work_area&) = delete;

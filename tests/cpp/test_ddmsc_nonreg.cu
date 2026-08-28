@@ -9,7 +9,7 @@
 #include <fast_deconv/algorithm/ddmsc_cycles.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/common/convergence.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <fstream>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -178,7 +178,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   }
 
   // ---- Upload the per-run inputs; the context copies its static inputs itself.
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_dirty(res(), sr, h_dirty);
   fdtest::device_buffer<float> d_jones(res(), sr, std::vector<float>(static_cast<std::size_t>(kFreq) * kNpix, 1.0f));
   fdtest::device_buffer<float> d_weights(res(), sr, std::vector<float>(kFreq, 1.0f / kFreq));
@@ -192,8 +192,8 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   core::host_span4d<float> psfs_view(h_psfs.data(), kFacets, kFreq, kNrow, kNcol);
   core::host_span2d<float> xdes_view(h_xdes.data(), kFreq, kOrder);
   core::host_span2d<bool> mask_view(h_mask.get(), kNrow, kNcol);
-  core::host_vect<float> sigmas_view(h_sigmas.data(), kScales);
-  core::host_vect<float> bias_view(scale_bias.data(), kScales);
+  core::host_span1d<float> sigmas_view(h_sigmas.data(), kScales);
+  core::host_span1d<float> bias_view(scale_bias.data(), kScales);
   core::host_span2d<int> map_view(map_pixel_facet.data(), kNrow, kNcol);
 
   ddmsc::context ctx(/*exec_device=*/0, psfs_view, xdes_view, mask_view, sigmas_view, bias_view, map_view, kNrow, kNcol,
@@ -228,14 +228,14 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
 
   core::device_span3d<float> dirty_view(d_dirty.get(), kFreq, kNrow, kNcol);
   core::device_span3d<float> jones_view(d_jones.get(), kFreq, kNrow, kNcol);
-  core::device_vect<float> weights_view(d_weights.get(), kFreq);
+  core::span1d<float> weights_view(d_weights.get(), kFreq);
 
   // ---- Run the full minor-cycle driver. `dirty` is left as the residual.
   const auto result = ddmsc::run_ddmsc_cycles(ctx, p, dirty_view, jones_view, weights_view);
 
   CHECK_CUDA(cudaMemcpyAsync(h_dirty.data(), d_dirty.get(), h_dirty.size() * sizeof(float), cudaMemcpyDeviceToHost,
                              sr.cuda_stream));
-  sr.sync();
+  sr.wait();
 
   // ---- Derive scalar metrics.
   const auto residual = fdtest::weighted_sum(h_dirty, std::vector<float>(kFreq, 1.0f / kFreq), kNpix);

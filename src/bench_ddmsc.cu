@@ -56,7 +56,7 @@
 #include <fast_deconv/algorithm/ddmsc_cycles.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/core/logger.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <fstream>
 #include <map>
@@ -585,12 +585,12 @@ static config_result run_config(const bench_config& c, const bench_options& opt,
   core::host_span4d<float> raw_psfs(const_cast<float*>(h_psfs.data()), c.n_facet, c.n_freq, c.psf_nrow, c.psf_ncol);
   core::host_span2d<float> xdes(const_cast<float*>(h_xdes.data()), c.n_freq, c.n_order);
   core::host_span2d<bool> mask(reinterpret_cast<bool*>(const_cast<unsigned char*>(h_mask.data())), c.nrow, c.ncol);
-  core::host_vect<float> scale_sigmas(const_cast<float*>(h_sigmas.data()), c.n_scales);
-  core::host_vect<float> scale_bias(const_cast<float*>(h_bias.data()), c.n_scales);
+  core::host_span1d<float> scale_sigmas(const_cast<float*>(h_sigmas.data()), c.n_scales);
+  core::host_span1d<float> scale_bias(const_cast<float*>(h_bias.data()), c.n_scales);
   core::host_span2d<int> map_pixel_facet(const_cast<int*>(h_map.data()), c.nrow, c.ncol);
   core::device_span3d<float> dirty(d_dirty, c.n_freq, c.nrow, c.ncol);
   core::device_span3d<float> jones_norm(d_jones, c.n_freq, c.nrow, c.ncol);
-  core::device_vect<float> weights_freq(d_weights, c.n_freq);
+  core::span1d<float> weights_freq(d_weights, c.n_freq);
 
   const ddmsc::params params = make_fixed_params(c);
   const float fft_padding = 1.1f;

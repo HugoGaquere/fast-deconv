@@ -58,12 +58,12 @@ class PseudoInverse : public fdtest::GpuTest {
   // i.e. element (o, f) lives at [f * n_cols + o]).
   std::vector<float> run(const std::vector<float>& a, int n_rows, int n_cols)
   {
-    const auto sr = res().make_stream();
+    const auto sr = res().make_ctx();
     fdtest::device_buffer<float> d_a(res(), sr, a);
     fdtest::device_buffer<float> d_pinv(res(), sr, static_cast<std::size_t>(n_rows) * n_cols);
 
     linalg::compute_pseudo_inverse(sr, d_a.get(), d_pinv.get(), n_rows, n_cols);
-    sr.sync();
+    sr.wait();
 
     const auto colmajor = d_pinv.to_host();
     std::vector<float> p(colmajor.size());

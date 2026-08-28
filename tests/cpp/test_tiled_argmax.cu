@@ -31,7 +31,7 @@ class TiledArgmax : public fdtest::GpuTest {
     matrix::tiled_argmax_ctx ws{sr, core::dims<2>(h, w), tile};
 
     auto out = ws.run(core::span2d<float>(d.get(), h, w));
-    sr.sync();
+    sr.wait();
     return out;  // ws frees its own device buffers in its destructor
   }
 };
@@ -45,7 +45,7 @@ TEST_F(TiledArgmax, SingleKnownPeak)
   const int pr = 40, pc = 50;
   img.at(flat(pr, pc, w)) = 5.0f;
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
 
   auto [val, idx] = run_once(sr, img, w, h, 32);
   EXPECT_FLOAT_EQ(val, 5.0f);
@@ -61,7 +61,7 @@ TEST_F(TiledArgmax, RandomRaggedMatchesCpuValue)
   std::vector<float> img(w * h);
   fdtest::fill_uniform(rng, img, -1.0f, 1.0f);
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
 
   auto [val, idx] = run_once(sr, img, w, h, 32);
   auto [ref_val, ref_idx] = cpu_argmax(img);
@@ -85,7 +85,7 @@ TEST_F(TiledArgmax, UniquePeakIndexAcrossTiles)
   const int pr = 177, pc = 183;    // inside the ragged bottom-right region
   img.at(flat(pr, pc, w)) = 9.0f;  // strictly above everything in [0,1)
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
 
   auto [val, idx] = run_once(sr, img, w, h, 32);
   EXPECT_FLOAT_EQ(val, 9.0f);
@@ -105,7 +105,7 @@ TEST_F(TiledArgmax, AllNegativeInitialisesToNegInf)
   const int pr = 70, pc = 11;
   img.at(flat(pr, pc, w)) = -0.5f;  // unique max, still negative
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
 
   auto [val, idx] = run_once(sr, img, w, h, 32);
   EXPECT_FLOAT_EQ(val, -0.5f);
@@ -118,7 +118,7 @@ TEST_F(TiledArgmax, AllNegativeInitialisesToNegInf)
 TEST_F(TiledArgmax, WorkspaceReuseAcrossCalls)
 {
   const int w = 64, h = 64;
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
 
   fdtest::device_buffer<float> d(res(), sr, static_cast<std::size_t>(w) * h);
   matrix::tiled_argmax_ctx ws{sr, core::dims<2>(h, w), 32};
@@ -130,7 +130,7 @@ TEST_F(TiledArgmax, WorkspaceReuseAcrossCalls)
   img.at(flat(ar, ac, w)) = 5.0f;
   d.from_host(img);
   auto [v1, i1] = ws.run(view);
-  sr.sync();
+  sr.wait();
   EXPECT_FLOAT_EQ(v1, 5.0f);
   EXPECT_EQ(i1, flat(ar, ac, w));
 
@@ -140,7 +140,7 @@ TEST_F(TiledArgmax, WorkspaceReuseAcrossCalls)
   img.at(flat(br, bc, w)) = 7.0f;
   d.from_host(img);
   auto [v2, i2] = ws.run(view);
-  sr.sync();
+  sr.wait();
   EXPECT_FLOAT_EQ(v2, 7.0f);
   EXPECT_EQ(i2, flat(br, bc, w));
 }
@@ -159,7 +159,7 @@ TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
   const int ar = 30, ac = 40;
   img.at(flat(ar, ac, w)) = 5.0f;
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
 
   fdtest::device_buffer<float> d(res(), sr, img);
 
@@ -168,7 +168,7 @@ TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
 
   // Full pass seeds all tiles; global max is A.
   auto [v0, i0] = ws.run(view);
-  sr.sync();
+  sr.wait();
   EXPECT_FLOAT_EQ(v0, 5.0f);
   EXPECT_EQ(i0, flat(ar, ac, w));
 
@@ -181,7 +181,7 @@ TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
                              sr.cuda_stream));
 
   auto [v1, i1] = ws.run_incremental(view, pr, pc, foot, foot);
-  sr.sync();
+  sr.wait();
   EXPECT_FLOAT_EQ(v1, 7.0f);
   EXPECT_EQ(i1, flat(br, bc, w));
 
@@ -191,7 +191,7 @@ TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
   CHECK_CUDA(cudaMemcpyAsync(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), sizeof(float), cudaMemcpyHostToDevice,
                              sr.cuda_stream));
   auto [v2, i2] = ws.run_incremental(view, pr, pc, foot, foot);
-  sr.sync();
+  sr.wait();
   EXPECT_FLOAT_EQ(v2, 5.0f);
   EXPECT_EQ(i2, flat(ar, ac, w));
 }

@@ -3,7 +3,7 @@
 
 #include <fast_deconv/algorithm/ddmsc.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -47,8 +47,8 @@ class DdmscClass : public fdtest::GpuTest {
     core::host_span4d<float> psf_view(psfs_.data(), kFacets, kFreq, kSize, kSize);
     core::host_span2d<float> xdes_view(xdes_.data(), kFreq, kOrder);
     core::host_span2d<bool> mask_view(mask_.get(), kSize, kSize);
-    core::host_vect<float> sigma_view(sigmas_.data(), kScales);
-    core::host_vect<float> bias_view(scale_bias_.data(), kScales);
+    core::host_span1d<float> sigma_view(sigmas_.data(), kScales);
+    core::host_span1d<float> bias_view(scale_bias_.data(), kScales);
     core::host_span2d<int> map_view(map_pixel_facet_.data(), kSize, kSize);
 
     return ddmsc::Ddmsc(psf_view, xdes_view, mask_view, sigma_view, bias_view, map_view,
@@ -142,7 +142,7 @@ TEST_F(DdmscClass, AddCoeffsFromDeviceSlicesRows)
   const int n_components = 3, n_order = 2;
   const std::vector<float> coeffs = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_coeffs(res(), sr, coeffs);
   core::device_span2d<float> view(d_coeffs.get(), n_components, n_order);
 
@@ -169,8 +169,8 @@ TEST(DdmscContextGuard, RejectsPlaneLargerThanInt32)
   core::host_span4d<float> big_psfs(static_cast<float*>(nullptr), 1, 1, kBig, kBig);
   core::host_span2d<float> xdes(static_cast<float*>(nullptr), 1, 2);
   core::host_span2d<bool> mask(static_cast<bool*>(nullptr), kSmall, kSmall);
-  core::host_vect<float> sigmas(static_cast<float*>(nullptr), 1);
-  core::host_vect<float> bias(static_cast<float*>(nullptr), 1);
+  core::host_span1d<float> sigmas(static_cast<float*>(nullptr), 1);
+  core::host_span1d<float> bias(static_cast<float*>(nullptr), 1);
   core::host_span2d<int> map(static_cast<int*>(nullptr), kSmall, kSmall);
 
   EXPECT_THROW(ddmsc::context(0, psfs, xdes, mask, sigmas, bias, map, kBig, kBig, 1, 1.5f), std::invalid_argument);

@@ -164,7 +164,7 @@ void convolve_with_scales(const linalg::convolve_ctx& conv, core::span2d<float> 
   }
 }
 
-int scale_selection(const core::exec_ctx& stream_res, core::span3d<float> scaled_dirty, core::host_vect<float> bias,
+int scale_selection(const core::exec_ctx& stream_res, core::span3d<float> scaled_dirty, core::host_span1d<float> bias,
                     const std::vector<int>& retired_scales)
 {
   const auto cuda_stream = stream_res.cuda_stream;
@@ -198,7 +198,7 @@ int scale_selection(const core::exec_ctx& stream_res, core::span3d<float> scaled
   CHECK_CUDA(cudaMemcpyAsync(h_maxes.data(), d_maxes.data_handle(), sizeof(float) * n_scales, cudaMemcpyDeviceToHost,
                              cuda_stream));
 
-  stream_res.sync();
+  stream_res.wait();
 
   // Biased scale selection on host (skip retired scales)
   int best_scale = 0;

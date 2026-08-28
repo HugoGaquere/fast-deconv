@@ -50,7 +50,7 @@ float max(const core::exec_ctx& ctx, core::span2d<float> data, core::span2d<bool
 
   float h_result;
   CHECK_CUDA(cudaMemcpyAsync(&h_result, d_out.get(), sizeof(float), cudaMemcpyDeviceToHost, cuda_stream));
-  ctx.sync();
+  ctx.wait();
 
   return h_result;
 }
