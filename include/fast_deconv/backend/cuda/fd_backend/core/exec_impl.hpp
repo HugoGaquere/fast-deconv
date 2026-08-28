@@ -57,6 +57,9 @@ class exec_resources_impl {
 /// launches in the .cu files need the stream.
 class exec_ctx_impl {
  public:
+  /// Backend memory lives on the device, so stage() must really copy.
+  static constexpr bool host_resident = false;
+
   explicit exec_ctx_impl(const exec_resources_impl& res) : device(res.device), memory_pool(res.memory_pool)
   {
     CHECK_CUDA(cudaSetDevice(device));

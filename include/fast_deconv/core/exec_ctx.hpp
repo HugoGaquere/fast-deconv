@@ -1,4 +1,5 @@
 #pragma once
+#include <cassert>
 #include <concepts>
 #include <cstdint>
 #include <fast_deconv/core/memory_types.hpp>
@@ -76,6 +77,38 @@ class exec_ctx : public exec_ctx_impl {
     auto dst = alloc_mdcontainer_async<T>(src.extents());
     this->copy_from_host_bytes(dst.data_handle(), src.data_handle(), src.size() * sizeof(T));
     return dst;
+  }
+
+  /// Backend-resident view of caller-owned host memory: an upload() on a device
+  /// backend, a borrow when backend memory already is host memory. @p src must
+  /// outlive the returned view, so this is for per-call inputs, not for buffers
+  /// a long-lived context keeps.
+  template <typename HostSpan>
+  auto stage(const HostSpan& src) const
+  {
+    using T = typename HostSpan::element_type;
+    constexpr std::size_t rank = HostSpan::rank();
+
+    if constexpr (impl::host_resident) {
+      return mdcontainer<T, rank>(src.data_handle(), emu::capsule{}, src.extents());
+    } else {
+      // The staging buffer is written, so it is allocated mutable; the view handed
+      // back keeps the caller's element type, so a const input stays unwritable.
+      auto owner = alloc_mdcontainer_async<std::remove_const_t<T>>(src.extents());
+      this->copy_from_host_bytes(owner.data_handle(), src.data_handle(), src.size() * sizeof(T));
+      return mdcontainer<T, rank>(owner.data_handle(), std::move(owner).capsule(), src.extents());
+    }
+  }
+
+  /// Undoes stage() for an in/out buffer: a download() where stage() copied,
+  /// nothing where it borrowed and the kernels already wrote @p host_dst.
+  template <typename Span>
+  void unstage(const Span& src, typename Span::element_type* host_dst) const
+  {
+    if constexpr (impl::host_resident)
+      assert(src.data_handle() == host_dst && "unstage() target is not the buffer stage() borrowed");
+    else
+      download(src, host_dst);
   }
 
   /// Copies backend memory back into caller-owned host memory. Async like
