@@ -3,7 +3,7 @@
 
 #include <cfloat>
 #include <cmath>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/matrix/argmax.hpp>
 #include <fast_deconv/matrix/max.hpp>
 #include <fast_deconv/matrix/rms.hpp>
@@ -67,7 +67,7 @@ TEST_F(MatrixReductions, MaxHonorsMask)
   img.at(planted) = 9.0f;
   mask.at(planted) = 1;  // exclude the global max
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_img(res(), sr, img);
   fdtest::device_buffer<bool> d_mask(res(), sr, to_bool(mask));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
@@ -86,7 +86,7 @@ TEST_F(MatrixReductions, MaxWithAbsPicksNegativeExtreme)
 
   img.at(flat(5, 5, kNcol)) = -3.0f;  // extreme value is negative
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_img(res(), sr, img);
   fdtest::device_buffer<bool> d_mask(res(), sr, std::vector<bool>(kNpix, false));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
@@ -102,7 +102,7 @@ TEST_F(MatrixReductions, RmsMatchesMaskedStdOracle)
   const auto img = make_image(rng);
   const auto mask = make_mask(rng);
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_img(res(), sr, img);
   fdtest::device_buffer<bool> d_mask(res(), sr, to_bool(mask));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
@@ -118,7 +118,7 @@ TEST_F(MatrixReductions, RmsAllMaskedReturnsZero)
   std::mt19937 rng(43);
   const auto img = make_image(rng);
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_img(res(), sr, img);
   fdtest::device_buffer<bool> d_mask(res(), sr, std::vector<bool>(kNpix, true));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
@@ -138,7 +138,7 @@ TEST_F(MatrixReductions, ComputeStatsMasksMaxButNotRms)
   img.at(planted) = 9.0f;
   mask.at(planted) = 1;
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_img(res(), sr, img);
   fdtest::device_buffer<bool> d_mask(res(), sr, to_bool(mask));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
@@ -160,7 +160,7 @@ TEST_F(MatrixReductions, ComputeStatsWithAbsAndWorkspaceReuse)
   auto img2 = make_image(rng);
   img2.at(flat(30, 44, kNcol)) = -2.5f;
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_img(res(), sr, img1);
   fdtest::device_buffer<bool> d_mask(res(), sr, std::vector<bool>(kNpix, false));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
@@ -187,7 +187,7 @@ TEST_F(MatrixReductions, ComputeStatsAsyncLeavesResultOnDevice)
   std::mt19937 rng(59);
   const auto img = make_image(rng);
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_img(res(), sr, img);
   fdtest::device_buffer<bool> d_mask(res(), sr, std::vector<bool>(kNpix, false));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
@@ -198,7 +198,7 @@ TEST_F(MatrixReductions, ComputeStatsAsyncLeavesResultOnDevice)
 
   matrix::stats_acc acc{};
   CHECK_CUDA(cudaMemcpyAsync(&acc, ws.device_state(), sizeof(acc), cudaMemcpyDeviceToHost, sr.cuda_stream));
-  sr.sync();
+  sr.wait();
 
   ASSERT_EQ(acc.count, kNpix);
   EXPECT_FLOAT_EQ(acc.max_v, fdtest::masked_max(img, std::vector<uint8_t>(kNpix, 0), false));
@@ -222,7 +222,7 @@ TEST_F(ArgmaxWorkspace, FindsPlantedUniquePeak)
   const int planted = flat(17, 23, kNcol);
   img.at(planted) = 5.0f;
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_img(res(), sr, img);
 
   matrix::argmax_ctx ws(sr, kNpix);
@@ -239,7 +239,7 @@ TEST_F(ArgmaxWorkspace, ReusableAcrossCallsAndAllNegativeSafe)
   const int a = flat(1, 2, kNcol);
   img.at(a) = -0.5f;  // unique max, still negative
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_img(res(), sr, img);
   matrix::argmax_ctx ws(sr, kNpix);
 

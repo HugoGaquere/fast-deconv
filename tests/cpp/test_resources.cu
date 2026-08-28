@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <fast_deconv/core/exec_ctx.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <optional>
 
 #include "helpers/gpu_test.hpp"
@@ -23,7 +23,7 @@ class Resources : public fdtest::GpuTest {};
 
 TEST_F(Resources, MdcontainerAllocFreeRoundTrip)
 {
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   const uint64_t baseline = res().pool_used_bytes();
 
   {
@@ -32,17 +32,17 @@ TEST_F(Resources, MdcontainerAllocFreeRoundTrip)
     EXPECT_EQ(buf.extent(0), kRows);
     EXPECT_EQ(buf.extent(1), kCols);
     EXPECT_EQ(buf.use_count(), 1);
-    sr.sync();
+    sr.wait();
     EXPECT_GE(res().pool_used_bytes(), baseline + kRows * kCols * sizeof(float));
   }
 
-  sr.sync();
+  sr.wait();
   EXPECT_EQ(res().pool_used_bytes(), baseline);
 }
 
 TEST_F(Resources, MdcontainerCopySharesOwnership)
 {
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   const uint64_t baseline = res().pool_used_bytes();
 
   std::optional original{sr.alloc_mdcontainer_async<float>(kRows, kCols)};
@@ -52,19 +52,19 @@ TEST_F(Resources, MdcontainerCopySharesOwnership)
 
   // The copy must keep the allocation alive past the original's destruction.
   original.reset();
-  sr.sync();
+  sr.wait();
   EXPECT_EQ(copy.data_handle(), ptr);
   EXPECT_EQ(copy.use_count(), 1);
   EXPECT_GE(res().pool_used_bytes(), baseline + kRows * kCols * sizeof(float));
 
   copy = core::device_cont2d<float>{};
-  sr.sync();
+  sr.wait();
   EXPECT_EQ(res().pool_used_bytes(), baseline);
 }
 
 TEST_F(Resources, MdcontainerDecaysToSpan)
 {
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
   auto buf = sr.alloc_mdcontainer_async<float>(kRows, kCols);
 
   const core::device_span2d<float> view = pass_by_value(buf);
@@ -73,7 +73,7 @@ TEST_F(Resources, MdcontainerDecaysToSpan)
   EXPECT_EQ(view.extent(1), kCols);
   // Decay builds a plain view: no ownership share, refcount untouched.
   EXPECT_EQ(buf.use_count(), 1);
-  sr.sync();
+  sr.wait();
 }
 
 TEST_F(Resources, MdcontainerDefaultConstructedIsEmpty)

@@ -1,6 +1,6 @@
 #pragma once
 #include <fast_deconv/core/exec_ctx.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <vector>
 
@@ -41,7 +41,7 @@ void convolve_with_scales(const linalg::convolve_ctx& conv, core::span2d<float> 
  * @param[in]     retired_scales Scale indices to exclude from selection.
  * @return Unbiased peak value and pixel coordinates of the selected scale.
  */
-int scale_selection(const core::exec_ctx& stream_res, core::span3d<float> scaled_dirty, core::host_vect<float> bias,
+int scale_selection(const core::exec_ctx& stream_res, core::span3d<float> scaled_dirty, core::host_span1d<float> bias,
                     const std::vector<int>& retired_scales);
 
 /**

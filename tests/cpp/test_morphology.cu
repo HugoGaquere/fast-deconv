@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <climits>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/morphology/dilation.hpp>
 #include <fast_deconv/morphology/roi.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
@@ -32,13 +32,13 @@ class ComputeMaskRoiTest : public fdtest::GpuTest {
 
   morpho::roi run(const std::vector<bool>& mask)
   {
-    const auto sr = res().make_stream();
+    const auto sr = res().make_ctx();
 
     fdtest::device_buffer<bool> d_mask(res(), sr, mask);
     core::device_span2d<bool> view(d_mask.get(), NROW, NCOL);
 
     morpho::roi r = morpho::compute_mask_roi(sr, view);
-    sr.sync();
+    sr.wait();
     return r;
   }
 };
@@ -136,7 +136,7 @@ class BinaryDilationTest : public fdtest::GpuTest {
 
   std::vector<uint8_t> run(const std::vector<bool>& data, const std::vector<bool>& se, int se_n, morpho::roi se_roi)
   {
-    const auto sr = res().make_stream();
+    const auto sr = res().make_ctx();
 
     const std::size_t npix = NROW * NCOL;
     fdtest::device_buffer<bool> d_data(res(), sr, data);
@@ -149,7 +149,7 @@ class BinaryDilationTest : public fdtest::GpuTest {
     core::device_span2d<bool> out_view(d_out.get(), NROW, NCOL);
 
     morpho::binary_dilation(sr, data_view, se_view, se_roi, out_view);
-    sr.sync();
+    sr.wait();
 
     return d_out.to_host();
   }

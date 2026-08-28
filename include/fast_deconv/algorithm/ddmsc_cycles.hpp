@@ -2,7 +2,7 @@
 
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 
 namespace fast_deconv::algorithm::ddmsc {
 

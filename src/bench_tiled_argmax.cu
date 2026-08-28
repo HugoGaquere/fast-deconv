@@ -108,7 +108,7 @@ static void fill_image(float* d_data, uint64_t npix, uint64_t seed, const core::
 {
   fill_pattern<<<1024, 256, 0, sr.cuda_stream>>>(d_data, npix, seed);
   BENCH_CHECK_CUDA(cudaGetLastError());
-  sr.sync();
+  sr.wait();
 }
 
 // ------------------------------------------------------------------------- //
@@ -221,7 +221,7 @@ static tile_result run_tile(const core::exec_ctx& sr, float* d_data, const optio
   tr.full = time_phase(opt.warmup, opt.reps, [&] { ws.run(view); });
   tr.incr = time_phase(opt.warmup, opt.reps, [&] { ws.run_incremental(view, peak_row, peak_col, psf, psf); });
 
-  sr.sync();  // ws releases its device buffers in its destructor
+  sr.wait();  // ws releases its device buffers in its destructor
   return tr;
 }
 
@@ -287,7 +287,7 @@ static void validate(const core::exec_ctx& sr, float* d_data, const options& opt
   printf("  [validate] INCREMENTAL %s: peak %.3f at %lld (want %.3f at %d)\n",
          (iv == bigger && ii == bidx) ? "ok" : "MISMATCH", iv, static_cast<long long>(ii), bigger, bidx);
 
-  sr.sync();  // ws releases its device buffers in its destructor
+  sr.wait();  // ws releases its device buffers in its destructor
   fill_image(d_data, static_cast<uint64_t>(opt.width) * opt.height, opt.seed, sr);  // restore
 }
 
@@ -397,7 +397,7 @@ int main(int argc, char** argv)
   }
 
   core::exec_resources res(opt.device);
-  const core::exec_ctx sr = res.make_stream();
+  const core::exec_ctx sr = res.make_ctx();
 
   float* d_data = sr.alloc_async<float>(npix);
   fill_image(d_data, npix, opt.seed, sr);
@@ -456,6 +456,6 @@ int main(int argc, char** argv)
   if (csv.is_open()) printf("\nWrote %s\n", opt.csv_path.c_str());
 
   sr.free_async(d_data);
-  sr.sync();
+  sr.wait();
   return 0;
 }

@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <fast_deconv/common/clean.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <random>
 #include <utility>
 #include <vector>
@@ -49,7 +49,7 @@ class SubtractComponent : public fdtest::GpuTest {
   std::vector<float> run_2d(const std::vector<float>& residual, const std::vector<float>& psf, int ph, int pw,
                             std::pair<int, int> peak, float gain)
   {
-    const auto sr = res().make_stream();
+    const auto sr = res().make_ctx();
     fdtest::device_buffer<float> d_res(res(), sr, residual);
     fdtest::device_buffer<float> d_psf(res(), sr, psf);
 
@@ -57,7 +57,7 @@ class SubtractComponent : public fdtest::GpuTest {
     core::device_span2d<float> psf_view(d_psf.get(), ph, pw);
 
     common::subtract_component_async(sr, res_view, psf_view, peak, gain);
-    sr.sync();
+    sr.wait();
     return d_res.to_host();
   }
 
@@ -132,7 +132,7 @@ TEST_F(SubtractComponent, MultiFrequencyOverloadUsesPerChannelCoeffs)
   const std::vector<float> coeffs = {1.0f, -0.5f, 0.25f};
   const float gain = 0.4f;
 
-  const auto sr = res().make_stream();
+  const auto sr = res().make_ctx();
 
   for (const auto& peak : {std::pair<int, int>{8, 10}, {0, 0}, {kH - 1, kW - 1}}) {
     fdtest::device_buffer<float> d_res(res(), sr, residual);
@@ -141,10 +141,10 @@ TEST_F(SubtractComponent, MultiFrequencyOverloadUsesPerChannelCoeffs)
 
     core::device_span3d<float> res_view(d_res.get(), n_freq, kH, kW);
     core::device_span3d<float> psf_view(d_psf.get(), n_freq, ph, pw);
-    core::device_vect<float> coeffs_view(d_coeffs.get(), n_freq);
+    core::span1d<float> coeffs_view(d_coeffs.get(), n_freq);
 
     common::subtract_component_async(sr, res_view, psf_view, coeffs_view, peak, gain);
-    sr.sync();
+    sr.wait();
 
     const auto got = d_res.to_host();
     for (int f = 0; f < n_freq; ++f) {

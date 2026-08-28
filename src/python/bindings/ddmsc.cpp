@@ -5,7 +5,7 @@
 #include <emu/pybind11/cast/mdspan.hpp>
 #include <fast_deconv/algorithm/ddmsc.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 
 #include "fast_deconv_bindings.hpp"
 
@@ -40,8 +40,8 @@ void bind_ddmsc(py::module_& m)
 
   py::class_<ddmsc::Ddmsc>(ddmsc_module, "DDMSC")
       .def(py::init<const core::host_span4d<float>&, const core::host_span2d<float>&, const core::host_span2d<bool>&,
-                    const core::host_vect<float>&, const core::host_vect<float>&, const core::host_span2d<int>&, int,
-                    int, int, float, int>(),
+                    const core::host_span1d<float>&, const core::host_span1d<float>&, const core::host_span2d<int>&,
+                    int, int, int, float, int>(),
            py::arg("raw_psfs"), py::arg("xdes"), py::arg("scale_mask"), py::arg("scale_sigmas"), py::arg("scale_bias"),
            py::arg("map_pixel_facet"), py::arg("dirty_nrow"), py::arg("dirty_ncol"), py::arg("n_freq"),
            py::arg("fft_padding"), py::arg("exec_device") = 0,

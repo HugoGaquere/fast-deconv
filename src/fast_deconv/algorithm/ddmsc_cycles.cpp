@@ -9,6 +9,7 @@
 #include <fast_deconv/common/mask.hpp>
 #include <fast_deconv/common/multi_frequency.hpp>
 #include <fast_deconv/core/logger.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/core/nvtx.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
@@ -17,8 +18,6 @@
 #include <fast_deconv/matrix/tiled_argmax.hpp>
 #include <fast_deconv/util/utils.hpp>
 #include <stdexcept>
-
-#include "fast_deconv/core/span_types.hpp"
 
 namespace fast_deconv::algorithm::ddmsc {
 
@@ -194,7 +193,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   std::vector<float> gains;
   int cached_scale = -1;
 
-  stream_a.sync();
+  stream_a.wait();
   // Loop over scales
   while (!deconv_convergence.should_stop()) {
     FD_NVTX_RANGE("outer_iter");
@@ -306,10 +305,10 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
       n_clean_iter++;
     }
 
-    stream_a.sync();
+    stream_a.wait();
     // stream_b must finish its per-channel subtracts on `dirty` before
     // stream_a reads it in the weighted_sum below.
-    stream_b.sync();
+    stream_b.wait();
     FD_NVTX_MARK("clean_loop end");
 
     // FD_LOG_INFO("run_ddmsc: scale {} produced {} clean iterations", selected_scale_idx, n_clean_iter);
@@ -356,8 +355,8 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   }
 
   FD_NVTX_MARK("finalize begin");
-  stream_a.sync();
-  stream_b.sync();
+  stream_a.wait();
+  stream_b.wait();
 
   FD_LOG_INFO("run_ddmsc: completed ({} iterations, exit={})", deconv_convergence.iteration(),
               common::to_string(deconv_convergence.status()));
