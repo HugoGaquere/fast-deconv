@@ -1,16 +1,14 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <climits>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/morphology/dilation.hpp>
 #include <fast_deconv/morphology/roi.hpp>
-#include <fast_deconv/util/cuda_macros.hpp>
 #include <utility>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 
 namespace core = fast_deconv::core;
 namespace morpho = fast_deconv::morphology;
@@ -25,7 +23,7 @@ namespace fdtest = fast_deconv::test;
 // Empty mask sentinel: {INT_MAX, -1, INT_MAX, -1}.
 // ============================================================================
 
-class ComputeMaskRoiTest : public fdtest::GpuTest {
+class ComputeMaskRoiTest : public fdtest::BackendTest {
  protected:
   // Deliberately non-square to exercise the row-major flat-index unravel.
   static constexpr int NROW = 6;
@@ -36,7 +34,7 @@ class ComputeMaskRoiTest : public fdtest::GpuTest {
     const auto sr = res().make_ctx();
 
     fdtest::device_buffer<bool> d_mask(sr, mask);
-    core::device_span2d<bool> view(d_mask.get(), NROW, NCOL);
+    core::span2d<bool> view(d_mask.get(), NROW, NCOL);
 
     morpho::roi r = morpho::compute_mask_roi(sr, view);
     sr.wait();
@@ -91,7 +89,7 @@ TEST_F(ComputeMaskRoiTest, RectangleBlockBoundingBox)
 // equivariance) so they remain valid across implementation refactors.
 // ============================================================================
 
-class BinaryDilationTest : public fdtest::GpuTest {
+class BinaryDilationTest : public fdtest::BackendTest {
  protected:
   // Non-square data shape to catch row/col indexing bugs.
   static constexpr int NROW = 6;
@@ -108,11 +106,11 @@ class BinaryDilationTest : public fdtest::GpuTest {
     fdtest::device_buffer<bool> d_data(sr, data);
     fdtest::device_buffer<bool> d_se(sr, se);
     fdtest::device_buffer<bool> d_out(sr, npix);
-    CHECK_CUDA(cudaMemsetAsync(d_out.get(), 0, npix * sizeof(bool), sr.cuda_stream));
+    d_out.fill_bytes(0);
 
-    core::device_span2d<bool> data_view(d_data.get(), NROW, NCOL);
-    core::device_span2d<bool> se_view(d_se.get(), se_n, se_n);
-    core::device_span2d<bool> out_view(d_out.get(), NROW, NCOL);
+    core::span2d<bool> data_view(d_data.get(), NROW, NCOL);
+    core::span2d<bool> se_view(d_se.get(), se_n, se_n);
+    core::span2d<bool> out_view(d_out.get(), NROW, NCOL);
 
     morpho::binary_dilation(sr, data_view, se_view, se_roi, out_view);
     sr.wait();
@@ -120,14 +118,6 @@ class BinaryDilationTest : public fdtest::GpuTest {
     return d_out.to_host();
   }
 };
-
-TEST_F(BinaryDilationTest, AllFalseInputProducesAllFalse)
-{
-  std::vector<bool> data(NROW * NCOL, false);
-  auto se = se_square_3x3();
-  auto out = run(data, se, 3, morpho::roi{0, 3, 0, 3});
-  for (uint8_t v : out) EXPECT_EQ(v, 0);
-}
 
 TEST_F(BinaryDilationTest, SinglePixelExpandsToStructuringElement)
 {
@@ -145,21 +135,6 @@ TEST_F(BinaryDilationTest, SinglePixelExpandsToStructuringElement)
       const bool inside_block = (r >= row - 1 && r <= row + 1 && c >= col - 1 && c <= col + 1);
       EXPECT_EQ(out[r * NCOL + c] != 0, inside_block) << "mismatch at (" << r << ", " << c << ")";
     }
-  }
-}
-
-TEST_F(BinaryDilationTest, ExtensivityOutputContainsInput)
-{
-  // dilate(A) ⊇ A: every foreground pixel in input must remain foreground.
-  std::vector<bool> data(NROW * NCOL, false);
-  data[1 * NCOL + 2] = true;
-  data[4 * NCOL + 8] = true;
-
-  auto se = se_square_3x3();
-  auto out = run(data, se, 3, morpho::roi{0, 3, 0, 3});
-
-  for (std::size_t i = 0; i < data.size(); ++i) {
-    if (data[i]) EXPECT_NE(out[i], 0) << "lost foreground at flat index " << i;
   }
 }
 

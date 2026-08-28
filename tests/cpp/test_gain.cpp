@@ -1,4 +1,3 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <fast_deconv/common/gain.hpp>
@@ -6,8 +5,8 @@
 #include <random>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
 
@@ -38,7 +37,7 @@ std::vector<float> host_gains(const std::vector<float>& psfs, const std::vector<
 
 }  // namespace
 
-class GainBatched : public fdtest::GpuTest {};
+class GainBatched : public fdtest::BackendTest {};
 
 TEST_F(GainBatched, PerFacetGainMatchesWeightedMeanMaxOracle)
 {
@@ -54,7 +53,7 @@ TEST_F(GainBatched, PerFacetGainMatchesWeightedMeanMaxOracle)
   fdtest::device_buffer<float> d_psfs(sr, psfs);
   fdtest::device_buffer<float> d_w(sr, weights);
 
-  core::device_span4d<float> psf_view(d_psfs.get(), kFacets, kFreq, kPsfH, kPsfW);
+  core::span4d<float> psf_view(d_psfs.get(), kFacets, kFreq, kPsfH, kPsfW);
   core::span1d<float> w_view(d_w.get(), kFreq);
 
   const auto gains = common::compute_gain_batched(sr, psf_view, w_view, kGamma);
@@ -83,7 +82,7 @@ TEST_F(GainBatched, AllGainsScaleZeroFastPathAndScaleMajorOrdering)
   fdtest::device_buffer<float> d_psfs(sr, psfs);
   fdtest::device_buffer<float> d_w(sr, weights);
 
-  core::device_span5d<float> psf_view(d_psfs.get(), n_scales, kFacets, kFreq, kPsfH, kPsfW);
+  core::span5d<float> psf_view(d_psfs.get(), n_scales, kFacets, kFreq, kPsfH, kPsfW);
   core::span1d<float> w_view(d_w.get(), kFreq);
 
   const auto all_gains = common::compute_all_gains_batched(sr, psf_view, w_view, kGamma);

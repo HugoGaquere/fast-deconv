@@ -1,4 +1,3 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <fast_deconv/common/clean.hpp>
@@ -7,8 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
 
@@ -41,7 +40,7 @@ std::vector<float> host_subtract(const std::vector<float>& residual, int h, int 
 
 }  // namespace
 
-class SubtractComponent : public fdtest::GpuTest {
+class SubtractComponent : public fdtest::BackendTest {
  protected:
   static constexpr int kH = 16;
   static constexpr int kW = 20;  // non-square residual
@@ -53,8 +52,8 @@ class SubtractComponent : public fdtest::GpuTest {
     fdtest::device_buffer<float> d_res(sr, residual);
     fdtest::device_buffer<float> d_psf(sr, psf);
 
-    core::device_span2d<float> res_view(d_res.get(), kH, kW);
-    core::device_span2d<float> psf_view(d_psf.get(), ph, pw);
+    core::span2d<float> res_view(d_res.get(), kH, kW);
+    core::span2d<float> psf_view(d_psf.get(), ph, pw);
 
     common::subtract_component_async(sr, res_view, psf_view, peak, gain);
     sr.wait();
@@ -68,7 +67,9 @@ class SubtractComponent : public fdtest::GpuTest {
   }
 };
 
-TEST_F(SubtractComponent, InteriorPeakSubtractsScaledPsfWindow)
+// Interior, edge and corner peaks against the host oracle: the window is clipped
+// at the border and pixels outside it are never touched.
+TEST_F(SubtractComponent, SubtractsScaledPsfWindowAndClipsAtBorders)
 {
   std::mt19937 rng(71);
   std::vector<float> residual(kH * kW);
@@ -76,32 +77,15 @@ TEST_F(SubtractComponent, InteriorPeakSubtractsScaledPsfWindow)
   std::vector<float> psf(5 * 5);
   fdtest::fill_uniform(rng, psf, 0.0f, 1.0f);
 
-  const std::pair<int, int> peak{8, 10};
-  const float gain = 0.3f;
-
-  const auto got = run_2d(residual, psf, 5, 5, peak, gain);
-  const auto expected = host_subtract(residual, kH, kW, psf, 5, 5, peak, gain);
-  expect_matches_oracle(got, expected);
-
-  // Pixels outside the 5x5 window are bit-identical to the input.
-  for (int y = 0; y < kH; ++y)
-    for (int x = 0; x < kW; ++x)
-      if (std::abs(y - peak.first) > 2 || std::abs(x - peak.second) > 2)
-        ASSERT_EQ(got.at(flat(y, x, kW)), residual.at(flat(y, x, kW))) << "touched (" << y << ", " << x << ")";
-}
-
-TEST_F(SubtractComponent, PeaksAtCornersAndEdgesClipWithoutOutOfBounds)
-{
-  std::mt19937 rng(73);
-  std::vector<float> residual(kH * kW);
-  fdtest::fill_uniform(rng, residual, -1.0f, 1.0f);
-  std::vector<float> psf(5 * 5);
-  fdtest::fill_uniform(rng, psf, 0.0f, 1.0f);
-
-  for (const auto& peak : {std::pair<int, int>{0, 0}, {0, kW - 1}, {kH - 1, 0}, {kH - 1, kW - 1}}) {
+  for (const auto& peak : {std::pair<int, int>{8, 10}, {0, 0}, {0, kW - 1}, {kH - 1, 0}, {kH - 1, kW - 1}}) {
     const auto got = run_2d(residual, psf, 5, 5, peak, 0.5f);
-    const auto expected = host_subtract(residual, kH, kW, psf, 5, 5, peak, 0.5f);
-    expect_matches_oracle(got, expected);
+    expect_matches_oracle(got, host_subtract(residual, kH, kW, psf, 5, 5, peak, 0.5f));
+
+    // Pixels outside the 5x5 window are bit-identical to the input.
+    for (int y = 0; y < kH; ++y)
+      for (int x = 0; x < kW; ++x)
+        if (std::abs(y - peak.first) > 2 || std::abs(x - peak.second) > 2)
+          ASSERT_EQ(got.at(flat(y, x, kW)), residual.at(flat(y, x, kW))) << "touched (" << y << ", " << x << ")";
   }
 }
 
@@ -139,8 +123,8 @@ TEST_F(SubtractComponent, MultiFrequencyOverloadUsesPerChannelCoeffs)
     fdtest::device_buffer<float> d_psf(sr, psf);
     fdtest::device_buffer<float> d_coeffs(sr, coeffs);
 
-    core::device_span3d<float> res_view(d_res.get(), n_freq, kH, kW);
-    core::device_span3d<float> psf_view(d_psf.get(), n_freq, ph, pw);
+    core::span3d<float> res_view(d_res.get(), n_freq, kH, kW);
+    core::span3d<float> psf_view(d_psf.get(), n_freq, ph, pw);
     core::span1d<float> coeffs_view(d_coeffs.get(), n_freq);
 
     common::subtract_component_async(sr, res_view, psf_view, coeffs_view, peak, gain);

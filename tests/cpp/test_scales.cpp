@@ -1,4 +1,3 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -10,8 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
 
@@ -22,7 +21,7 @@ namespace fdtest = fast_deconv::test;
 
 using fdtest::flat;
 
-class ScalesTest : public fdtest::GpuTest {};
+class ScalesTest : public fdtest::BackendTest {};
 
 // ============================================================================
 // make_gaussian_kernels_async — freq-domain Gaussian exp(-2 pi^2 rho^2 sigma^2)
@@ -43,7 +42,7 @@ TEST_F(ScalesTest, GaussianKernelsMatchHostFormulaOnHalfComplexGrid)
   fdtest::device_buffer<float> d_scales(sr, static_cast<std::size_t>(n_scales) * slice);
 
   core::span1d<float> sigma_view(d_sigmas.get(), n_scales);
-  core::device_span3d<float> scales_view(d_scales.get(), n_scales, nrow, ncol_half);
+  core::span3d<float> scales_view(d_scales.get(), n_scales, nrow, ncol_half);
 
   scale::make_gaussian_kernels_async(sr, sigma_view, ncol_full, scales_view);
   sr.wait();
@@ -103,13 +102,13 @@ TEST_F(ScalesTest, ConvolveWithScalesMatchesDirectConvolution)
   fdtest::device_buffer<float> d_kernels(
       sr, static_cast<std::size_t>(n_scales) * ctx.dims().freq_nrow * ctx.dims().freq_ncol);
   core::span1d<float> sigma_view(d_sigmas.get(), n_scales);
-  core::device_span3d<float> kernels_view(d_kernels.get(), n_scales, ctx.dims().freq_nrow, ctx.dims().freq_ncol);
+  core::span3d<float> kernels_view(d_kernels.get(), n_scales, ctx.dims().freq_nrow, ctx.dims().freq_ncol);
   scale::make_gaussian_kernels_async(sr, sigma_view, ctx.dims().padded_ncol, kernels_view);
 
   fdtest::device_buffer<float> d_dirty(sr, dirty);
   fdtest::device_buffer<float> d_out(sr, static_cast<std::size_t>(n_scales) * npix);
-  core::device_span2d<float> dirty_view(d_dirty.get(), nrow, ncol);
-  core::device_span3d<float> out_view(d_out.get(), n_scales, nrow, ncol);
+  core::span2d<float> dirty_view(d_dirty.get(), nrow, ncol);
+  core::span3d<float> out_view(d_out.get(), n_scales, nrow, ncol);
 
   scale::convolve_with_scales(ctx, dirty_view, kernels_view, out_view);
   sr.wait();
@@ -137,7 +136,7 @@ TEST_F(ScalesTest, ConvolveWithScalesMatchesDirectConvolution)
 // scale_selection — biased peak-finding on host_span1d bias
 // ============================================================================
 
-class ScaleSelection : public fdtest::GpuTest {
+class ScaleSelection : public fdtest::BackendTest {
  protected:
   static constexpr int kScales = 3;
   static constexpr int kNrow = 4;
@@ -156,7 +155,7 @@ class ScaleSelection : public fdtest::GpuTest {
   {
     const auto sr = res().make_ctx();
     fdtest::device_buffer<float> d_planes(sr, planes);
-    core::device_span3d<float> planes_view(d_planes.get(), kScales, kNrow, kNcol);
+    core::span3d<float> planes_view(d_planes.get(), kScales, kNrow, kNcol);
     core::host_span1d<float> bias_view(bias.data(), kScales);
     const int best = scale::scale_selection(sr, planes_view, bias_view, retired);
     sr.wait();
@@ -199,7 +198,7 @@ TEST_F(ScaleSelection, AllRetiredReturnsScaleZero)
 // conv_psf = G(sigma), conv2_mean = sum_f w[f] * G(sigma * sqrt(2)).
 // ============================================================================
 
-class ConvolvePsfs : public fdtest::GpuTest {
+class ConvolvePsfs : public fdtest::BackendTest {
  protected:
   static constexpr int kFacets = 2;
   static constexpr int kFreq = 2;
@@ -234,17 +233,17 @@ class ConvolvePsfs : public fdtest::GpuTest {
     fdtest::device_buffer<float> d_conv(sr, static_cast<std::size_t>(n_scales) * psfs.size());
     fdtest::device_buffer<float> d_conv2(sr, static_cast<std::size_t>(n_scales) * kFacets * kNpix);
 
-    core::device_span4d<float> psf_view(d_psfs.get(), kFacets, kFreq, kH, kW);
+    core::span4d<float> psf_view(d_psfs.get(), kFacets, kFreq, kH, kW);
     core::span1d<float> sigma_view(d_sigmas.get(), static_cast<int>(sigmas.size()));
     core::span1d<float> w_view(d_w.get(), kFreq);
 
     if (scale_idx < 0) {
-      core::device_span5d<float> conv_view(d_conv.get(), n_scales, kFacets, kFreq, kH, kW);
-      core::device_span4d<float> conv2_view(d_conv2.get(), n_scales, kFacets, kH, kW);
+      core::span5d<float> conv_view(d_conv.get(), n_scales, kFacets, kFreq, kH, kW);
+      core::span4d<float> conv2_view(d_conv2.get(), n_scales, kFacets, kH, kW);
       scale::convolve_psfs_with_scales_async(ctx, psf_view, sigma_view, w_view, conv_view, conv2_view);
     } else {
-      core::device_span4d<float> conv_view(d_conv.get(), kFacets, kFreq, kH, kW);
-      core::device_span3d<float> conv2_view(d_conv2.get(), kFacets, kH, kW);
+      core::span4d<float> conv_view(d_conv.get(), kFacets, kFreq, kH, kW);
+      core::span3d<float> conv2_view(d_conv2.get(), kFacets, kH, kW);
       scale::convolve_psfs_with_scale_async(ctx, psf_view, sigma_view, scale_idx, w_view, conv_view, conv2_view);
     }
     sr.wait();
@@ -253,47 +252,42 @@ class ConvolvePsfs : public fdtest::GpuTest {
   }
 };
 
-TEST_F(ConvolvePsfs, ScaleZeroFastPathCopiesAndAveragesChannels)
+// Single-scale entry point at both branches: scale 0 is a copy plus the channel
+// mean, scale 1 convolves. Delta PSFs make the scale-1 outputs analytic —
+// conv_psf = G(sigma), conv2_mean = G(sigma * sqrt(2)) since the weights sum to 1.
+TEST_F(ConvolvePsfs, SingleScaleEntryPointCopiesAtZeroAndConvolvesAbove)
 {
-  std::mt19937 rng(107);
-  std::vector<float> psfs(kFacets * kFreq * kNpix);
-  fdtest::fill_uniform(rng, psfs, 0.0f, 1.0f);
-  const std::vector<float> weights = {0.6f, 0.4f};
-
-  const auto [conv, conv2] = run(psfs, {0.0f}, weights, /*scale_idx=*/0);
-
-  for (std::size_t i = 0; i < psfs.size(); ++i) ASSERT_EQ(conv.at(i), psfs.at(i)) << "conv_psf flat " << i;
-
-  for (int b = 0; b < kFacets; ++b) {
-    const std::vector<float> facet(psfs.begin() + b * kFreq * kNpix, psfs.begin() + (b + 1) * kFreq * kNpix);
-    const auto expected = fdtest::weighted_sum(facet, weights, kNpix);
-    for (int i = 0; i < kNpix; ++i)
-      ASSERT_NEAR(conv2.at(b * kNpix + i), expected.at(i), 1e-6f) << "facet " << b << " pixel " << i;
-  }
-}
-
-TEST_F(ConvolvePsfs, DeltaPsfProducesGaussianAndSqrt2Gaussian)
-{
-  const auto psfs = delta_psfs();
   const std::vector<float> weights = {0.6f, 0.4f};
   const double sigma = 1.2;
 
-  const auto [conv, conv2] = run(psfs, {static_cast<float>(sigma)}, weights, /*scale_idx=*/1);
+  std::mt19937 rng(107);
+  std::vector<float> random_psfs(kFacets * kFreq * kNpix);
+  fdtest::fill_uniform(rng, random_psfs, 0.0f, 1.0f);
 
-  // conv_psf: delta ⊛ G(sigma) = sum-normalized Gaussian at the delta position.
+  {
+    const auto [conv, conv2] = run(random_psfs, {0.0f}, weights, /*scale_idx=*/0);
+    for (std::size_t i = 0; i < random_psfs.size(); ++i)
+      ASSERT_EQ(conv.at(i), random_psfs.at(i)) << "conv_psf flat " << i;
+    for (int b = 0; b < kFacets; ++b) {
+      const std::vector<float> facet(random_psfs.begin() + b * kFreq * kNpix,
+                                     random_psfs.begin() + (b + 1) * kFreq * kNpix);
+      const auto expected = fdtest::weighted_sum(facet, weights, kNpix);
+      for (int i = 0; i < kNpix; ++i)
+        ASSERT_NEAR(conv2.at(b * kNpix + i), expected.at(i), 1e-6f) << "facet " << b << " pixel " << i;
+    }
+  }
+
+  const auto [conv, conv2] = run(delta_psfs(), {static_cast<float>(sigma)}, weights, /*scale_idx=*/1);
   const auto g1 = fdtest::gaussian2d(kH, kW, kH / 2, kW / 2, sigma);
-  for (int b = 0; b < kFacets; ++b)
+  const auto g2 = fdtest::gaussian2d(kH, kW, kH / 2, kW / 2, sigma * std::sqrt(2.0));
+  for (int b = 0; b < kFacets; ++b) {
     for (int f = 0; f < kFreq; ++f)
       for (int i = 0; i < kNpix; ++i)
         ASSERT_NEAR(conv.at((b * kFreq + f) * kNpix + i), g1.at(i), 1e-4f)
             << "facet " << b << " freq " << f << " pixel " << i;
-
-  // conv2_mean: G^2 in freq domain is a spatial Gaussian of sigma * sqrt(2);
-  // weights sum to 1 so the channel mean is that Gaussian itself.
-  const auto g2 = fdtest::gaussian2d(kH, kW, kH / 2, kW / 2, sigma * std::sqrt(2.0));
-  for (int b = 0; b < kFacets; ++b)
     for (int i = 0; i < kNpix; ++i)
       ASSERT_NEAR(conv2.at(b * kNpix + i), g2.at(i), 1e-4f) << "facet " << b << " pixel " << i;
+  }
 }
 
 TEST_F(ConvolvePsfs, AllScalesVariantSlicesPerScaleOutputs)

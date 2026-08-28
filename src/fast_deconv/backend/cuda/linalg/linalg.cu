@@ -20,8 +20,8 @@ void weighted_sum_async(const core::exec_ctx& ctx, const float* A, const float* 
   kernel::weighted_sum_kernel<<<CEIL_DIV(n, 256), 256, 0, ctx.cuda_stream>>>(A, weights, out, w, n);
 }
 
-void weighted_sum_async(const core::exec_ctx& ctx, const core::span3d<float> A, const core::span1d<float> weights,
-                        core::span2d<float> out)
+void weighted_sum_async(const core::exec_ctx& ctx, const core::span3d<const float> A,
+                        const core::span1d<const float> weights, core::span2d<float> out)
 {
   // const size_t n = A.extent(1) * A.extent(2);
   // kernel::weighted_sum_kernel<<<CEIL_DIV(n, 256), 256, 0, ctx.cuda_stream>>>(

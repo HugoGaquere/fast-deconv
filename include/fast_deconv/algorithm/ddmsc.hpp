@@ -32,8 +32,8 @@ class Ddmsc {
 
   /// Run one full deconvolution session. The updated residual is written back
   /// into @p dirty (host, in/out) before returning.
-  ddmsc_result run(core::host_span3d<float>& dirty, const core::host_span3d<float>& jones_norm,
-                   const core::host_span1d<float>& weights_freq);
+  ddmsc_result run(core::host_span3d<float>& dirty, const core::host_span3d<const float>& jones_norm,
+                   const core::host_span1d<const float>& weights_freq);
 
   bool clean_negative() const { return params_.clean_negative; }
   void set_clean_negative(bool v) { params_.clean_negative = v; }

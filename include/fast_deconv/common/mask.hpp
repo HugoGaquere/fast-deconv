@@ -50,7 +50,7 @@ void mask_less_than_threshold(const core::exec_ctx& ctx, core::span2d<float> dat
  */
 void build_auto_mask(const core::exec_ctx& ctx, const std::vector<std::pair<int, int>>& coords,
                      const std::vector<int>& scales, core::span3d<float> central_facet_psfs,
-                     core::span1d<float> weights_freq, core::span1d<float> scale_sigmas, float fft_padding,
+                     core::span1d<const float> weights_freq, core::span1d<float> scale_sigmas, float fft_padding,
                      core::span2d<bool> external_mask, core::span3d<bool> mask_per_scale);
 
 }  // namespace fast_deconv::common

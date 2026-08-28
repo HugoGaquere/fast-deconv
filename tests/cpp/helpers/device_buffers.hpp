@@ -1,18 +1,17 @@
 #pragma once
 
-#include <cuda_runtime.h>
-
 #include <cstdint>
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/linalg/fft.hpp>
-#include <fast_deconv/util/cuda_macros.hpp>
 #include <type_traits>
 #include <vector>
 
 namespace fast_deconv::test {
 
-// Owning device allocation on lane @p sr, freed (with a stream sync) on
-// destruction — an early ASSERT return cannot leak pool memory.
+// Owning allocation in backend memory on lane @p sr, freed (with a wait) on
+// destruction — an early ASSERT return cannot leak pool memory. Every transfer
+// goes through core::exec_ctx's backend-neutral primitives, so the same test
+// source compiles against the cuda and host backends.
 template <typename T>
 class device_buffer {
  public:
@@ -25,9 +24,9 @@ class device_buffer {
     if constexpr (std::is_same_v<T, bool>) {
       std::vector<uint8_t> bytes(host.size());
       for (std::size_t i = 0; i < host.size(); ++i) bytes.at(i) = host.at(i) ? 1 : 0;
-      CHECK_CUDA(cudaMemcpyAsync(ptr_, bytes.data(), n_ * sizeof(bool), cudaMemcpyHostToDevice, sr_.cuda_stream));
+      sr_.copy_from_host_bytes(ptr_, bytes.data(), n_ * sizeof(bool));
     } else {
-      CHECK_CUDA(cudaMemcpyAsync(ptr_, host.data(), n_ * sizeof(T), cudaMemcpyHostToDevice, sr_.cuda_stream));
+      sr_.copy_from_host_bytes(ptr_, host.data(), n_ * sizeof(T));
     }
     sr_.wait();
   }
@@ -46,28 +45,31 @@ class device_buffer {
   T* get() const { return ptr_; }
   std::size_t size() const { return n_; }
 
-  // Blocking device-to-host copy. Returns std::vector<uint8_t> for bool
+  // Blocking read back to the host. Returns std::vector<uint8_t> for bool
   // buffers to sidestep std::vector<bool> bit-packing.
   auto to_host() const
   {
-    if constexpr (std::is_same_v<T, bool>) {
-      std::vector<uint8_t> host(n_);
-      CHECK_CUDA(cudaMemcpyAsync(host.data(), ptr_, n_ * sizeof(bool), cudaMemcpyDeviceToHost, sr_.cuda_stream));
-      sr_.wait();
-      return host;
-    } else {
-      std::vector<T> host(n_);
-      CHECK_CUDA(cudaMemcpyAsync(host.data(), ptr_, n_ * sizeof(T), cudaMemcpyDeviceToHost, sr_.cuda_stream));
-      sr_.wait();
-      return host;
-    }
+    using element = std::conditional_t<std::is_same_v<T, bool>, uint8_t, T>;
+    std::vector<element> host(n_);
+    sr_.copy_to_host_bytes(host.data(), ptr_, n_ * sizeof(T));
+    sr_.wait();
+    return host;
   }
 
-  // Blocking host-to-device refresh of an existing buffer (non-bool only).
+  // Blocking refresh of an existing buffer (non-bool only).
   void from_host(const std::vector<T>& host)
   {
     static_assert(!std::is_same_v<T, bool>, "use the upload constructor for bool buffers");
-    CHECK_CUDA(cudaMemcpyAsync(ptr_, host.data(), host.size() * sizeof(T), cudaMemcpyHostToDevice, sr_.cuda_stream));
+    sr_.copy_from_host_bytes(ptr_, host.data(), host.size() * sizeof(T));
+    sr_.wait();
+  }
+
+  // Sets every byte to @p value — the neutral stand-in for a device memset,
+  // used to poison an output buffer before the code under test fills it.
+  void fill_bytes(int value)
+  {
+    const std::vector<uint8_t> bytes(n_ * sizeof(T), static_cast<uint8_t>(value));
+    sr_.copy_from_host_bytes(ptr_, bytes.data(), bytes.size());
     sr_.wait();
   }
 
@@ -79,7 +81,7 @@ class device_buffer {
 
 // Allocates required_work_size() bytes, binds them to @p conv, and frees them on
 // scope exit. Every convolve_ctx in a test goes through this, so a plan can
-// never execute with an unbound cuFFT work area (a recurring bug in tests: see
+// never execute with an unbound work area (a recurring bug in tests: see
 // commits b0bfdca and 65addc8).
 class scoped_work_area {
  public:

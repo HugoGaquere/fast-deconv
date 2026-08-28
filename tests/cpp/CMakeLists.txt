@@ -1,34 +1,30 @@
 find_package(GTest CONFIG REQUIRED)
 
 #-------------------------------------------------------------------#
-# Unit tests (label UNIT): fast, one module per file, CPU oracles.
+# Unit tests (label UNIT). The sources are backend-agnostic: every
+# transfer goes through core::exec_ctx's neutral primitives, so the
+# same files compile for both backends.
+#
+# They only PASS on cuda — each host kernel is still a stub that throws
+# "host backend not implemented yet", so on host the ones that drive a
+# kernel fail until it lands.
 #-------------------------------------------------------------------#
-set(FAST_DECONV_UNIT_TEST_SOURCES
+add_executable(fast_deconv_unit_tests
   test_convergence.cpp
+  test_resources.cpp
+  test_fft.cpp
+  test_linalg.cpp
+  test_pseudo_inverse.cpp
+  test_matrix.cpp
+  test_morphology.cpp
+  test_mask.cpp
+  test_tiled_argmax.cpp
+  test_clean.cpp
+  test_gain.cpp
+  test_multi_frequency.cpp
+  test_scales.cpp
+  test_ddmsc_class.cpp
 )
-
-# The rest drive device kernels through CUDA-only helpers, so they build only
-# for the cuda backend. Port them alongside whichever host kernels land first.
-if(FAST_DECONV_WITH_CUDA)
-  list(APPEND FAST_DECONV_UNIT_TEST_SOURCES
-    test_resources.cu
-    test_utils.cu
-    test_fft.cu
-    test_linalg.cu
-    test_pseudo_inverse.cu
-    test_matrix.cu
-    test_morphology.cu
-    test_mask.cu
-    test_tiled_argmax.cu
-    test_clean.cu
-    test_gain.cu
-    test_multi_frequency.cu
-    test_scales.cu
-    test_ddmsc_class.cu
-  )
-endif()
-
-add_executable(fast_deconv_unit_tests ${FAST_DECONV_UNIT_TEST_SOURCES})
 
 target_link_libraries(fast_deconv_unit_tests PRIVATE
   fast_deconv
@@ -45,6 +41,7 @@ gtest_discover_tests(fast_deconv_unit_tests PROPERTIES LABELS "UNIT")
 #-------------------------------------------------------------------#
 # Non-regression test (label NONREG): full synthetic DDMSC run whose
 # scalar metrics are compared against a committed JSON baseline.
+# Still cuda-only: not ported alongside the rest.
 # Regenerate the baseline with FAST_DECONV_UPDATE_BASELINE=1.
 #-------------------------------------------------------------------#
 if(FAST_DECONV_WITH_CUDA)

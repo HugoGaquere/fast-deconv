@@ -86,16 +86,6 @@ inline float masked_max(const std::vector<float>& data, const std::vector<uint8_
   return best;
 }
 
-// First-seen argmax (strict >), no mask; matches deterministic device
-// implementations that tie-break on the smaller index.
-inline std::pair<float, int> cpu_argmax(const std::vector<float>& img)
-{
-  int best = 0;
-  for (int i = 1; i < static_cast<int>(img.size()); ++i)
-    if (img.at(i) > img.at(best)) best = i;
-  return {img.at(best), best};
-}
-
 // sqrt(max(E[x^2] - E[x]^2, 0)) over ALL pixels — the matrix::stats_ctx::run
 // rms definition (its mask applies to the max only).
 inline float std_all(const std::vector<float>& data)
@@ -106,25 +96,6 @@ inline float std_all(const std::vector<float>& data)
     sum_sq += static_cast<double>(v) * v;
   }
   const double n = static_cast<double>(data.size());
-  const double var = sum_sq / n - (sum / n) * (sum / n);
-  return static_cast<float>(std::sqrt(var > 0.0 ? var : 0.0));
-}
-
-// Same statistic restricted to pixels where mask == 0 — the matrix::rms
-// definition. Returns 0 when every pixel is masked.
-inline float std_unmasked(const std::vector<float>& data, const std::vector<uint8_t>& mask)
-{
-  double sum = 0.0, sum_sq = 0.0;
-  std::size_t count = 0;
-  for (std::size_t i = 0; i < data.size(); ++i) {
-    if (mask.at(i)) continue;
-    const double v = data.at(i);
-    sum += v;
-    sum_sq += v * v;
-    ++count;
-  }
-  if (count == 0) return 0.0f;
-  const double n = static_cast<double>(count);
   const double var = sum_sq / n - (sum / n) * (sum / n);
   return static_cast<float>(std::sqrt(var > 0.0 ? var : 0.0));
 }

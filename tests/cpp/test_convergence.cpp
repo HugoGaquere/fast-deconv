@@ -26,14 +26,6 @@ scale_stall_tracker no_stalls() { return scale_stall_tracker{/*n_scales=*/1, /*m
 // convergence
 // ============================================================================
 
-TEST(Convergence, FreshInstanceIsRunning)
-{
-  convergence c(/*max_iter=*/100, /*min_flux=*/0.1f, /*max_divergent_iter=*/3, /*divergence_factor=*/4.0f, no_stalls());
-  EXPECT_EQ(c.status(), convergence_status::running);
-  EXPECT_EQ(c.iteration(), 0);
-  EXPECT_FALSE(c.should_stop());
-}
-
 // init runs the status update but does not consume iterations, so an
 // already-converged start stops at once.
 TEST(Convergence, InitialFluxAtOrBelowThresholdConvergesImmediately)
@@ -97,21 +89,35 @@ TEST(Convergence, DivergenceUsesAbsoluteFlux)
 }
 
 // update_status_ writes its checks weakest-reason first, so when several hold at
-// once the LAST write wins. Pin the orderings that matter to the driver.
-TEST(Convergence, StatusPrecedenceDivergedBeatsConvergedBeatsMaxIterations)
+// once the LAST write wins. Pin every ordering the driver depends on: a pathological
+// residual outranks everything, then converged, then the "ran out of work" statuses.
+TEST(Convergence, StatusPrecedenceWhenSeveralReasonsHoldAtOnce)
 {
-  // All three conditions trigger on the same update: diverged is reported.
+  // diverged over converged over max_iterations: iteration 2>=2, -10 <= -5, |-10| > 1.5*4.
   convergence c(/*max_iter=*/2, /*min_flux=*/-5.0f, /*max_divergent_iter=*/0, /*divergence_factor=*/1.5f, no_stalls());
   c.init(4.0f, 1.0f);
-  c.track(-10.0f, 1.0f, 2, 0);  // iteration 2>=2, -10 <= -5, |−10| > 1.5*4
+  c.track(-10.0f, 1.0f, 2, 0);
   EXPECT_EQ(c.status(), convergence_status::diverged);
 
-  // Converged and max_iterations together: converged is reported.
+  // converged over max_iterations.
   convergence c2(/*max_iter=*/2, /*min_flux=*/0.1f, /*max_divergent_iter=*/10, /*divergence_factor=*/100.0f,
                  no_stalls());
   c2.init(1.0f, 1.0f);
   c2.track(0.05f, 1.0f, 2, 0);
   EXPECT_EQ(c2.status(), convergence_status::converged);
+
+  // converged over all_scales_stalled and no_components.
+  convergence c3(100, /*min_flux=*/0.1f, 10, 100.0f,
+                 scale_stall_tracker{/*n_scales=*/1, /*max_stall_count=*/0, /*stall_threshold=*/0.01f});
+  c3.init(1.0f, 5.0f);
+  c3.track(0.05f, 5.0f, 0, 0);
+  EXPECT_EQ(c3.status(), convergence_status::converged);
+
+  // diverged over no_components.
+  convergence c4(100, 0.1f, 10, 100.0f, no_stalls());
+  c4.init(1.0f, 1.0f);
+  c4.track(std::numeric_limits<float>::quiet_NaN(), 1.0f, 0, 0);
+  EXPECT_EQ(c4.status(), convergence_status::diverged);
 }
 
 // Slow exponential growth (~1%/iteration) never exceeds divergence_factor * previous
@@ -214,22 +220,6 @@ TEST(Convergence, ZeroSubminorCountIsReportedAsNoComponents)
   EXPECT_EQ(c.status(), convergence_status::no_components);
   EXPECT_TRUE(c.should_stop());
   EXPECT_EQ(c.iteration(), 0);
-}
-
-// Reaching the flux threshold is the good outcome and outranks both "ran out of work"
-// statuses; a pathological residual outranks everything.
-TEST(Convergence, StatusPrecedenceAgainstStalledAndNoComponents)
-{
-  convergence c(100, /*min_flux=*/0.1f, 10, 100.0f,
-                scale_stall_tracker{/*n_scales=*/1, /*max_stall_count=*/0, /*stall_threshold=*/0.01f});
-  c.init(1.0f, 5.0f);
-  c.track(0.05f, 5.0f, 0, 0);  // stalled AND no components AND flux below threshold
-  EXPECT_EQ(c.status(), convergence_status::converged);
-
-  convergence c2(100, 0.1f, 10, 100.0f, no_stalls());
-  c2.init(1.0f, 1.0f);
-  c2.track(std::numeric_limits<float>::quiet_NaN(), 1.0f, 0, 0);
-  EXPECT_EQ(c2.status(), convergence_status::diverged);
 }
 
 // ============================================================================

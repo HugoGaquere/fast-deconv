@@ -66,11 +66,11 @@ int scale_selection(const core::exec_ctx& stream_res, core::span3d<float> scaled
  *                            shape (n_facets, psf_h, psf_w), pre-allocated.
  */
 void convolve_psfs_with_scale_async(const linalg::convolve_ctx& conv, core::span4d<float> psfs,
-                                    core::span1d<float> d_sigma, int scale_idx, core::span1d<float> weights,
+                                    core::span1d<float> d_sigma, int scale_idx, core::span1d<const float> weights,
                                     core::span4d<float> out_conv_psf, core::span3d<float> out_conv2_mean);
 
 void convolve_psfs_with_scales_async(const linalg::convolve_ctx& conv, core::span4d<float> psfs,
-                                     core::span1d<float> d_sigmas, core::span1d<float> weights,
+                                     core::span1d<float> d_sigmas, core::span1d<const float> weights,
                                      core::span5d<float> out_conv_psf, core::span4d<float> out_conv2_mean);
 
 }  // namespace fast_deconv::scale

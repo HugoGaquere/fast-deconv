@@ -1,12 +1,11 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <fast_deconv/linalg/fft.hpp>
 #include <utility>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 #include "helpers/host_oracles.hpp"
 
 namespace linalg = fast_deconv::linalg;
@@ -99,7 +98,7 @@ std::vector<float> iota_image(int n, float offset = 0.0f)
 
 }  // namespace
 
-class FftLayout : public fdtest::GpuTest {};
+class FftLayout : public fdtest::BackendTest {};
 
 TEST_F(FftLayout, PadIfftshiftMatchesHostOracle)
 {

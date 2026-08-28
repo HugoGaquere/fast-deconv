@@ -1,4 +1,3 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <fast_deconv/core/memory_types.hpp>
@@ -6,8 +5,8 @@
 #include <random>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
 
@@ -15,7 +14,7 @@ namespace core = fast_deconv::core;
 namespace linalg = fast_deconv::linalg;
 namespace fdtest = fast_deconv::test;
 
-class WeightedSum : public fdtest::GpuTest {};
+class WeightedSum : public fdtest::BackendTest {};
 
 // out[i] = sum_f w[f] * A[f, i]. Weights deliberately do NOT sum to 1, so an
 // accidental normalization inside the kernel would show up.
@@ -54,9 +53,9 @@ TEST_F(WeightedSum, MdspanOverloadOnNonSquareImage)
   fdtest::device_buffer<float> d_w(sr, weights);
   fdtest::device_buffer<float> d_out(sr, static_cast<std::size_t>(npix));
 
-  core::device_span3d<float> a_view(d_a.get(), n_freq, nrow, ncol);
+  core::span3d<float> a_view(d_a.get(), n_freq, nrow, ncol);
   core::span1d<float> w_view(d_w.get(), n_freq);
-  core::device_span2d<float> out_view(d_out.get(), nrow, ncol);
+  core::span2d<float> out_view(d_out.get(), nrow, ncol);
 
   linalg::weighted_sum_async(sr, a_view, w_view, out_view);
   sr.wait();

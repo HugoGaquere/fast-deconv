@@ -1,4 +1,3 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <fast_deconv/algorithm/ddmsc.hpp>
@@ -9,8 +8,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 
 namespace core = fast_deconv::core;
 namespace ddmsc = fast_deconv::algorithm::ddmsc;
@@ -19,7 +18,7 @@ namespace fdtest = fast_deconv::test;
 // Minimal but real construction scene: the pool, both streams and the cuFFT
 // plans are built on the first run(), so this is a GPU fixture. All spans are
 // stored as views by the class — the backing buffers live in the fixture.
-class DdmscClass : public fdtest::GpuTest {
+class DdmscClass : public fdtest::BackendTest {
  protected:
   static constexpr int kFacets = 1;
   static constexpr int kFreq = 2;
@@ -29,9 +28,6 @@ class DdmscClass : public fdtest::GpuTest {
 
   void SetUp() override
   {
-    fdtest::GpuTest::SetUp();
-    if (IsSkipped()) return;
-
     psfs_.assign(kFacets * kFreq * kSize * kSize, 0.0f);
     for (int f = 0; f < kFreq; ++f) psfs_.at(f * kSize * kSize + (kSize / 2) * kSize + kSize / 2) = 1.0f;
 
@@ -83,7 +79,7 @@ TEST_F(DdmscClass, AddCoeffsFromDeviceSlicesRows)
 
   const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_coeffs(sr, coeffs);
-  core::device_span2d<float> view(d_coeffs.get(), n_components, n_order);
+  core::span2d<float> view(d_coeffs.get(), n_components, n_order);
 
   ddmsc::ddmsc_result result(/*max_iter=*/10, n_order);
   result.add_coeffs_from_device(sr, view);

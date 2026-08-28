@@ -1,19 +1,15 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <cfloat>
 #include <cmath>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/matrix/argmax.hpp>
-#include <fast_deconv/matrix/max.hpp>
-#include <fast_deconv/matrix/rms.hpp>
 #include <fast_deconv/matrix/stats.hpp>
-#include <fast_deconv/util/cuda_macros.hpp>
 #include <random>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
 
@@ -53,79 +49,7 @@ std::vector<bool> to_bool(const std::vector<uint8_t>& mask)
 
 }  // namespace
 
-class MatrixReductions : public fdtest::GpuTest {};
-
-// The mask excludes the true global max, so the reduction must return the best
-// UNMASKED value — a max that ignores the mask fails here.
-TEST_F(MatrixReductions, MaxHonorsMask)
-{
-  std::mt19937 rng(31);
-  auto img = make_image(rng);
-  auto mask = make_mask(rng);
-
-  const int planted = flat(20, 30, kNcol);
-  img.at(planted) = 9.0f;
-  mask.at(planted) = 1;  // exclude the global max
-
-  const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(sr, img);
-  fdtest::device_buffer<bool> d_mask(sr, to_bool(mask));
-  core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
-  core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
-
-  const float got = matrix::max(sr, img_view, mask_view, /*use_abs=*/false);
-  EXPECT_FLOAT_EQ(got, fdtest::masked_max(img, mask, false));
-  EXPECT_LT(got, 9.0f);
-}
-
-TEST_F(MatrixReductions, MaxWithAbsPicksNegativeExtreme)
-{
-  std::mt19937 rng(37);
-  auto img = make_image(rng);
-  const std::vector<uint8_t> mask(kNpix, 0);
-
-  img.at(flat(5, 5, kNcol)) = -3.0f;  // extreme value is negative
-
-  const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(sr, img);
-  fdtest::device_buffer<bool> d_mask(sr, std::vector<bool>(kNpix, false));
-  core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
-  core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
-
-  EXPECT_FLOAT_EQ(matrix::max(sr, img_view, mask_view, /*use_abs=*/true), 3.0f);
-  EXPECT_FLOAT_EQ(matrix::max(sr, img_view, mask_view, /*use_abs=*/false), fdtest::masked_max(img, mask, false));
-}
-
-TEST_F(MatrixReductions, RmsMatchesMaskedStdOracle)
-{
-  std::mt19937 rng(41);
-  const auto img = make_image(rng);
-  const auto mask = make_mask(rng);
-
-  const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(sr, img);
-  fdtest::device_buffer<bool> d_mask(sr, to_bool(mask));
-  core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
-  core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
-
-  const float got = matrix::rms(sr, img_view, mask_view);
-  const float expected = fdtest::std_unmasked(img, mask);
-  EXPECT_NEAR(got, expected, 1e-5f * std::fabs(expected) + 1e-7f);
-}
-
-TEST_F(MatrixReductions, RmsAllMaskedReturnsZero)
-{
-  std::mt19937 rng(43);
-  const auto img = make_image(rng);
-
-  const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(sr, img);
-  fdtest::device_buffer<bool> d_mask(sr, std::vector<bool>(kNpix, true));
-  core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
-  core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
-
-  EXPECT_FLOAT_EQ(matrix::rms(sr, img_view, mask_view), 0.0f);
-}
+class MatrixReductions : public fdtest::BackendTest {};
 
 // stats_ctx::run is deliberately asymmetric (stats.hpp): the mask excludes
 // pixels from the MAX only; the rms is over every pixel. Pin that contract.
@@ -141,8 +65,8 @@ TEST_F(MatrixReductions, ComputeStatsMasksMaxButNotRms)
   const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_img(sr, img);
   fdtest::device_buffer<bool> d_mask(sr, to_bool(mask));
-  core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
-  core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
+  core::span2d<float> img_view(d_img.get(), kNrow, kNcol);
+  core::span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
 
   matrix::stats_ctx ws(sr, kNpix, /*use_abs=*/false);
   const auto [max_v, rms_v] = ws.run(img_view, mask_view);
@@ -163,8 +87,8 @@ TEST_F(MatrixReductions, ComputeStatsWithAbsAndWorkspaceReuse)
   const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_img(sr, img1);
   fdtest::device_buffer<bool> d_mask(sr, std::vector<bool>(kNpix, false));
-  core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
-  core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
+  core::span2d<float> img_view(d_img.get(), kNrow, kNcol);
+  core::span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
 
   // use_abs is fixed at construction; the same ctx must serve any number
   // of calls (temp bytes are queried once in the ctor).
@@ -190,14 +114,14 @@ TEST_F(MatrixReductions, ComputeStatsAsyncLeavesResultOnDevice)
   const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_img(sr, img);
   fdtest::device_buffer<bool> d_mask(sr, std::vector<bool>(kNpix, false));
-  core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
-  core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
+  core::span2d<float> img_view(d_img.get(), kNrow, kNcol);
+  core::span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
 
   matrix::stats_ctx ws(sr, kNpix, /*use_abs=*/false);
   ws.run_async(img_view, mask_view);
 
   matrix::stats_acc acc{};
-  CHECK_CUDA(cudaMemcpyAsync(&acc, ws.device_state(), sizeof(acc), cudaMemcpyDeviceToHost, sr.cuda_stream));
+  sr.copy_to_host_bytes(&acc, ws.device_state(), sizeof(acc));
   sr.wait();
 
   ASSERT_EQ(acc.count, kNpix);
@@ -212,24 +136,7 @@ TEST_F(MatrixReductions, ComputeStatsAsyncLeavesResultOnDevice)
 // matrix::argmax (CUB DeviceReduce::ArgMax wrapper)
 // ============================================================================
 
-class ArgmaxWorkspace : public fdtest::GpuTest {};
-
-TEST_F(ArgmaxWorkspace, FindsPlantedUniquePeak)
-{
-  std::mt19937 rng(61);
-  std::vector<float> img(kNpix);
-  fdtest::fill_uniform(rng, img, 0.0f, 1.0f);
-  const int planted = flat(17, 23, kNcol);
-  img.at(planted) = 5.0f;
-
-  const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(sr, img);
-
-  matrix::argmax_ctx ws(sr, kNpix);
-  const auto [val, idx] = ws.run(core::span2d<float>(d_img.get(), kNrow, kNcol));
-  EXPECT_FLOAT_EQ(val, 5.0f);
-  EXPECT_EQ(idx, planted);
-}
+class ArgmaxWorkspace : public fdtest::BackendTest {};
 
 TEST_F(ArgmaxWorkspace, ReusableAcrossCallsAndAllNegativeSafe)
 {

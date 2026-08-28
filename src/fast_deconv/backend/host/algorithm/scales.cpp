@@ -11,8 +11,8 @@ namespace {
 }
 }  // namespace
 
-void make_gaussian_kernels_async(const core::exec_ctx& /*ctx*/, core::span1d<float> /*sigmas*/,
-                                 int /*scale_ncol_full*/, core::span3d<float> /*scales*/)
+void make_gaussian_kernels_async(const core::exec_ctx& /*ctx*/, core::span1d<float> /*sigmas*/, int /*scale_ncol_full*/,
+                                 core::span3d<float> /*scales*/)
 {
   not_implemented("scale::make_gaussian_kernels_async");
 }
@@ -31,14 +31,14 @@ int scale_selection(const core::exec_ctx& /*ctx*/, core::span3d<float> /*scaled_
 
 void convolve_psfs_with_scale_async(const linalg::convolve_ctx& /*conv*/, core::span4d<float> /*psfs*/,
                                     core::span1d<float> /*d_sigma*/, int /*scale_idx*/,
-                                    core::span1d<float> /*weights*/, core::span4d<float> /*out_conv_psf*/,
+                                    core::span1d<const float> /*weights*/, core::span4d<float> /*out_conv_psf*/,
                                     core::span3d<float> /*out_conv2_mean*/)
 {
   not_implemented("scale::convolve_psfs_with_scale_async");
 }
 
 void convolve_psfs_with_scales_async(const linalg::convolve_ctx& /*conv*/, core::span4d<float> /*psfs*/,
-                                     core::span1d<float> /*d_sigmas*/, core::span1d<float> /*weights*/,
+                                     core::span1d<float> /*d_sigmas*/, core::span1d<const float> /*weights*/,
                                      core::span5d<float> /*out_conv_psf*/, core::span4d<float> /*out_conv2_mean*/)
 {
   not_implemented("scale::convolve_psfs_with_scales_async");
