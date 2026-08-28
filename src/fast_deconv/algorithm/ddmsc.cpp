@@ -32,19 +32,19 @@ Ddmsc::Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<f
 ddmsc_result Ddmsc::run(core::host_span3d<float>& dirty, const core::host_span3d<float>& jones_norm,
                         const core::host_span1d<float>& weights_freq)
 {
-  const core::exec_ctx& stream = ctx_.state().compute_stream;
+  const core::exec_ctx& ctx = ctx_.state().compute_stream;
 
-  // Copy the per-call inputs host->device.
-  auto d_dirty = stream.upload(dirty);
-  auto d_jones = stream.upload(jones_norm);
-  auto d_weights = stream.upload(weights_freq);
+  // Stage the per-call inputs into backend memory; a host backend borrows them.
+  auto d_dirty = ctx.stage(dirty);
+  auto d_jones = ctx.stage(jones_norm);
+  auto d_weights = ctx.stage(weights_freq);
 
   core::span3d<float> dirty_view = d_dirty;
   ddmsc_result result = run_ddmsc_cycles(ctx_, params_, dirty_view, d_jones, d_weights);
 
-  // Copy the mutated residual back into the caller's host buffer (in/out).
-  stream.download(d_dirty, dirty.data_handle());
-  stream.wait();
+  // Bring the mutated residual back into the caller's host buffer (in/out).
+  ctx.unstage(d_dirty, dirty.data_handle());
+  ctx.wait();
   return result;
 }
 

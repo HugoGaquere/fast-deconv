@@ -26,6 +26,9 @@ class exec_ctx_impl {
   /// Matches the alignment device allocations give the vectorized paths.
   static constexpr std::align_val_t alignment{64};
 
+  /// Backend memory is host memory, so stage() can borrow instead of copying.
+  static constexpr bool host_resident = true;
+
   explicit exec_ctx_impl(const exec_resources_impl& /*res*/) {}
 
   exec_ctx_impl(const exec_ctx_impl&) = delete;
