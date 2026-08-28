@@ -1,17 +1,9 @@
 find_package(GTest CONFIG REQUIRED)
 
-# Mark GTest targets as SYSTEM so clangd doesn't surface their warnings.
-foreach(_tp_target IN ITEMS GTest::gtest GTest::gtest_main GTest::gmock GTest::gmock_main)
-  if(TARGET ${_tp_target})
-    set_target_properties(${_tp_target} PROPERTIES SYSTEM TRUE)
-  endif()
-endforeach()
-
 #-------------------------------------------------------------------#
 # Unit tests (label UNIT): fast, one module per file, CPU oracles.
 #-------------------------------------------------------------------#
 set(FAST_DECONV_UNIT_TEST_SOURCES
-  test_main.cpp
   test_convergence.cpp
 )
 
@@ -40,7 +32,7 @@ add_executable(fast_deconv_unit_tests ${FAST_DECONV_UNIT_TEST_SOURCES})
 
 target_link_libraries(fast_deconv_unit_tests PRIVATE
   fast_deconv
-  GTest::gtest
+  GTest::gtest_main
 )
 
 target_include_directories(fast_deconv_unit_tests PRIVATE
@@ -59,13 +51,12 @@ if(FAST_DECONV_WITH_CUDA)
   find_package(nlohmann_json CONFIG REQUIRED)
 
   add_executable(fast_deconv_nonreg_tests
-    test_main.cpp
     test_ddmsc_nonreg.cu
   )
 
   target_link_libraries(fast_deconv_nonreg_tests PRIVATE
     fast_deconv
-    GTest::gtest
+    GTest::gtest_main
     nlohmann_json::nlohmann_json
   )
 

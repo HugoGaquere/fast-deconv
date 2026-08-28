@@ -4,6 +4,7 @@
 #include <cmath>
 #include <fast_deconv/common/multi_frequency.hpp>
 #include <fast_deconv/core/memory_types.hpp>
+#include <random>
 #include <utility>
 #include <vector>
 
@@ -137,6 +138,58 @@ std::vector<double> host_fit_min_norm(const std::vector<double>& xdes, const std
   return theta;
 }
 
+// ---- Scene construction. Every test below plants per-band values @p y at one
+// pixel of an otherwise-@p background image and pairs them with a design matrix.
+
+struct scene {
+  std::vector<double> xdes_d;  // [n_freq, n_order], double copy for the oracles
+  std::vector<float> xdes;
+  std::vector<float> dirty;  // [n_freq, kNpix]
+};
+
+// Design columns {1, log_nu}: the 2-term log-polynomial model.
+std::vector<double> log_design(const std::vector<double>& log_nu)
+{
+  std::vector<double> xdes;
+  for (const double l : log_nu) {
+    xdes.push_back(1.0);
+    xdes.push_back(l);
+  }
+  return xdes;
+}
+
+// Design columns (nu/nu0)^o, o = 0..n_order-1: the power-series model.
+std::vector<double> power_design(const std::vector<double>& nu, double nu0, int n_order)
+{
+  std::vector<double> xdes;
+  for (const double f : nu)
+    for (int o = 0; o < n_order; ++o) xdes.push_back(std::pow(f / nu0, o));
+  return xdes;
+}
+
+scene make_scene(std::vector<double> xdes_d, const std::vector<double>& y, std::pair<int, int> peak,
+                 float background = 0.0f)
+{
+  const int n_freq = static_cast<int>(y.size());
+  scene sc;
+  sc.xdes_d = std::move(xdes_d);
+  sc.xdes.assign(sc.xdes_d.begin(), sc.xdes_d.end());
+  sc.dirty.assign(static_cast<std::size_t>(n_freq) * kNpix, background);
+  for (int f = 0; f < n_freq; ++f)
+    sc.dirty.at(f * kNpix + flat(peak.first, peak.second, kNcol)) = static_cast<float>(y.at(f));
+  return sc;
+}
+
+std::vector<float> to_float(const std::vector<double>& v) { return {v.begin(), v.end()}; }
+
+template <typename T>
+double band_weighted_mean(const std::vector<double>& w, const std::vector<T>& v)
+{
+  double acc = 0.0;
+  for (std::size_t f = 0; f < w.size(); ++f) acc += w.at(f) * v.at(f);
+  return acc;
+}
+
 }  // namespace
 
 class FitCoefficients : public fdtest::GpuTest {
@@ -155,12 +208,12 @@ class FitCoefficients : public fdtest::GpuTest {
       for (int i = 0; i < kNpix; ++i) jn_image.at(f * kNpix + i) = jn.at(f);
 
     const auto sr = res().make_ctx();
-    fdtest::device_buffer<float> d_dirty(res(), sr, dirty);
-    fdtest::device_buffer<float> d_jn(res(), sr, jn_image);
-    fdtest::device_buffer<float> d_w(res(), sr, weights);
-    fdtest::device_buffer<float> d_xdes(res(), sr, xdes);
-    fdtest::device_buffer<float> d_compact(res(), sr, static_cast<std::size_t>(n_order));
-    fdtest::device_buffer<float> d_per_chan(res(), sr, static_cast<std::size_t>(n_freq));
+    fdtest::device_buffer<float> d_dirty(sr, dirty);
+    fdtest::device_buffer<float> d_jn(sr, jn_image);
+    fdtest::device_buffer<float> d_w(sr, weights);
+    fdtest::device_buffer<float> d_xdes(sr, xdes);
+    fdtest::device_buffer<float> d_compact(sr, static_cast<std::size_t>(n_order));
+    fdtest::device_buffer<float> d_per_chan(sr, static_cast<std::size_t>(n_freq));
 
     core::device_span3d<float> dirty_view(d_dirty.get(), n_freq, kNrow, kNcol);
     core::device_span3d<float> jn_view(d_jn.get(), n_freq, kNrow, kNcol);
@@ -174,6 +227,13 @@ class FitCoefficients : public fdtest::GpuTest {
 
     return {d_compact.to_host(), d_per_chan.to_host()};
   }
+
+  // Same relative tolerance everywhere: the device solve runs in double.
+  void expect_matches(const std::vector<float>& got, const std::vector<double>& expected, const char* what)
+  {
+    for (std::size_t i = 0; i < expected.size(); ++i)
+      EXPECT_NEAR(got.at(i), expected.at(i), 1e-3 * std::abs(expected.at(i)) + 1e-4) << what << " " << i;
+  }
 };
 
 // With unit jones/weights and dirty[f, peak] = xdes[f, :] @ alpha, the fit is
@@ -181,59 +241,34 @@ class FitCoefficients : public fdtest::GpuTest {
 // the peak values.
 TEST_F(FitCoefficients, RecoversExactCoefficientsWithUnitWeights)
 {
-  const int n_freq = 4;
   const std::vector<double> log_nu = {0.0, 0.1, 0.2, 0.3};
   const std::vector<double> alpha = {2.5, -1.2};
+  std::vector<double> y;
+  for (const double l : log_nu) y.push_back(alpha.at(0) + l * alpha.at(1));
 
-  std::vector<float> xdes(n_freq * kOrder);
-  std::vector<float> dirty(n_freq * kNpix, 0.0f);
-  const std::pair<int, int> peak{2, 3};
-  for (int f = 0; f < n_freq; ++f) {
-    xdes.at(f * kOrder + 0) = 1.0f;
-    xdes.at(f * kOrder + 1) = static_cast<float>(log_nu.at(f));
-    dirty.at(f * kNpix + flat(peak.first, peak.second, kNcol)) =
-        static_cast<float>(alpha.at(0) + log_nu.at(f) * alpha.at(1));
-  }
-
+  const auto sc = make_scene(log_design(log_nu), y, {2, 3});
+  const int n_freq = static_cast<int>(y.size());
   const auto [compact, per_chan] =
-      run(xdes, std::vector<float>(n_freq, 1.0f), std::vector<float>(n_freq, 1.0f), dirty, peak);
+      run(sc.xdes, std::vector<float>(n_freq, 1.0f), std::vector<float>(n_freq, 1.0f), sc.dirty, {2, 3});
 
-  EXPECT_NEAR(compact.at(0), alpha.at(0), 1e-3f);
-  EXPECT_NEAR(compact.at(1), alpha.at(1), 1e-3f);
-  for (int f = 0; f < n_freq; ++f)
-    EXPECT_NEAR(per_chan.at(f), dirty.at(f * kNpix + flat(peak.first, peak.second, kNcol)), 1e-3f) << "freq " << f;
+  expect_matches(compact, alpha, "order");
+  expect_matches(per_chan, y, "freq");
 }
 
 TEST_F(FitCoefficients, WeightedJonesFitMatchesHostLeastSquares)
 {
-  const int n_freq = 4;
   const std::vector<double> log_nu = {0.0, 0.1, 0.2, 0.3};
   const std::vector<double> jn = {1.0, 1.2, 0.9, 1.1};
   const std::vector<double> w = {0.5, 1.0, 0.75, 1.25};
-  const std::vector<double> y = {3.1, 2.7, 2.9, 2.4};  // peak values, deliberately not an exact model fit
+  const std::vector<double> y = {3.1, 2.7, 2.9, 2.4};  // deliberately not an exact model fit
 
-  std::vector<double> xdes_d(n_freq * kOrder);
-  std::vector<float> xdes(n_freq * kOrder);
-  std::vector<float> dirty(n_freq * kNpix, 0.1f);
   const std::pair<int, int> peak{4, 6};  // bottom-right corner pixel
-  for (int f = 0; f < n_freq; ++f) {
-    xdes_d.at(f * kOrder + 0) = 1.0;
-    xdes_d.at(f * kOrder + 1) = log_nu.at(f);
-    xdes.at(f * kOrder + 0) = 1.0f;
-    xdes.at(f * kOrder + 1) = static_cast<float>(log_nu.at(f));
-    dirty.at(f * kNpix + flat(peak.first, peak.second, kNcol)) = static_cast<float>(y.at(f));
-  }
+  const auto sc = make_scene(log_design(log_nu), y, peak, /*background=*/0.1f);
+  const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak);
+  const auto expected = host_fit(sc.xdes_d, jn, w, y, kOrder);
 
-  const std::vector<float> jn_f(jn.begin(), jn.end());
-  const std::vector<float> w_f(w.begin(), w.end());
-  const auto [compact, per_chan] = run(xdes, jn_f, w_f, dirty, peak);
-  const auto expected = host_fit(xdes_d, jn, w, y, kOrder);
-
-  for (int o = 0; o < kOrder; ++o)
-    EXPECT_NEAR(compact.at(o), expected.compact.at(o), 1e-3 * std::abs(expected.compact.at(o)) + 1e-4) << "order " << o;
-  for (int f = 0; f < n_freq; ++f)
-    EXPECT_NEAR(per_chan.at(f), expected.per_chan.at(f), 1e-3 * std::abs(expected.per_chan.at(f)) + 1e-4)
-        << "freq " << f;
+  expect_matches(compact, expected.compact, "order");
+  expect_matches(per_chan, expected.per_chan, "freq");
 }
 
 TEST_F(FitCoefficients, OverdeterminedNoisyFitMatchesHostLeastSquares)
@@ -243,29 +278,18 @@ TEST_F(FitCoefficients, OverdeterminedNoisyFitMatchesHostLeastSquares)
   const std::vector<double> alpha = {1.8, -0.9};
 
   std::mt19937 rng(101);
-  std::vector<double> y(n_freq);
-  std::vector<double> xdes_d(n_freq * kOrder);
-  std::vector<float> xdes(n_freq * kOrder);
-  std::vector<float> dirty(n_freq * kNpix, 0.0f);
+  std::vector<double> y;
+  for (const double l : log_nu) y.push_back(alpha.at(0) + l * alpha.at(1) + 0.05 * fdtest::normal01(rng));
+
   const std::pair<int, int> peak{0, 0};  // top-left corner pixel
-  for (int f = 0; f < n_freq; ++f) {
-    y.at(f) = alpha.at(0) + log_nu.at(f) * alpha.at(1) + 0.05 * fdtest::normal01(rng);
-    xdes_d.at(f * kOrder + 0) = 1.0;
-    xdes_d.at(f * kOrder + 1) = log_nu.at(f);
-    xdes.at(f * kOrder + 0) = 1.0f;
-    xdes.at(f * kOrder + 1) = static_cast<float>(log_nu.at(f));
-    dirty.at(f * kNpix + flat(peak.first, peak.second, kNcol)) = static_cast<float>(y.at(f));
-  }
-
+  const auto sc = make_scene(log_design(log_nu), y, peak);
   const auto [compact, per_chan] =
-      run(xdes, std::vector<float>(n_freq, 1.0f), std::vector<float>(n_freq, 1.0f), dirty, peak);
-  const auto expected = host_fit(xdes_d, std::vector<double>(n_freq, 1.0), std::vector<double>(n_freq, 1.0), y, kOrder);
+      run(sc.xdes, std::vector<float>(n_freq, 1.0f), std::vector<float>(n_freq, 1.0f), sc.dirty, peak);
+  const auto expected =
+      host_fit(sc.xdes_d, std::vector<double>(n_freq, 1.0), std::vector<double>(n_freq, 1.0), y, kOrder);
 
-  for (int o = 0; o < kOrder; ++o)
-    EXPECT_NEAR(compact.at(o), expected.compact.at(o), 1e-3 * std::abs(expected.compact.at(o)) + 1e-4) << "order " << o;
-  for (int f = 0; f < n_freq; ++f)
-    EXPECT_NEAR(per_chan.at(f), expected.per_chan.at(f), 1e-3 * std::abs(expected.per_chan.at(f)) + 1e-4)
-        << "freq " << f;
+  expect_matches(compact, expected.compact, "order");
+  expect_matches(per_chan, expected.per_chan, "freq");
 }
 
 // The minor cycle subtracts gain * per_chan from the residual cube and books the
@@ -277,80 +301,39 @@ TEST_F(FitCoefficients, OverdeterminedNoisyFitMatchesHostLeastSquares)
 TEST_F(FitCoefficients, PreservesBandWeightedMeanAtSteepJones)
 {
   constexpr int kFitOrder = 3;
-  const int n_freq = 5;
   const std::vector<double> nu = {1090.0, 1285.0, 1480.0, 1675.0, 1870.0};
   const std::vector<double> jn = {6.0591e-02, 1.4545e-02, 1.7321e-03, 6.0919e-05, 9.3927e-06};
   const std::vector<double> w = {0.2, 0.2, 0.2, 0.2, 0.2};
   const std::vector<double> y = {0.02, -0.015, 0.01, -0.005, 0.002};
 
-  const double nu0 = 1480.0;
-  std::vector<double> xdes_d(n_freq * kFitOrder);
-  std::vector<float> xdes(n_freq * kFitOrder);
-  std::vector<float> dirty(n_freq * kNpix, 0.0f);
   const std::pair<int, int> peak{1, 2};
-  for (int f = 0; f < n_freq; ++f) {
-    for (int o = 0; o < kFitOrder; ++o) {
-      xdes_d.at(f * kFitOrder + o) = std::pow(nu.at(f) / nu0, o);
-      xdes.at(f * kFitOrder + o) = static_cast<float>(xdes_d.at(f * kFitOrder + o));
-    }
-    dirty.at(f * kNpix + flat(peak.first, peak.second, kNcol)) = static_cast<float>(y.at(f));
-  }
+  const auto sc = make_scene(power_design(nu, /*nu0=*/1480.0, kFitOrder), y, peak);
+  const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak, kFitOrder);
+  const auto expected = host_fit(sc.xdes_d, jn, w, y, kFitOrder);
 
-  const std::vector<float> jn_f(jn.begin(), jn.end());
-  const std::vector<float> w_f(w.begin(), w.end());
-  const auto [compact, per_chan] = run(xdes, jn_f, w_f, dirty, peak, kFitOrder);
-  const auto expected = host_fit(xdes_d, jn, w, y, kFitOrder);
-
-  double mean_model = 0.0;
-  double mean_data = 0.0;
-  for (int f = 0; f < n_freq; ++f) {
-    mean_model += w.at(f) * per_chan.at(f);
-    mean_data += w.at(f) * y.at(f);
-  }
-  EXPECT_NEAR(mean_model, mean_data, 1e-6) << "band-weighted mean not preserved: CLEAN bookkeeping would be wrong";
+  EXPECT_NEAR(band_weighted_mean(w, per_chan), band_weighted_mean(w, y), 1e-6)
+      << "band-weighted mean not preserved: CLEAN bookkeeping would be wrong";
 
   // Same tolerance as the well-conditioned cases: cond(G) ~ 3e5 here, which the
   // device solve absorbs because it runs in double.
-  for (int o = 0; o < kFitOrder; ++o)
-    EXPECT_NEAR(compact.at(o), expected.compact.at(o), 1e-3 * std::abs(expected.compact.at(o)) + 1e-4) << "order " << o;
-  for (int f = 0; f < n_freq; ++f)
-    EXPECT_NEAR(per_chan.at(f), expected.per_chan.at(f), 1e-3 * std::abs(expected.per_chan.at(f)) + 1e-4)
-        << "freq " << f;
+  expect_matches(compact, expected.compact, "order");
+  expect_matches(per_chan, expected.per_chan, "freq");
 }
 
 // Flat jones norms put the constant vector in the model span, so the constraint
 // is already satisfied and must not perturb the fit.
 TEST_F(FitCoefficients, ConstraintIsInactiveAtFlatJones)
 {
-  const int n_freq = 4;
   const std::vector<double> log_nu = {0.0, 0.1, 0.2, 0.3};
-  const std::vector<double> jn(n_freq, 1.0767);
+  const std::vector<double> jn(4, 1.0767);
   const std::vector<double> w = {0.25, 0.25, 0.25, 0.25};
   const std::vector<double> y = {3.1, 2.7, 2.9, 2.4};
 
-  std::vector<double> xdes_d(n_freq * kOrder);
-  std::vector<float> xdes(n_freq * kOrder);
-  std::vector<float> dirty(n_freq * kNpix, 0.0f);
   const std::pair<int, int> peak{3, 1};
-  for (int f = 0; f < n_freq; ++f) {
-    xdes_d.at(f * kOrder + 0) = 1.0;
-    xdes_d.at(f * kOrder + 1) = log_nu.at(f);
-    xdes.at(f * kOrder + 0) = 1.0f;
-    xdes.at(f * kOrder + 1) = static_cast<float>(log_nu.at(f));
-    dirty.at(f * kNpix + flat(peak.first, peak.second, kNcol)) = static_cast<float>(y.at(f));
-  }
+  const auto sc = make_scene(log_design(log_nu), y, peak);
+  const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak);
 
-  const std::vector<float> jn_f(jn.begin(), jn.end());
-  const std::vector<float> w_f(w.begin(), w.end());
-  const auto [compact, per_chan] = run(xdes, jn_f, w_f, dirty, peak);
-
-  double mean_model = 0.0;
-  double mean_data = 0.0;
-  for (int f = 0; f < n_freq; ++f) {
-    mean_model += w.at(f) * per_chan.at(f);
-    mean_data += w.at(f) * y.at(f);
-  }
-  EXPECT_NEAR(mean_model, mean_data, 1e-5);
+  EXPECT_NEAR(band_weighted_mean(w, per_chan), band_weighted_mean(w, y), 1e-5);
 }
 
 // Fewer bands than coefficients: SAX is 2x4, so SAX^T W SAX is 4x4 of rank 2 and the
@@ -361,37 +344,21 @@ TEST_F(FitCoefficients, ConstraintIsInactiveAtFlatJones)
 TEST_F(FitCoefficients, MinimumNormFitWhenFewerBandsThanOrder)
 {
   constexpr int kFitOrder = 4;
-  const int n_freq = 2;
   const std::vector<double> nu = {131.932e6, 155.370e6};
   const std::vector<double> jn = {0.9, 0.8};
   const std::vector<double> w = {0.5, 0.5};
   const std::vector<double> y = {0.0193, -0.0989};
 
-  const double nu0 = 143.650818e6;
-  std::vector<double> xdes_d(n_freq * kFitOrder);
-  std::vector<float> xdes(n_freq * kFitOrder);
-  std::vector<float> dirty(n_freq * kNpix, 0.0f);
   const std::pair<int, int> peak{2, 4};
-  for (int f = 0; f < n_freq; ++f) {
-    for (int o = 0; o < kFitOrder; ++o) {
-      xdes_d.at(f * kFitOrder + o) = std::pow(nu.at(f) / nu0, o);
-      xdes.at(f * kFitOrder + o) = static_cast<float>(xdes_d.at(f * kFitOrder + o));
-    }
-    dirty.at(f * kNpix + flat(peak.first, peak.second, kNcol)) = static_cast<float>(y.at(f));
-  }
-
-  const std::vector<float> jn_f(jn.begin(), jn.end());
-  const std::vector<float> w_f(w.begin(), w.end());
-  const auto [compact, per_chan] = run(xdes, jn_f, w_f, dirty, peak, kFitOrder);
-  const auto expected = host_fit_min_norm(xdes_d, jn, y, kFitOrder);
+  const auto sc = make_scene(power_design(nu, /*nu0=*/143.650818e6, kFitOrder), y, peak);
+  const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak, kFitOrder);
+  const auto expected = host_fit_min_norm(sc.xdes_d, jn, y, kFitOrder);
 
   // With at least as many coefficients as bands the fit interpolates every band, so the
   // band-weighted mean is preserved automatically and the constraint must not be applied.
-  for (int f = 0; f < n_freq; ++f)
+  for (std::size_t f = 0; f < y.size(); ++f)
     EXPECT_NEAR(per_chan.at(f), y.at(f), 1e-6) << "band " << f << " not reproduced exactly";
-
-  for (int o = 0; o < kFitOrder; ++o)
-    EXPECT_NEAR(compact.at(o), expected.at(o), 1e-3 * std::abs(expected.at(o)) + 1e-4) << "order " << o;
+  expect_matches(compact, expected, "order");
 
   // Guards the regression directly: inverting the singular Gram matrix reproduced the
   // bands just as exactly but returned coefficients of order 1e3 (the run's worst
@@ -407,31 +374,16 @@ TEST_F(FitCoefficients, MinimumNormFitWhenFewerBandsThanOrder)
 TEST_F(FitCoefficients, ExactFitAtSquareSystem)
 {
   constexpr int kFitOrder = 3;
-  const int n_freq = 3;
   const std::vector<double> nu = {120.0e6, 144.0e6, 168.0e6};
   const std::vector<double> jn = {0.7, 1.0, 0.6};
   const std::vector<double> w = {1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0};
   const std::vector<double> y = {0.05, -0.02, 0.011};
 
-  const double nu0 = 144.0e6;
-  std::vector<double> xdes_d(n_freq * kFitOrder);
-  std::vector<float> xdes(n_freq * kFitOrder);
-  std::vector<float> dirty(n_freq * kNpix, 0.0f);
   const std::pair<int, int> peak{1, 3};
-  for (int f = 0; f < n_freq; ++f) {
-    for (int o = 0; o < kFitOrder; ++o) {
-      xdes_d.at(f * kFitOrder + o) = std::pow(nu.at(f) / nu0, o);
-      xdes.at(f * kFitOrder + o) = static_cast<float>(xdes_d.at(f * kFitOrder + o));
-    }
-    dirty.at(f * kNpix + flat(peak.first, peak.second, kNcol)) = static_cast<float>(y.at(f));
-  }
+  const auto sc = make_scene(power_design(nu, /*nu0=*/144.0e6, kFitOrder), y, peak);
+  const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak, kFitOrder);
+  const auto expected = host_fit_min_norm(sc.xdes_d, jn, y, kFitOrder);
 
-  const std::vector<float> jn_f(jn.begin(), jn.end());
-  const std::vector<float> w_f(w.begin(), w.end());
-  const auto [compact, per_chan] = run(xdes, jn_f, w_f, dirty, peak, kFitOrder);
-  const auto expected = host_fit_min_norm(xdes_d, jn, y, kFitOrder);
-
-  for (int f = 0; f < n_freq; ++f) EXPECT_NEAR(per_chan.at(f), y.at(f), 1e-6) << "band " << f;
-  for (int o = 0; o < kFitOrder; ++o)
-    EXPECT_NEAR(compact.at(o), expected.at(o), 1e-3 * std::abs(expected.at(o)) + 1e-4) << "order " << o;
+  for (std::size_t f = 0; f < y.size(); ++f) EXPECT_NEAR(per_chan.at(f), y.at(f), 1e-6) << "band " << f;
+  expect_matches(compact, expected, "order");
 }

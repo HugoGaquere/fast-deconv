@@ -38,8 +38,8 @@ TEST_F(MaskAndAbs, Fills2dMaskedPixelsAndTakesAbsOfUnmasked)
   const float fill = -std::numeric_limits<float>::infinity();
   const auto sr = res().make_ctx();
 
-  fdtest::device_buffer<float> d_data(res(), sr, data);
-  fdtest::device_buffer<bool> d_mask(res(), sr, mask);
+  fdtest::device_buffer<float> d_data(sr, data);
+  fdtest::device_buffer<bool> d_mask(sr, mask);
   core::device_span2d<float> data_view(d_data.get(), nrow, ncol);
   core::device_span2d<bool> mask_view(d_mask.get(), nrow, ncol);
 
@@ -65,8 +65,8 @@ TEST_F(MaskAndAbs, WithoutAbsUnmaskedPixelsAreUntouched)
   mask.at(12) = true;
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_data(res(), sr, data);
-  fdtest::device_buffer<bool> d_mask(res(), sr, mask);
+  fdtest::device_buffer<float> d_data(sr, data);
+  fdtest::device_buffer<bool> d_mask(sr, mask);
   core::device_span2d<float> data_view(d_data.get(), nrow, ncol);
   core::device_span2d<bool> mask_view(d_mask.get(), nrow, ncol);
 
@@ -92,8 +92,8 @@ TEST_F(MaskAndAbs, Broadcasts2dMaskAcrossEvery3dSlice)
   mask.at(flat(3, 4, ncol)) = true;
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_data(res(), sr, data);
-  fdtest::device_buffer<bool> d_mask(res(), sr, mask);
+  fdtest::device_buffer<float> d_data(sr, data);
+  fdtest::device_buffer<bool> d_mask(sr, mask);
   core::device_span3d<float> data_view(d_data.get(), n_batch, nrow, ncol);
   core::device_span2d<bool> mask_view(d_mask.get(), nrow, ncol);
 
@@ -121,8 +121,8 @@ TEST_F(MaskAndAbs, Applies3dMaskPerSliceIndependently)
   for (int i = 0; i < plane; i += 4) mask.at(plane + i) = true;
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_data(res(), sr, data);
-  fdtest::device_buffer<bool> d_mask(res(), sr, mask);
+  fdtest::device_buffer<float> d_data(sr, data);
+  fdtest::device_buffer<bool> d_mask(sr, mask);
   core::device_span3d<float> data_view(d_data.get(), n_batch, nrow, ncol);
   core::device_span3d<bool> mask_view(d_mask.get(), n_batch, nrow, ncol);
 
@@ -147,7 +147,7 @@ TEST_F(MaskAndAbs, MaskLessThanThresholdIsStrict)
 
   const float fill = -1000.0f;
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_data(res(), sr, data);
+  fdtest::device_buffer<float> d_data(sr, data);
   core::device_span2d<float> data_view(d_data.get(), nrow, ncol);
 
   common::mask_less_than_threshold(sr, data_view, threshold, fill);
@@ -166,7 +166,47 @@ TEST_F(MaskAndAbs, MaskLessThanThresholdIsStrict)
 // build_auto_mask
 // ============================================================================
 
-class BuildAutoMask : public fdtest::GpuTest {};
+class BuildAutoMask : public fdtest::GpuTest {
+ protected:
+  // Run build_auto_mask on a single-channel scene and return the host mask.
+  // The output buffer is pre-filled with @p prefill so the internal memset is
+  // exercised; @p psf is a full (psf_h, psf_w) plane.
+  std::vector<uint8_t> run(const std::vector<std::pair<int, int>>& coords, const std::vector<int>& scales,
+                           const std::vector<float>& psf, int psf_h, int psf_w, const std::vector<float>& sigmas,
+                           const std::vector<bool>& external, int nrow, int ncol, int prefill = 0xff)
+  {
+    const int n_scales = static_cast<int>(sigmas.size());
+    const int plane = nrow * ncol;
+    const auto sr = res().make_ctx();
+
+    fdtest::device_buffer<bool> d_mask(sr, static_cast<std::size_t>(n_scales) * plane);
+    CHECK_CUDA(cudaMemsetAsync(d_mask.get(), prefill, n_scales * plane * sizeof(bool), sr.cuda_stream));
+
+    fdtest::device_buffer<float> d_psf(sr, psf);
+    fdtest::device_buffer<float> d_weights(sr, std::vector<float>{1.0f});  // single channel
+    fdtest::device_buffer<float> d_sigmas(sr, sigmas);
+    fdtest::device_buffer<bool> d_external(sr, external);
+
+    core::device_span3d<bool> mask_view(d_mask.get(), n_scales, nrow, ncol);
+    core::device_span3d<float> psf_view(d_psf.get(), 1, psf_h, psf_w);
+    core::span1d<float> weights_view(d_weights.get(), 1);
+    core::span1d<float> sigma_view(d_sigmas.get(), n_scales);
+    core::device_span2d<bool> external_view(d_external.get(), nrow, ncol);
+
+    common::build_auto_mask(sr, coords, scales, psf_view, weights_view, sigma_view, /*fft_padding=*/1.5f, external_view,
+                            mask_view);
+    sr.wait();
+    return d_mask.to_host();
+  }
+
+  // Delta PSF at the FFT center (psf_h/2, psf_w/2); even sizes keep it there.
+  static std::vector<float> delta_psf(int psf_h, int psf_w)
+  {
+    std::vector<float> psf(static_cast<std::size_t>(psf_h) * psf_w, 0.0f);
+    psf.at((psf_h / 2) * psf_w + (psf_w / 2)) = 1.0f;
+    return psf;
+  }
+};
 
 // With a delta center_psf and sigma=0 for every scale, conv2_psf is a delta,
 // the FWHM mask is a single pixel and the dilation is the identity — so the
@@ -174,68 +214,24 @@ class BuildAutoMask : public fdtest::GpuTest {};
 // After finalize_mask_kernel: mask = (!is_near_component) || external_mask.
 TEST_F(BuildAutoMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
 {
-  const int n_scales = 3;
-  const int nrow = 4;
-  const int ncol = 5;
+  const int n_scales = 3, nrow = 4, ncol = 5;
   const int plane = nrow * ncol;
-  const int total = n_scales * plane;
-
-  // Even psf size keeps the FFT center at (psf_h/2, psf_w/2).
-  const int psf_h = 8;
-  const int psf_w = 8;
-  const int psf_npix = psf_h * psf_w;
 
   const std::vector<std::pair<int, int>> coords = {{0, 0}, {1, 2}, {3, 4}};
   const std::vector<int> scales = {0, 2, 1};
 
-  const auto sr = res().make_ctx();
+  // sigma = 0 → freq-domain Gaussian is identically 1, conv2_psf == the PSF.
+  // External mask all-false, so the output mask is exactly !is_near_component.
+  const auto h_mask = run(coords, scales, delta_psf(8, 8), 8, 8, std::vector<float>(n_scales, 0.0f),
+                          std::vector<bool>(plane, false), nrow, ncol);
 
-  // Output mask buffer, pre-filled with 0xff to verify the internal memset.
-  fdtest::device_buffer<bool> d_mask(res(), sr, static_cast<std::size_t>(total));
-  CHECK_CUDA(cudaMemsetAsync(d_mask.get(), 0xff, total * sizeof(bool), sr.cuda_stream));
+  // Peak coords are the only "near component" pixels → mask=0 there, 1 elsewhere.
+  std::vector<uint8_t> expected(static_cast<std::size_t>(n_scales) * plane, 1);
+  for (std::size_t k = 0; k < coords.size(); ++k)
+    expected.at(scales.at(k) * plane + coords.at(k).first * ncol + coords.at(k).second) = 0;
 
-  // Delta PSF at FFT-center, single channel.
-  const int n_freq = 1;
-  std::vector<float> h_psf(n_freq * psf_npix, 0.0f);
-  h_psf.at((psf_h / 2) * psf_w + (psf_w / 2)) = 1.0f;
-  fdtest::device_buffer<float> d_psf(res(), sr, h_psf);
-
-  // Single channel: weight = 1.0
-  fdtest::device_buffer<float> d_weights(res(), sr, std::vector<float>(n_freq, 1.0f));
-
-  // sigma = 0 → freq-domain Gaussian is identically 1, conv2_psf == central_facet_psfs[0].
-  fdtest::device_buffer<float> d_sigmas(res(), sr, std::vector<float>(n_scales, 0.0f));
-
-  // External mask all-false (no extra masking) — so output mask = !is_near_component.
-  fdtest::device_buffer<bool> d_external(res(), sr, std::vector<bool>(plane, false));
-
-  core::device_span3d<bool> mask_view(d_mask.get(), n_scales, nrow, ncol);
-  core::device_span3d<float> psf_view(d_psf.get(), n_freq, psf_h, psf_w);
-  core::span1d<float> weights_view(d_weights.get(), n_freq);
-  core::span1d<float> sigma_view(d_sigmas.get(), n_scales);
-  core::device_span2d<bool> external_view(d_external.get(), nrow, ncol);
-
-  const float fft_padding = 1.5f;
-
-  common::build_auto_mask(sr, coords, scales, psf_view, weights_view, sigma_view, fft_padding, external_view,
-                          mask_view);
-  sr.wait();
-
-  const auto h_bytes = d_mask.to_host();
-
-  // After finalize: mask = !is_near_component (since external is all-false).
-  // Peak coords are the only "near component" pixels → mask=0 there, mask=1 elsewhere.
-  std::vector<uint8_t> expected(total, 1);
-  for (size_t k = 0; k < coords.size(); ++k) {
-    const int s = scales.at(k);
-    const int r = coords.at(k).first;
-    const int c = coords.at(k).second;
-    expected.at(s * plane + r * ncol + c) = 0;
-  }
-
-  for (int i = 0; i < total; ++i) {
-    EXPECT_EQ(h_bytes.at(i), expected.at(i)) << "Mismatch at flat idx " << i;
-  }
+  for (std::size_t i = 0; i < expected.size(); ++i)
+    EXPECT_EQ(h_mask.at(i), expected.at(i)) << "Mismatch at flat idx " << i;
 }
 
 // A real (Gaussian) PSF and a nonzero scale sigma: the component's FWHM
@@ -244,39 +240,12 @@ TEST_F(BuildAutoMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
 // masked.
 TEST_F(BuildAutoMask, GaussianPsfUnmasksFwhmNeighborhoodOfComponent)
 {
-  const int n_scales = 2;
   const int nrow = 16, ncol = 16;
   const int plane = nrow * ncol;
-  const int psf_h = 16, psf_w = 16;
-  const double sigma_psf = 1.5;
 
   // Single component at the image center, on scale 1 (sigma = 1.0).
-  const std::vector<std::pair<int, int>> coords = {{8, 8}};
-  const std::vector<int> scales = {1};
-
-  const auto sr = res().make_ctx();
-
-  fdtest::device_buffer<bool> d_mask(res(), sr, static_cast<std::size_t>(n_scales) * plane);
-  CHECK_CUDA(cudaMemsetAsync(d_mask.get(), 0xff, n_scales * plane * sizeof(bool), sr.cuda_stream));
-
-  // Gaussian PSF centered at the FFT center (psf_h/2, psf_w/2), single channel.
-  const int n_freq = 1;
-  const auto h_psf = fdtest::gaussian2d(psf_h, psf_w, psf_h / 2, psf_w / 2, sigma_psf);
-  fdtest::device_buffer<float> d_psf(res(), sr, h_psf);
-  fdtest::device_buffer<float> d_weights(res(), sr, std::vector<float>(n_freq, 1.0f));
-  fdtest::device_buffer<float> d_sigmas(res(), sr, std::vector<float>{0.0f, 1.0f});
-  fdtest::device_buffer<bool> d_external(res(), sr, std::vector<bool>(plane, false));
-
-  core::device_span3d<bool> mask_view(d_mask.get(), n_scales, nrow, ncol);
-  core::device_span3d<float> psf_view(d_psf.get(), n_freq, psf_h, psf_w);
-  core::span1d<float> weights_view(d_weights.get(), n_freq);
-  core::span1d<float> sigma_view(d_sigmas.get(), n_scales);
-  core::device_span2d<bool> external_view(d_external.get(), nrow, ncol);
-
-  common::build_auto_mask(sr, coords, scales, psf_view, weights_view, sigma_view, 1.5f, external_view, mask_view);
-  sr.wait();
-
-  const auto h_mask = d_mask.to_host();
+  const auto h_mask = run({{8, 8}}, {1}, fdtest::gaussian2d(16, 16, 8, 8, /*sigma_psf=*/1.5), 16, 16, {0.0f, 1.0f},
+                          std::vector<bool>(plane, false), nrow, ncol);
 
   // Scale 1: the conv2 PSF has sigma_eff = sqrt(sigma_psf^2 + 2*sigma_s^2) ≈ 2.06,
   // FWHM radius ≈ 1.18*sigma_eff ≈ 2.4 px — the component and its immediate
@@ -295,42 +264,15 @@ TEST_F(BuildAutoMask, GaussianPsfUnmasksFwhmNeighborhoodOfComponent)
 // external mask is OR'd in after the component-neighborhood negation.
 TEST_F(BuildAutoMask, ExternalMaskOverridesComponentNeighborhood)
 {
-  const int n_scales = 1;
   const int nrow = 4, ncol = 5;
   const int plane = nrow * ncol;
-  const int psf_h = 8, psf_w = 8;
-  const int psf_npix = psf_h * psf_w;
-
-  const std::vector<std::pair<int, int>> coords = {{1, 2}};
-  const std::vector<int> scales = {0};
-
-  const auto sr = res().make_ctx();
-
-  fdtest::device_buffer<bool> d_mask(res(), sr, static_cast<std::size_t>(n_scales) * plane);
-  CHECK_CUDA(cudaMemsetAsync(d_mask.get(), 0, n_scales * plane * sizeof(bool), sr.cuda_stream));
-
-  const int n_freq = 1;
-  std::vector<float> h_psf(n_freq * psf_npix, 0.0f);
-  h_psf.at((psf_h / 2) * psf_w + (psf_w / 2)) = 1.0f;  // delta PSF
-  fdtest::device_buffer<float> d_psf(res(), sr, h_psf);
-  fdtest::device_buffer<float> d_weights(res(), sr, std::vector<float>(n_freq, 1.0f));
-  fdtest::device_buffer<float> d_sigmas(res(), sr, std::vector<float>(n_scales, 0.0f));
 
   // External mask true exactly at the component pixel.
   std::vector<bool> external(plane, false);
   external.at(flat(1, 2, ncol)) = true;
-  fdtest::device_buffer<bool> d_external(res(), sr, external);
 
-  core::device_span3d<bool> mask_view(d_mask.get(), n_scales, nrow, ncol);
-  core::device_span3d<float> psf_view(d_psf.get(), n_freq, psf_h, psf_w);
-  core::span1d<float> weights_view(d_weights.get(), n_freq);
-  core::span1d<float> sigma_view(d_sigmas.get(), n_scales);
-  core::device_span2d<bool> external_view(d_external.get(), nrow, ncol);
+  const auto h_mask = run({{1, 2}}, {0}, delta_psf(8, 8), 8, 8, {0.0f}, external, nrow, ncol, /*prefill=*/0);
 
-  common::build_auto_mask(sr, coords, scales, psf_view, weights_view, sigma_view, 1.5f, external_view, mask_view);
-  sr.wait();
-
-  const auto h_mask = d_mask.to_host();
   // Delta PSF + sigma 0 would leave exactly the component pixel unmasked, but
   // the external mask overrides it: everything is masked.
   for (int i = 0; i < plane; ++i) ASSERT_EQ(h_mask.at(i), 1) << "pixel " << i;

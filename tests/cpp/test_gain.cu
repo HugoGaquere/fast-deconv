@@ -51,8 +51,8 @@ TEST_F(GainBatched, PerFacetGainMatchesWeightedMeanMaxOracle)
   const std::vector<float> weights = {0.5f, 0.3f, 0.2f};
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_psfs(res(), sr, psfs);
-  fdtest::device_buffer<float> d_w(res(), sr, weights);
+  fdtest::device_buffer<float> d_psfs(sr, psfs);
+  fdtest::device_buffer<float> d_w(sr, weights);
 
   core::device_span4d<float> psf_view(d_psfs.get(), kFacets, kFreq, kPsfH, kPsfW);
   core::span1d<float> w_view(d_w.get(), kFreq);
@@ -80,8 +80,8 @@ TEST_F(GainBatched, AllGainsScaleZeroFastPathAndScaleMajorOrdering)
   const std::vector<float> weights = {0.5f, 0.3f, 0.2f};
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_psfs(res(), sr, psfs);
-  fdtest::device_buffer<float> d_w(res(), sr, weights);
+  fdtest::device_buffer<float> d_psfs(sr, psfs);
+  fdtest::device_buffer<float> d_w(sr, weights);
 
   core::device_span5d<float> psf_view(d_psfs.get(), n_scales, kFacets, kFreq, kPsfH, kPsfW);
   core::span1d<float> w_view(d_w.get(), kFreq);

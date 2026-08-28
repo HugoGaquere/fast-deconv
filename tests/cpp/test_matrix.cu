@@ -68,8 +68,8 @@ TEST_F(MatrixReductions, MaxHonorsMask)
   mask.at(planted) = 1;  // exclude the global max
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(res(), sr, img);
-  fdtest::device_buffer<bool> d_mask(res(), sr, to_bool(mask));
+  fdtest::device_buffer<float> d_img(sr, img);
+  fdtest::device_buffer<bool> d_mask(sr, to_bool(mask));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
   core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
 
@@ -87,8 +87,8 @@ TEST_F(MatrixReductions, MaxWithAbsPicksNegativeExtreme)
   img.at(flat(5, 5, kNcol)) = -3.0f;  // extreme value is negative
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(res(), sr, img);
-  fdtest::device_buffer<bool> d_mask(res(), sr, std::vector<bool>(kNpix, false));
+  fdtest::device_buffer<float> d_img(sr, img);
+  fdtest::device_buffer<bool> d_mask(sr, std::vector<bool>(kNpix, false));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
   core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
 
@@ -103,8 +103,8 @@ TEST_F(MatrixReductions, RmsMatchesMaskedStdOracle)
   const auto mask = make_mask(rng);
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(res(), sr, img);
-  fdtest::device_buffer<bool> d_mask(res(), sr, to_bool(mask));
+  fdtest::device_buffer<float> d_img(sr, img);
+  fdtest::device_buffer<bool> d_mask(sr, to_bool(mask));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
   core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
 
@@ -119,8 +119,8 @@ TEST_F(MatrixReductions, RmsAllMaskedReturnsZero)
   const auto img = make_image(rng);
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(res(), sr, img);
-  fdtest::device_buffer<bool> d_mask(res(), sr, std::vector<bool>(kNpix, true));
+  fdtest::device_buffer<float> d_img(sr, img);
+  fdtest::device_buffer<bool> d_mask(sr, std::vector<bool>(kNpix, true));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
   core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
 
@@ -139,8 +139,8 @@ TEST_F(MatrixReductions, ComputeStatsMasksMaxButNotRms)
   mask.at(planted) = 1;
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(res(), sr, img);
-  fdtest::device_buffer<bool> d_mask(res(), sr, to_bool(mask));
+  fdtest::device_buffer<float> d_img(sr, img);
+  fdtest::device_buffer<bool> d_mask(sr, to_bool(mask));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
   core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
 
@@ -161,8 +161,8 @@ TEST_F(MatrixReductions, ComputeStatsWithAbsAndWorkspaceReuse)
   img2.at(flat(30, 44, kNcol)) = -2.5f;
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(res(), sr, img1);
-  fdtest::device_buffer<bool> d_mask(res(), sr, std::vector<bool>(kNpix, false));
+  fdtest::device_buffer<float> d_img(sr, img1);
+  fdtest::device_buffer<bool> d_mask(sr, std::vector<bool>(kNpix, false));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
   core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
 
@@ -188,8 +188,8 @@ TEST_F(MatrixReductions, ComputeStatsAsyncLeavesResultOnDevice)
   const auto img = make_image(rng);
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(res(), sr, img);
-  fdtest::device_buffer<bool> d_mask(res(), sr, std::vector<bool>(kNpix, false));
+  fdtest::device_buffer<float> d_img(sr, img);
+  fdtest::device_buffer<bool> d_mask(sr, std::vector<bool>(kNpix, false));
   core::device_span2d<float> img_view(d_img.get(), kNrow, kNcol);
   core::device_span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
 
@@ -223,7 +223,7 @@ TEST_F(ArgmaxWorkspace, FindsPlantedUniquePeak)
   img.at(planted) = 5.0f;
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(res(), sr, img);
+  fdtest::device_buffer<float> d_img(sr, img);
 
   matrix::argmax_ctx ws(sr, kNpix);
   const auto [val, idx] = ws.run(core::span2d<float>(d_img.get(), kNrow, kNcol));
@@ -240,7 +240,7 @@ TEST_F(ArgmaxWorkspace, ReusableAcrossCallsAndAllNegativeSafe)
   img.at(a) = -0.5f;  // unique max, still negative
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(res(), sr, img);
+  fdtest::device_buffer<float> d_img(sr, img);
   matrix::argmax_ctx ws(sr, kNpix);
 
   const auto [v1, i1] = ws.run(core::span2d<float>(d_img.get(), kNrow, kNcol));

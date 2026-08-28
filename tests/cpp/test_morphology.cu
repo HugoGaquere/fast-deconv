@@ -6,6 +6,7 @@
 #include <fast_deconv/morphology/dilation.hpp>
 #include <fast_deconv/morphology/roi.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
+#include <utility>
 #include <vector>
 
 #include "helpers/device_buffers.hpp"
@@ -34,7 +35,7 @@ class ComputeMaskRoiTest : public fdtest::GpuTest {
   {
     const auto sr = res().make_ctx();
 
-    fdtest::device_buffer<bool> d_mask(res(), sr, mask);
+    fdtest::device_buffer<bool> d_mask(sr, mask);
     core::device_span2d<bool> view(d_mask.get(), NROW, NCOL);
 
     morpho::roi r = morpho::compute_mask_roi(sr, view);
@@ -43,79 +44,44 @@ class ComputeMaskRoiTest : public fdtest::GpuTest {
   }
 };
 
-TEST_F(ComputeMaskRoiTest, AllFalseReturnsEmptySentinel)
+// One case per bbox shape the kernel has to get right; the mask is described by
+// its foreground pixels as (row, col), so a row/col swap breaks every case.
+TEST_F(ComputeMaskRoiTest, BoundingBoxOfForegroundPixels)
 {
-  std::vector<bool> mask(NROW * NCOL, false);
-  auto r = run(mask);
-  EXPECT_EQ(r.xmin, INT_MAX);
-  EXPECT_EQ(r.xmax, -1);
-  EXPECT_EQ(r.ymin, INT_MAX);
-  EXPECT_EQ(r.ymax, -1);
+  const struct {
+    const char* name;
+    std::vector<std::pair<int, int>> pixels;
+    morpho::roi expected;
+  } cases[] = {
+      {"empty", {}, {INT_MAX, -1, INT_MAX, -1}},
+      {"single pixel", {{2, 7}}, {2, 2, 7, 7}},
+      {"two disjoint pixels", {{1, 2}, {4, 9}}, {1, 4, 2, 9}},
+      {"four corners", {{0, 0}, {0, NCOL - 1}, {NROW - 1, 0}, {NROW - 1, NCOL - 1}}, {0, NROW - 1, 0, NCOL - 1}},
+  };
+
+  for (const auto& cs : cases) {
+    std::vector<bool> mask(NROW * NCOL, false);
+    for (const auto& [r, c] : cs.pixels) mask.at(r * NCOL + c) = true;
+    const auto got = run(mask);
+    EXPECT_EQ(got.xmin, cs.expected.xmin) << cs.name;
+    EXPECT_EQ(got.xmax, cs.expected.xmax) << cs.name;
+    EXPECT_EQ(got.ymin, cs.expected.ymin) << cs.name;
+    EXPECT_EQ(got.ymax, cs.expected.ymax) << cs.name;
+  }
 }
 
-TEST_F(ComputeMaskRoiTest, AllTrueCoversFullExtent)
-{
-  std::vector<bool> mask(NROW * NCOL, true);
-  auto r = run(mask);
-  EXPECT_EQ(r.xmin, 0);
-  EXPECT_EQ(r.xmax, NROW - 1);
-  EXPECT_EQ(r.ymin, 0);
-  EXPECT_EQ(r.ymax, NCOL - 1);
-}
-
-TEST_F(ComputeMaskRoiTest, SinglePixelGivesDegenerateBox)
-{
-  // Single foreground pixel at (row=2, col=7) → xmin=xmax=2, ymin=ymax=7.
-  std::vector<bool> mask(NROW * NCOL, false);
-  const int row = 2, col = 7;
-  mask[row * NCOL + col] = true;
-  auto r = run(mask);
-  EXPECT_EQ(r.xmin, row);
-  EXPECT_EQ(r.xmax, row);
-  EXPECT_EQ(r.ymin, col);
-  EXPECT_EQ(r.ymax, col);
-}
-
+// A solid block, so the bbox is not just the hull of a few isolated pixels.
 TEST_F(ComputeMaskRoiTest, RectangleBlockBoundingBox)
 {
-  // Block of true values in rows [1..4], cols [3..8].
   std::vector<bool> mask(NROW * NCOL, false);
   const int r0 = 1, r1 = 4, c0 = 3, c1 = 8;
   for (int r = r0; r <= r1; ++r)
-    for (int c = c0; c <= c1; ++c) mask[r * NCOL + c] = true;
+    for (int c = c0; c <= c1; ++c) mask.at(r * NCOL + c) = true;
   auto r = run(mask);
   EXPECT_EQ(r.xmin, r0);
   EXPECT_EQ(r.xmax, r1);
   EXPECT_EQ(r.ymin, c0);
   EXPECT_EQ(r.ymax, c1);
-}
-
-TEST_F(ComputeMaskRoiTest, TwoDisjointPixelsSpanFullBox)
-{
-  // Two pixels far apart — bbox should cover both.
-  std::vector<bool> mask(NROW * NCOL, false);
-  mask[1 * NCOL + 2] = true;  // (row=1, col=2)
-  mask[4 * NCOL + 9] = true;  // (row=4, col=9)
-  auto r = run(mask);
-  EXPECT_EQ(r.xmin, 1);
-  EXPECT_EQ(r.xmax, 4);
-  EXPECT_EQ(r.ymin, 2);
-  EXPECT_EQ(r.ymax, 9);
-}
-
-TEST_F(ComputeMaskRoiTest, CornerPixelsHitBoundary)
-{
-  // Pixels at the four corners — bbox is the whole image.
-  std::vector<bool> mask(NROW * NCOL, false);
-  mask[0 * NCOL + 0] = true;
-  mask[0 * NCOL + (NCOL - 1)] = true;
-  mask[(NROW - 1) * NCOL + 0] = true;
-  mask[(NROW - 1) * NCOL + (NCOL - 1)] = true;
-  auto r = run(mask);
-  EXPECT_EQ(r.xmin, 0);
-  EXPECT_EQ(r.xmax, NROW - 1);
-  EXPECT_EQ(r.ymin, 0);
-  EXPECT_EQ(r.ymax, NCOL - 1);
 }
 
 // ============================================================================
@@ -139,9 +105,9 @@ class BinaryDilationTest : public fdtest::GpuTest {
     const auto sr = res().make_ctx();
 
     const std::size_t npix = NROW * NCOL;
-    fdtest::device_buffer<bool> d_data(res(), sr, data);
-    fdtest::device_buffer<bool> d_se(res(), sr, se);
-    fdtest::device_buffer<bool> d_out(res(), sr, npix);
+    fdtest::device_buffer<bool> d_data(sr, data);
+    fdtest::device_buffer<bool> d_se(sr, se);
+    fdtest::device_buffer<bool> d_out(sr, npix);
     CHECK_CUDA(cudaMemsetAsync(d_out.get(), 0, npix * sizeof(bool), sr.cuda_stream));
 
     core::device_span2d<bool> data_view(d_data.get(), NROW, NCOL);

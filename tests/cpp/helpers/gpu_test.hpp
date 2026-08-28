@@ -6,15 +6,6 @@
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <optional>
 
-// Skip the current test when no CUDA device is usable, instead of crashing at
-// the first CUDA call. Usable from any test body or SetUp().
-#define SKIP_IF_NO_GPU()                                                                         \
-  do {                                                                                           \
-    int fd_test_device_count_ = 0;                                                               \
-    if (cudaGetDeviceCount(&fd_test_device_count_) != cudaSuccess || fd_test_device_count_ == 0) \
-      GTEST_SKIP() << "No CUDA device available";                                                \
-  } while (0)
-
 namespace fast_deconv::test {
 
 // Base fixture for every GPU test: skips cleanly on machines without a CUDA
@@ -25,7 +16,9 @@ class GpuTest : public ::testing::Test {
  protected:
   void SetUp() override
   {
-    SKIP_IF_NO_GPU();
+    int device_count = 0;
+    if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0)
+      GTEST_SKIP() << "No CUDA device available";
     res_.emplace(0);
   }
 
