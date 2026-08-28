@@ -11,7 +11,7 @@
 /// `--device` selects the CUDA device (default: 0). The example calls
 /// cudaSetDevice on that device before any cudaMalloc/cudaMemcpy so the host
 /// uploads target the right GPU; ddmsc::context propagates the same id to
-/// core::resources and its streams, which are bound to that device.
+/// core::exec_resources and its streams, which are bound to that device.
 /// `--csv` writes per-cycle stats (timing, component count, etc.) to a CSV
 /// file. Use scripts/plot_cycle_timing.py to chart the output.
 /// `--force-auto-mask-last` forces auto-masking on the last cycle of the set,
@@ -39,7 +39,7 @@
 #include <fast_deconv/algorithm/ddmsc_cycles.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
-#include <fast_deconv/core/resources.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/util/dump.hpp>
 #include <filesystem>
@@ -168,7 +168,7 @@ int main(int argc, char** argv)
 
   // Bind this thread to the requested device so the raw cudaMalloc/cudaMemcpy
   // calls below target it. ddmsc::context will pass the same id down to
-  // core::resources and its streams, which are bound to the same device.
+  // core::exec_resources and its streams, which are bound to the same device.
   cudaError_t set_err = cudaSetDevice(device_id);
   if (set_err != cudaSuccess) {
     fprintf(stderr, "cudaSetDevice(%d) failed: %s\n", device_id, cudaGetErrorString(set_err));

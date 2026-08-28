@@ -1,5 +1,5 @@
 #pragma once
-#include <fast_deconv/core/resources.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/span_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <vector>
@@ -15,8 +15,8 @@ namespace fast_deconv::scale {
  * @param[out] scales          Output kernels, device,
  *                             shape (n_scales, scale_nrow, scale_ncol_half).
  */
-void make_gaussian_kernels_async(const core::stream_resources& stream_res, core::span1d<float> sigmas,
-                                 int scale_ncol_full, core::span3d<float> scales);
+void make_gaussian_kernels_async(const core::exec_ctx& stream_res, core::span1d<float> sigmas, int scale_ncol_full,
+                                 core::span3d<float> scales);
 
 /**
  * @brief   Convolve a 2D mean residual image with Gaussian scale kernels.
@@ -41,8 +41,8 @@ void convolve_with_scales(const linalg::convolve_ctx& conv, core::span2d<float> 
  * @param[in]     retired_scales Scale indices to exclude from selection.
  * @return Unbiased peak value and pixel coordinates of the selected scale.
  */
-int scale_selection(const core::stream_resources& stream_res, core::span3d<float> scaled_dirty,
-                    core::host_vect<float> bias, const std::vector<int>& retired_scales);
+int scale_selection(const core::exec_ctx& stream_res, core::span3d<float> scaled_dirty, core::host_vect<float> bias,
+                    const std::vector<int>& retired_scales);
 
 /**
  * @brief   Convolve PSFs with Gaussian(sigma) for all facets, producing

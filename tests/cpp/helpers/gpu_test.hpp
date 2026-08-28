@@ -3,7 +3,7 @@
 #include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
-#include <fast_deconv/core/resources.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
 #include <optional>
 
 // Skip the current test when no CUDA device is usable, instead of crashing at
@@ -18,9 +18,9 @@
 namespace fast_deconv::test {
 
 // Base fixture for every GPU test: skips cleanly on machines without a CUDA
-// device, then provides per-test core::resources on device 0. Streams are
-// deliberately not cached here — core::stream_resources is non-movable, so
-// tests create theirs locally with `const auto sr = res().make_stream();`.
+// device, then provides per-test core::exec_resources on device 0. Streams are
+// deliberately not cached here — core::exec_ctx is non-movable, so tests create
+// theirs locally with `const auto sr = res().make_stream();`.
 class GpuTest : public ::testing::Test {
  protected:
   void SetUp() override
@@ -29,11 +29,11 @@ class GpuTest : public ::testing::Test {
     res_.emplace(0);
   }
 
-  core::resources& res() { return *res_; }
+  core::exec_resources& res() { return *res_; }
 
  private:
-  // core::resources is non-movable: construct in place once the GPU check passed.
-  std::optional<core::resources> res_;
+  // core::exec_resources is non-movable: construct in place once the GPU check passed.
+  std::optional<core::exec_resources> res_;
 };
 
 }  // namespace fast_deconv::test

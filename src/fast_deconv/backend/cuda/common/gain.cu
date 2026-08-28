@@ -1,7 +1,7 @@
 #include <cub/cub.cuh>
 #include <emu/submdspan.hpp>
 #include <fast_deconv/common/gain.hpp>
-#include <fast_deconv/core/resources.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
 
 namespace fast_deconv::common {

@@ -65,7 +65,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fast_deconv/core/resources.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/matrix/argmax.hpp>
 #include <fast_deconv/matrix/tiled_argmax.hpp>
 #include <fstream>
@@ -104,7 +104,7 @@ __global__ void fill_pattern(float* data, uint64_t n, uint64_t seed)
   }
 }
 
-static void fill_image(float* d_data, uint64_t npix, uint64_t seed, const core::stream_resources& sr)
+static void fill_image(float* d_data, uint64_t npix, uint64_t seed, const core::exec_ctx& sr)
 {
   fill_pattern<<<1024, 256, 0, sr.cuda_stream>>>(d_data, npix, seed);
   BENCH_CHECK_CUDA(cudaGetLastError());
@@ -191,8 +191,7 @@ struct tile_result {
 };
 
 // Run the full + incremental phases for one (tile, psf) pair over the shared image.
-static tile_result run_tile(const core::stream_resources& sr, float* d_data, const options& opt, int tile,
-                            int psf)
+static tile_result run_tile(const core::exec_ctx& sr, float* d_data, const options& opt, int tile, int psf)
 {
   tile_result tr;
   tr.tile = tile;
@@ -265,7 +264,7 @@ static void write_csv_row(std::ostream& os, const options& opt, const timing& na
 //  Optional correctness cross-check
 // ------------------------------------------------------------------------- //
 
-static void validate(const core::stream_resources& sr, float* d_data, const options& opt, int tile, int psf)
+static void validate(const core::exec_ctx& sr, float* d_data, const options& opt, int tile, int psf)
 {
   const int peak_row = opt.height / 2, peak_col = opt.width / 2;
 
@@ -397,8 +396,8 @@ int main(int argc, char** argv)
     }
   }
 
-  core::resources res(opt.device);
-  const core::stream_resources sr = res.make_stream();
+  core::exec_resources res(opt.device);
+  const core::exec_ctx sr = res.make_stream();
 
   float* d_data = sr.alloc_async<float>(npix);
   fill_image(d_data, npix, opt.seed, sr);

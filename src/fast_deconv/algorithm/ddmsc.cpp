@@ -32,7 +32,7 @@ Ddmsc::Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<f
 ddmsc_result Ddmsc::run(core::host_span3d<float>& dirty, const core::host_span3d<float>& jones_norm,
                         const core::host_vect<float>& weights_freq)
 {
-  const core::stream_resources& stream = ctx_.state().compute_stream;
+  const core::exec_ctx& stream = ctx_.state().compute_stream;
 
   // Copy the per-call inputs host->device.
   auto d_dirty = stream.upload(dirty);
