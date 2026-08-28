@@ -16,8 +16,8 @@ void weighted_sum_async(const core::exec_ctx& /*ctx*/, const float* /*A*/, const
   not_implemented();
 }
 
-void weighted_sum_async(const core::exec_ctx& /*ctx*/, const core::span3d<float> /*A*/,
-                        const core::span1d<float> /*weights*/, core::span2d<float> /*out*/)
+void weighted_sum_async(const core::exec_ctx& /*ctx*/, const core::span3d<const float> /*A*/,
+                        const core::span1d<const float> /*weights*/, core::span2d<float> /*out*/)
 {
   not_implemented();
 }

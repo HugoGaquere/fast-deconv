@@ -9,6 +9,7 @@
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/core/memory_types.hpp>
+#include <fast_deconv/util/cuda_macros.hpp>
 #include <fstream>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -17,8 +18,8 @@
 #include <string>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
 
@@ -147,7 +148,7 @@ struct metric_row {
 
 }  // namespace
 
-class DdmscNonReg : public fdtest::GpuTest {};
+class DdmscNonReg : public fdtest::BackendTest {};
 
 TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
 {

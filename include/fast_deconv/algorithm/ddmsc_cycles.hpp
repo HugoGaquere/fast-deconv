@@ -20,6 +20,7 @@ namespace fast_deconv::algorithm::ddmsc {
  * @return ddmsc_result with all extracted components, final flux, and iteration count.
  */
 ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>& dirty,
-                              const core::span3d<float>& jones_norm, const core::span1d<float>& weights_freq);
+                              const core::span3d<const float>& jones_norm,
+                              const core::span1d<const float>& weights_freq);
 
 }  // namespace fast_deconv::algorithm::ddmsc

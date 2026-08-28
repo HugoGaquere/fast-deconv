@@ -1,4 +1,3 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -8,8 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
 
@@ -192,7 +191,7 @@ double band_weighted_mean(const std::vector<double>& w, const std::vector<T>& v)
 
 }  // namespace
 
-class FitCoefficients : public fdtest::GpuTest {
+class FitCoefficients : public fdtest::BackendTest {
  protected:
   // Upload the scene and run fit_coefficients at @p peak. jones_norm is
   // constant per channel (value jn[f] at every pixel).
@@ -215,10 +214,10 @@ class FitCoefficients : public fdtest::GpuTest {
     fdtest::device_buffer<float> d_compact(sr, static_cast<std::size_t>(n_order));
     fdtest::device_buffer<float> d_per_chan(sr, static_cast<std::size_t>(n_freq));
 
-    core::device_span3d<float> dirty_view(d_dirty.get(), n_freq, kNrow, kNcol);
-    core::device_span3d<float> jn_view(d_jn.get(), n_freq, kNrow, kNcol);
+    core::span3d<float> dirty_view(d_dirty.get(), n_freq, kNrow, kNcol);
+    core::span3d<float> jn_view(d_jn.get(), n_freq, kNrow, kNcol);
     core::span1d<float> w_view(d_w.get(), n_freq);
-    core::device_span2d<float> xdes_view(d_xdes.get(), n_freq, n_order);
+    core::span2d<float> xdes_view(d_xdes.get(), n_freq, n_order);
     core::span1d<float> compact_view(d_compact.get(), n_order);
     core::span1d<float> per_chan_view(d_per_chan.get(), n_freq);
 

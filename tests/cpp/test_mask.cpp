@@ -1,17 +1,15 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <cmath>
 #include <cstdint>
 #include <fast_deconv/common/mask.hpp>
 #include <fast_deconv/core/memory_types.hpp>
-#include <fast_deconv/util/cuda_macros.hpp>
 #include <limits>
 #include <utility>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 #include "helpers/host_oracles.hpp"
 
 namespace core = fast_deconv::core;
@@ -25,9 +23,11 @@ using fdtest::flat;
 // Convention everywhere: mask true = excluded/filled, false = valid.
 // ============================================================================
 
-class MaskAndAbs : public fdtest::GpuTest {};
+class MaskAndAbs : public fdtest::BackendTest {};
 
-TEST_F(MaskAndAbs, Fills2dMaskedPixelsAndTakesAbsOfUnmasked)
+// abs=true takes |value| on unmasked pixels; abs=false leaves them bit-identical.
+// Masked pixels take the fill value either way.
+TEST_F(MaskAndAbs, Fills2dMaskedPixelsAndAppliesAbsOnlyWhenAsked)
 {
   const int nrow = 6, ncol = 7, n = nrow * ncol;
   std::vector<float> data(n);
@@ -35,50 +35,27 @@ TEST_F(MaskAndAbs, Fills2dMaskedPixelsAndTakesAbsOfUnmasked)
   std::vector<bool> mask(n, false);
   for (int i = 0; i < n; i += 3) mask.at(i) = true;
 
-  const float fill = -std::numeric_limits<float>::infinity();
-  const auto sr = res().make_ctx();
+  for (const bool use_abs : {true, false}) {
+    const float fill = use_abs ? -std::numeric_limits<float>::infinity() : 42.0f;
+    const auto sr = res().make_ctx();
 
-  fdtest::device_buffer<float> d_data(sr, data);
-  fdtest::device_buffer<bool> d_mask(sr, mask);
-  core::device_span2d<float> data_view(d_data.get(), nrow, ncol);
-  core::device_span2d<bool> mask_view(d_mask.get(), nrow, ncol);
+    fdtest::device_buffer<float> d_data(sr, data);
+    fdtest::device_buffer<bool> d_mask(sr, mask);
+    core::span2d<float> data_view(d_data.get(), nrow, ncol);
+    core::span2d<bool> mask_view(d_mask.get(), nrow, ncol);
 
-  common::mask_and_abs_async(sr, data_view, mask_view, fill, /*abs=*/true);
-  sr.wait();
+    common::mask_and_abs_async(sr, data_view, mask_view, fill, use_abs);
+    sr.wait();
 
-  const auto got = d_data.to_host();
-  for (int i = 0; i < n; ++i) {
-    if (mask.at(i))
-      ASSERT_EQ(got.at(i), fill) << "masked pixel " << i;
-    else
-      ASSERT_FLOAT_EQ(got.at(i), std::fabs(data.at(i))) << "unmasked pixel " << i;
-  }
-}
-
-TEST_F(MaskAndAbs, WithoutAbsUnmaskedPixelsAreUntouched)
-{
-  const int nrow = 4, ncol = 5, n = nrow * ncol;
-  std::vector<float> data(n);
-  for (int i = 0; i < n; ++i) data.at(i) = -0.5f * static_cast<float>(i);
-  std::vector<bool> mask(n, false);
-  mask.at(3) = true;
-  mask.at(12) = true;
-
-  const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_data(sr, data);
-  fdtest::device_buffer<bool> d_mask(sr, mask);
-  core::device_span2d<float> data_view(d_data.get(), nrow, ncol);
-  core::device_span2d<bool> mask_view(d_mask.get(), nrow, ncol);
-
-  common::mask_and_abs_async(sr, data_view, mask_view, /*fill_value=*/42.0f, /*abs=*/false);
-  sr.wait();
-
-  const auto got = d_data.to_host();
-  for (int i = 0; i < n; ++i) {
-    if (mask.at(i))
-      ASSERT_EQ(got.at(i), 42.0f) << "masked pixel " << i;
-    else
-      ASSERT_EQ(got.at(i), data.at(i)) << "unmasked pixel " << i;  // bit-identical
+    const auto got = d_data.to_host();
+    for (int i = 0; i < n; ++i) {
+      if (mask.at(i))
+        ASSERT_EQ(got.at(i), fill) << "abs=" << use_abs << " masked pixel " << i;
+      else if (use_abs)
+        ASSERT_FLOAT_EQ(got.at(i), std::fabs(data.at(i))) << "unmasked pixel " << i;
+      else
+        ASSERT_EQ(got.at(i), data.at(i)) << "unmasked pixel " << i;  // bit-identical
+    }
   }
 }
 
@@ -94,8 +71,8 @@ TEST_F(MaskAndAbs, Broadcasts2dMaskAcrossEvery3dSlice)
   const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_data(sr, data);
   fdtest::device_buffer<bool> d_mask(sr, mask);
-  core::device_span3d<float> data_view(d_data.get(), n_batch, nrow, ncol);
-  core::device_span2d<bool> mask_view(d_mask.get(), nrow, ncol);
+  core::span3d<float> data_view(d_data.get(), n_batch, nrow, ncol);
+  core::span2d<bool> mask_view(d_mask.get(), nrow, ncol);
 
   common::mask_and_abs_async(sr, data_view, mask_view, /*fill_value=*/0.0f, /*abs=*/true);
   sr.wait();
@@ -123,8 +100,8 @@ TEST_F(MaskAndAbs, Applies3dMaskPerSliceIndependently)
   const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_data(sr, data);
   fdtest::device_buffer<bool> d_mask(sr, mask);
-  core::device_span3d<float> data_view(d_data.get(), n_batch, nrow, ncol);
-  core::device_span3d<bool> mask_view(d_mask.get(), n_batch, nrow, ncol);
+  core::span3d<float> data_view(d_data.get(), n_batch, nrow, ncol);
+  core::span3d<bool> mask_view(d_mask.get(), n_batch, nrow, ncol);
 
   common::mask_and_abs_async(sr, data_view, mask_view, /*fill_value=*/7.0f, /*abs=*/false);
   sr.wait();
@@ -148,7 +125,7 @@ TEST_F(MaskAndAbs, MaskLessThanThresholdIsStrict)
   const float fill = -1000.0f;
   const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_data(sr, data);
-  core::device_span2d<float> data_view(d_data.get(), nrow, ncol);
+  core::span2d<float> data_view(d_data.get(), nrow, ncol);
 
   common::mask_less_than_threshold(sr, data_view, threshold, fill);
   sr.wait();
@@ -166,7 +143,7 @@ TEST_F(MaskAndAbs, MaskLessThanThresholdIsStrict)
 // build_auto_mask
 // ============================================================================
 
-class BuildAutoMask : public fdtest::GpuTest {
+class BuildAutoMask : public fdtest::BackendTest {
  protected:
   // Run build_auto_mask on a single-channel scene and return the host mask.
   // The output buffer is pre-filled with @p prefill so the internal memset is
@@ -180,18 +157,18 @@ class BuildAutoMask : public fdtest::GpuTest {
     const auto sr = res().make_ctx();
 
     fdtest::device_buffer<bool> d_mask(sr, static_cast<std::size_t>(n_scales) * plane);
-    CHECK_CUDA(cudaMemsetAsync(d_mask.get(), prefill, n_scales * plane * sizeof(bool), sr.cuda_stream));
+    d_mask.fill_bytes(prefill);
 
     fdtest::device_buffer<float> d_psf(sr, psf);
     fdtest::device_buffer<float> d_weights(sr, std::vector<float>{1.0f});  // single channel
     fdtest::device_buffer<float> d_sigmas(sr, sigmas);
     fdtest::device_buffer<bool> d_external(sr, external);
 
-    core::device_span3d<bool> mask_view(d_mask.get(), n_scales, nrow, ncol);
-    core::device_span3d<float> psf_view(d_psf.get(), 1, psf_h, psf_w);
+    core::span3d<bool> mask_view(d_mask.get(), n_scales, nrow, ncol);
+    core::span3d<float> psf_view(d_psf.get(), 1, psf_h, psf_w);
     core::span1d<float> weights_view(d_weights.get(), 1);
     core::span1d<float> sigma_view(d_sigmas.get(), n_scales);
-    core::device_span2d<bool> external_view(d_external.get(), nrow, ncol);
+    core::span2d<bool> external_view(d_external.get(), nrow, ncol);
 
     common::build_auto_mask(sr, coords, scales, psf_view, weights_view, sigma_view, /*fft_padding=*/1.5f, external_view,
                             mask_view);

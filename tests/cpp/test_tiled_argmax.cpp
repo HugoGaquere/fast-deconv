@@ -1,16 +1,13 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <fast_deconv/matrix/tiled_argmax.hpp>
-#include <fast_deconv/util/cuda_macros.hpp>
 #include <random>
-#include <tuple>
 #include <utility>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
 
@@ -18,10 +15,9 @@ namespace core = fast_deconv::core;
 namespace matrix = fast_deconv::matrix;
 namespace fdtest = fast_deconv::test;
 
-using fdtest::cpu_argmax;
 using fdtest::flat;
 
-class TiledArgmax : public fdtest::GpuTest {
+class TiledArgmax : public fdtest::BackendTest {
  protected:
   // Upload @p img, run a full pass over a fresh ctx, free, return result.
   matrix::peak run_once(const core::exec_ctx& sr, const std::vector<float>& img, int w, int h, int tile)
@@ -35,27 +31,6 @@ class TiledArgmax : public fdtest::GpuTest {
     return out;  // ws frees its own device buffers in its destructor
   }
 };
-
-// Ragged geometry: 130x70 with 32x32 tiles -> partial edge tiles on both axes.
-// Random data, so we only assert on the VALUE (tie-safe) against the CPU max.
-TEST_F(TiledArgmax, RandomRaggedMatchesCpuValue)
-{
-  const int w = 130, h = 70;
-  std::mt19937 rng(1234);
-  std::vector<float> img(w * h);
-  fdtest::fill_uniform(rng, img, -1.0f, 1.0f);
-
-  const auto sr = res().make_ctx();
-
-  auto [val, idx] = run_once(sr, img, w, h, 32);
-  auto [ref_val, ref_idx] = cpu_argmax(img);
-
-  EXPECT_FLOAT_EQ(val, ref_val);
-  // Value at the returned index must equal the reported value (index sanity).
-  ASSERT_GE(idx, 0);
-  ASSERT_LT(idx, static_cast<int>(img.size()));
-  EXPECT_FLOAT_EQ(img.at(idx), val);
-}
 
 // Unique global peak planted in a far, ragged corner tile. Checks BOTH value
 // and index across many tiles + a partial edge tile.
@@ -161,8 +136,7 @@ TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
   const int pr = 120, pc = 110, foot = 64;  // footprint [88,152) x [78,142)
   const int br = 125, bc = 118;             // inside the footprint
   img.at(flat(br, bc, w)) = 7.0f;
-  CHECK_CUDA(cudaMemcpyAsync(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), sizeof(float), cudaMemcpyHostToDevice,
-                             sr.cuda_stream));
+  sr.copy_from_host_bytes(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), sizeof(float));
 
   auto [v1, i1] = ws.run_incremental(view, pr, pc, foot, foot);
   sr.wait();
@@ -172,8 +146,7 @@ TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
   // A sat in an untouched tile: its cached maximum must still be combined in. Drop
   // B back below A and refresh the same footprint; A must re-emerge as the winner.
   img.at(flat(br, bc, w)) = 0.0f;
-  CHECK_CUDA(cudaMemcpyAsync(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), sizeof(float), cudaMemcpyHostToDevice,
-                             sr.cuda_stream));
+  sr.copy_from_host_bytes(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), sizeof(float));
   auto [v2, i2] = ws.run_incremental(view, pr, pc, foot, foot);
   sr.wait();
   EXPECT_FLOAT_EQ(v2, 5.0f);

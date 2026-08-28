@@ -53,7 +53,8 @@ std::string format_run_banner(const params& p, std::size_t dirty_nrows, std::siz
 }  // namespace
 
 ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>& dirty,
-                              const core::span3d<float>& jones_norm, const core::span1d<float>& weights_freq)
+                              const core::span3d<const float>& jones_norm,
+                              const core::span1d<const float>& weights_freq)
 {
   FD_NVTX_RANGE_FN();
   // log::set_level(spdlog::level::debug);  // disabled for benchmarking

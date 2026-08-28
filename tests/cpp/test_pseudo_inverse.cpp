@@ -1,18 +1,17 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <fast_deconv/linalg/pseudo_inverse.hpp>
 #include <random>
 #include <vector>
 
+#include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
-#include "helpers/gpu_test.hpp"
 #include "helpers/rng.hpp"
 
 namespace linalg = fast_deconv::linalg;
 namespace fdtest = fast_deconv::test;
 
-class PseudoInverse : public fdtest::GpuTest {
+class PseudoInverse : public fdtest::BackendTest {
  protected:
   // Run compute_pseudo_inverse on row-major A [n_rows, n_cols]; return P as
   // row-major [n_cols, n_rows] (the device output is col-major [n_cols, n_rows],
