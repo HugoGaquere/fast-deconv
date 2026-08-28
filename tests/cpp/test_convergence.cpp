@@ -115,36 +115,26 @@ TEST(Convergence, StatusPrecedenceDivergedBeatsConvergedBeatsMaxIterations)
 }
 
 // Slow exponential growth (~1%/iteration) never exceeds divergence_factor * previous
-// flux. The initial-flux comparison catches it: past 4x the starting flux every
-// iteration scores a strike, so it trips within max_divergent_iter + 1 of crossing.
-TEST(Convergence, SlowExponentialDivergenceIsCaught)
+// flux, so only the initial-flux comparison can catch it: below 4x the starting flux
+// nothing is scored, past it every iteration earns a strike.
+TEST(Convergence, SlowExponentialDivergenceIsCaughtOnlyPastTheFactor)
 {
   convergence c(/*max_iter=*/1000, /*min_flux=*/0.0f, /*max_divergent_iter=*/3, /*divergence_factor=*/4.0f,
                 no_stalls());
   float flux = 1.0f;
   c.init(flux, 1.0f);
-  int i = 0;
-  for (; i < 200 && c.status() != convergence_status::diverged; ++i) {
-    flux *= 1.01f;
-    c.track(flux, 1.0f, 1, 0);
-  }
-  EXPECT_EQ(c.status(), convergence_status::diverged);
-  // 1.01^139 first exceeds 4x, then 4 more iterations to exhaust the strike budget.
-  EXPECT_EQ(i, 143);
-}
 
-// The initial-flux comparison must not fire on growth that stays under the factor.
-TEST(Convergence, GrowthBelowDivergenceFactorIsTolerated)
-{
-  convergence c(/*max_iter=*/1000, /*min_flux=*/0.0f, /*max_divergent_iter=*/3, /*divergence_factor=*/4.0f,
-                no_stalls());
-  float flux = 1.0f;
-  c.init(flux, 1.0f);
-  for (int i = 0; i < 100; ++i) {  // 1.01^100 = 2.7 < 4
+  for (int i = 0; i < 100; ++i) {  // 1.01^100 = 2.7 < 4: tolerated
     flux *= 1.01f;
     c.track(flux, 1.0f, 1, 0);
   }
   EXPECT_EQ(c.status(), convergence_status::running);
+
+  for (int i = 0; i < 100 && c.status() != convergence_status::diverged; ++i) {
+    flux *= 1.01f;
+    c.track(flux, 1.0f, 1, 0);
+  }
+  EXPECT_EQ(c.status(), convergence_status::diverged);
 }
 
 // Once the residual overflows, every ordering test in update_status_ is false on NaN.

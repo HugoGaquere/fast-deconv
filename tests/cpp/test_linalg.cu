@@ -28,9 +28,9 @@ TEST_F(WeightedSum, RawPointerOverloadMatchesHostOracle)
   const std::vector<float> weights = {0.2f, 0.5f, 1.3f};
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_a(res(), sr, a);
-  fdtest::device_buffer<float> d_w(res(), sr, weights);
-  fdtest::device_buffer<float> d_out(res(), sr, static_cast<std::size_t>(n));
+  fdtest::device_buffer<float> d_a(sr, a);
+  fdtest::device_buffer<float> d_w(sr, weights);
+  fdtest::device_buffer<float> d_out(sr, static_cast<std::size_t>(n));
 
   linalg::weighted_sum_async(sr, d_a.get(), d_w.get(), d_out.get(), w, n);
   sr.wait();
@@ -50,9 +50,9 @@ TEST_F(WeightedSum, MdspanOverloadOnNonSquareImage)
   const std::vector<float> weights = {0.7f, 0.1f, 0.6f};
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_a(res(), sr, a);
-  fdtest::device_buffer<float> d_w(res(), sr, weights);
-  fdtest::device_buffer<float> d_out(res(), sr, static_cast<std::size_t>(npix));
+  fdtest::device_buffer<float> d_a(sr, a);
+  fdtest::device_buffer<float> d_w(sr, weights);
+  fdtest::device_buffer<float> d_out(sr, static_cast<std::size_t>(npix));
 
   core::device_span3d<float> a_view(d_a.get(), n_freq, nrow, ncol);
   core::span1d<float> w_view(d_w.get(), n_freq);

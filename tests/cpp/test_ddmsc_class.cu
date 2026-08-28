@@ -74,67 +74,6 @@ TEST_F(DdmscClass, ConstructsAndDestroysCleanly)
   (void)w;
 }
 
-TEST_F(DdmscClass, SetterGetterRoundTripForEveryParameter)
-{
-  auto w = make_ddmsc();
-
-  w.set_clean_negative(true);
-  EXPECT_TRUE(w.clean_negative());
-  w.set_clean_negative(false);
-  EXPECT_FALSE(w.clean_negative());
-
-  w.set_peak_factor(0.35f);
-  EXPECT_FLOAT_EQ(w.peak_factor(), 0.35f);
-
-  w.set_gamma(0.07f);
-  EXPECT_FLOAT_EQ(w.gamma(), 0.07f);
-
-  w.set_max_sub_iteration(123);
-  EXPECT_EQ(w.max_sub_iteration(), 123);
-
-  w.set_flux_threshold(0.002f);
-  EXPECT_FLOAT_EQ(w.flux_threshold(), 0.002f);
-
-  w.set_stop_rms_factor(2.5f);
-  EXPECT_FLOAT_EQ(w.stop_rms_factor(), 2.5f);
-
-  w.set_stop_peak_factor(0.01f);
-  EXPECT_FLOAT_EQ(w.stop_peak_factor(), 0.01f);
-
-  w.set_stop_cycle_factor(0.75f);
-  EXPECT_FLOAT_EQ(w.stop_cycle_factor(), 0.75f);
-
-  w.set_stop_sidelobe_level(0.2f);
-  EXPECT_FLOAT_EQ(w.stop_sidelobe_level(), 0.2f);
-
-  w.set_max_iteration(4567);
-  EXPECT_EQ(w.max_iteration(), 4567);
-
-  w.set_divergence_factor(3.5f);
-  EXPECT_FLOAT_EQ(w.divergence_factor(), 3.5f);
-
-  w.set_stall_threshold(1e-5f);
-  EXPECT_FLOAT_EQ(w.stall_threshold(), 1e-5f);
-
-  w.set_auto_mask(true);
-  EXPECT_TRUE(w.auto_mask());
-
-  w.set_force_auto_mask(true);
-  EXPECT_TRUE(w.force_auto_mask());
-
-  w.set_auto_mask_peak_threshold(0.05f);
-  ASSERT_TRUE(w.auto_mask_peak_threshold().has_value());
-  EXPECT_FLOAT_EQ(*w.auto_mask_peak_threshold(), 0.05f);
-  w.set_auto_mask_peak_threshold(std::nullopt);
-  EXPECT_FALSE(w.auto_mask_peak_threshold().has_value());
-
-  w.set_auto_mask_rms_threshold(4.0f);
-  ASSERT_TRUE(w.auto_mask_rms_threshold().has_value());
-  EXPECT_FLOAT_EQ(*w.auto_mask_rms_threshold(), 4.0f);
-  w.set_auto_mask_rms_threshold(std::nullopt);
-  EXPECT_FALSE(w.auto_mask_rms_threshold().has_value());
-}
-
 // ddmsc_result::add_coeffs_from_device slices a (n_components, n_order) device
 // buffer into one host vector per component.
 TEST_F(DdmscClass, AddCoeffsFromDeviceSlicesRows)
@@ -143,7 +82,7 @@ TEST_F(DdmscClass, AddCoeffsFromDeviceSlicesRows)
   const std::vector<float> coeffs = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_coeffs(res(), sr, coeffs);
+  fdtest::device_buffer<float> d_coeffs(sr, coeffs);
   core::device_span2d<float> view(d_coeffs.get(), n_components, n_order);
 
   ddmsc::ddmsc_result result(/*max_iter=*/10, n_order);

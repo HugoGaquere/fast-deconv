@@ -50,8 +50,8 @@ class SubtractComponent : public fdtest::GpuTest {
                             std::pair<int, int> peak, float gain)
   {
     const auto sr = res().make_ctx();
-    fdtest::device_buffer<float> d_res(res(), sr, residual);
-    fdtest::device_buffer<float> d_psf(res(), sr, psf);
+    fdtest::device_buffer<float> d_res(sr, residual);
+    fdtest::device_buffer<float> d_psf(sr, psf);
 
     core::device_span2d<float> res_view(d_res.get(), kH, kW);
     core::device_span2d<float> psf_view(d_psf.get(), ph, pw);
@@ -135,9 +135,9 @@ TEST_F(SubtractComponent, MultiFrequencyOverloadUsesPerChannelCoeffs)
   const auto sr = res().make_ctx();
 
   for (const auto& peak : {std::pair<int, int>{8, 10}, {0, 0}, {kH - 1, kW - 1}}) {
-    fdtest::device_buffer<float> d_res(res(), sr, residual);
-    fdtest::device_buffer<float> d_psf(res(), sr, psf);
-    fdtest::device_buffer<float> d_coeffs(res(), sr, coeffs);
+    fdtest::device_buffer<float> d_res(sr, residual);
+    fdtest::device_buffer<float> d_psf(sr, psf);
+    fdtest::device_buffer<float> d_coeffs(sr, coeffs);
 
     core::device_span3d<float> res_view(d_res.get(), n_freq, kH, kW);
     core::device_span3d<float> psf_view(d_psf.get(), n_freq, ph, pw);

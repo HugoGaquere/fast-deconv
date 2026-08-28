@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstdio>
 #include <cstdlib>
 #include <fast_deconv/algorithm/ddmsc_cycles.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
@@ -146,20 +145,6 @@ struct metric_row {
   bool pass() const { return std::abs(actual - baseline) <= std::max(tol_abs, tol_rel * std::abs(baseline)); }
 };
 
-std::string format_table(const std::vector<metric_row>& rows)
-{
-  std::string out = "\nmetric                          |     baseline |       actual |  rel_diff |   status\n";
-  out += "--------------------------------+--------------+--------------+-----------+---------\n";
-  for (const auto& r : rows) {
-    const double rel = std::abs(r.baseline) > 0.0 ? std::abs(r.actual - r.baseline) / std::abs(r.baseline) : 0.0;
-    char line[160];
-    std::snprintf(line, sizeof(line), "%-31s | %12.6g | %12.6g | %8.2f%% | %s\n", r.name.c_str(), r.baseline, r.actual,
-                  100.0 * rel, r.pass() ? "ok" : "FAIL");
-    out += line;
-  }
-  return out;
-}
-
 }  // namespace
 
 class DdmscNonReg : public fdtest::GpuTest {};
@@ -179,9 +164,9 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
 
   // ---- Upload the per-run inputs; the context copies its static inputs itself.
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_dirty(res(), sr, h_dirty);
-  fdtest::device_buffer<float> d_jones(res(), sr, std::vector<float>(static_cast<std::size_t>(kFreq) * kNpix, 1.0f));
-  fdtest::device_buffer<float> d_weights(res(), sr, std::vector<float>(kFreq, 1.0f / kFreq));
+  fdtest::device_buffer<float> d_dirty(sr, h_dirty);
+  fdtest::device_buffer<float> d_jones(sr, std::vector<float>(static_cast<std::size_t>(kFreq) * kNpix, 1.0f));
+  fdtest::device_buffer<float> d_weights(sr, std::vector<float>(kFreq, 1.0f / kFreq));
 
   auto h_mask = std::make_unique<bool[]>(kNpix);
   std::vector<float> h_sigmas(kScaleSigmas.begin(), kScaleSigmas.end());
@@ -358,10 +343,5 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
     rows.push_back({"recovered_flux_per_source[" + std::to_string(s) + "]",
                     base.at("recovered_flux_per_source").at(s).get<double>(), recovered_flux.at(s), 0.10, 0.05});
 
-  bool all_pass = true;
-  for (const auto& r : rows) {
-    EXPECT_TRUE(r.pass()) << r.name << ": baseline=" << r.baseline << " actual=" << r.actual;
-    all_pass = all_pass && r.pass();
-  }
-  if (!all_pass) ADD_FAILURE() << format_table(rows);
+  for (const auto& r : rows) EXPECT_TRUE(r.pass()) << r.name << ": baseline=" << r.baseline << " actual=" << r.actual;
 }
