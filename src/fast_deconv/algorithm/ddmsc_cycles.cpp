@@ -215,8 +215,8 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
       core::span3d<float> central_facet_psfs = emu::submdspan(device.raw_psfs_d, central_facet_idx);
 
       // Merge history-from-previous-calls with components found so far in this call.
-      std::vector<std::pair<int, int>> all_coords = ctx.historical_peak_coords;
-      all_coords.insert(all_coords.end(), result.peak_coords.begin(), result.peak_coords.end());
+      std::vector<common::index2d> all_coords = ctx.historical_peak_coords;
+      for (const auto& [r, c] : result.peak_coords) all_coords.push_back({r, c});
       std::vector<int> all_scales = ctx.historical_scales;
       all_scales.insert(all_scales.end(), result.scales.begin(), result.scales.end());
 
@@ -277,14 +277,14 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
     while (peak_value > threshold && n_clean_iter < p.max_clean_iteration) {
       FD_NVTX_RANGE("minor_iter");
       const auto peak_coords = util::unravel_index_2D(peak_index, dirty_ncols);
-      const int facet_idx = ctx.map_pixel_facet(peak_coords.first, peak_coords.second);
+      const int facet_idx = ctx.map_pixel_facet(peak_coords.row, peak_coords.col);
       // const float gain = all_gains.at(gain_offset + facet_idx);
       const float gain = gains.at(facet_idx);
 
       result.add_component(peak_coords, selected_scale_idx, gain);
 
       FD_LOG_DEBUG("run_ddmsc:   [sub={}] peak={:.8f} at ({},{}) facet={} gain={:.6f}", n_clean_iter, peak_value,
-                   peak_coords.first, peak_coords.second, facet_idx, gain);
+                   peak_coords.row, peak_coords.col, facet_idx, gain);
 
       core::span3d<float> conv_psf = emu::submdspan(conv_psfs, facet_idx);
       core::span2d<float> conv2_psf = emu::submdspan(conv2_psfs, facet_idx);
@@ -298,8 +298,8 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
       common::subtract_component_async(stream_a, mean_residual, conv2_psf, peak_coords, peak_value * gain);
       // Only the conv2_psf footprint centered on peak_coords was dirtied; refresh
       // just the touched tiles and re-combine against the cached ones.
-      const auto next = tiled_ws.run_incremental(mean_residual, peak_coords.first, peak_coords.second,
-                                                 conv2_psf.extent(0), conv2_psf.extent(1));
+      const auto next = tiled_ws.run_incremental(mean_residual, peak_coords.row, peak_coords.col, conv2_psf.extent(0),
+                                                 conv2_psf.extent(1));
       peak_value = next.value;
       peak_index = next.index;
 
@@ -368,8 +368,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   result.total_iterations = total_iterations;
   result.status = deconv_convergence.status();
 
-  ctx.historical_peak_coords.insert(ctx.historical_peak_coords.end(), result.peak_coords.begin(),
-                                    result.peak_coords.end());
+  for (const auto& [r, c] : result.peak_coords) ctx.historical_peak_coords.push_back({r, c});
   ctx.historical_scales.insert(ctx.historical_scales.end(), result.scales.begin(), result.scales.end());
 
   return result;

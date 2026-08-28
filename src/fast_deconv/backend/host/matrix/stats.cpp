@@ -8,12 +8,12 @@ stats_ctx::stats_ctx(const core::exec_ctx& ctx, std::size_t n_elements, bool use
 {
 }
 
-void stats_ctx::run_async(core::span2d<float> /*data*/, core::span2d<bool> /*mask*/)
+void stats_ctx::run_async(core::span2d<float> data, core::span2d<bool> mask)
 {
   throw std::runtime_error("matrix::stats: host backend not implemented yet");
 }
 
-stats_result stats_ctx::run(core::span2d<float> /*data*/, core::span2d<bool> /*mask*/)
+stats_result stats_ctx::run(core::span2d<float> data, core::span2d<bool> mask)
 {
   throw std::runtime_error("matrix::stats: host backend not implemented yet");
 }

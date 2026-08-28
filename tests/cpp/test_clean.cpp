@@ -21,18 +21,18 @@ namespace {
 
 // Host oracle mirroring the kernel's centering convention: the PSF's
 // (ph/2, pw/2) pixel lands on the peak; out-of-image parts are clipped.
-// residual[y, x] -= coeff * gain * psf[i, j] with (y, x) = peak + (i - ph/2, j - pw/2).
+// residual[row, col] -= coeff * gain * psf[i, j] with (row, col) = peak + (i - ph/2, j - pw/2).
 std::vector<float> host_subtract(const std::vector<float>& residual, int h, int w, const std::vector<float>& psf,
-                                 int ph, int pw, std::pair<int, int> peak, float gain, float coeff = 1.0f)
+                                 int ph, int pw, common::index2d peak, float gain, float coeff = 1.0f)
 {
   std::vector<float> out = residual;
-  const int y0 = peak.first - ph / 2;
-  const int x0 = peak.second - pw / 2;
+  const int row0 = peak.row - ph / 2;
+  const int col0 = peak.col - pw / 2;
   for (int i = 0; i < ph; ++i) {
     for (int j = 0; j < pw; ++j) {
-      const int y = y0 + i, x = x0 + j;
-      if (y < 0 || y >= h || x < 0 || x >= w) continue;
-      out.at(flat(y, x, w)) -= coeff * gain * psf.at(flat(i, j, pw));
+      const int row = row0 + i, col = col0 + j;
+      if (row < 0 || row >= h || col < 0 || col >= w) continue;
+      out.at(flat(row, col, w)) -= coeff * gain * psf.at(flat(i, j, pw));
     }
   }
   return out;
@@ -46,7 +46,7 @@ class SubtractComponent : public fdtest::BackendTest {
   static constexpr int kW = 20;  // non-square residual
 
   std::vector<float> run_2d(const std::vector<float>& residual, const std::vector<float>& psf, int ph, int pw,
-                            std::pair<int, int> peak, float gain)
+                            common::index2d peak, float gain)
   {
     const auto sr = res().make_ctx();
     fdtest::device_buffer<float> d_res(sr, residual);
@@ -77,15 +77,16 @@ TEST_F(SubtractComponent, SubtractsScaledPsfWindowAndClipsAtBorders)
   std::vector<float> psf(5 * 5);
   fdtest::fill_uniform(rng, psf, 0.0f, 1.0f);
 
-  for (const auto& peak : {std::pair<int, int>{8, 10}, {0, 0}, {0, kW - 1}, {kH - 1, 0}, {kH - 1, kW - 1}}) {
+  for (const auto& peak : {common::index2d{8, 10}, {0, 0}, {0, kW - 1}, {kH - 1, 0}, {kH - 1, kW - 1}}) {
     const auto got = run_2d(residual, psf, 5, 5, peak, 0.5f);
     expect_matches_oracle(got, host_subtract(residual, kH, kW, psf, 5, 5, peak, 0.5f));
 
     // Pixels outside the 5x5 window are bit-identical to the input.
-    for (int y = 0; y < kH; ++y)
-      for (int x = 0; x < kW; ++x)
-        if (std::abs(y - peak.first) > 2 || std::abs(x - peak.second) > 2)
-          ASSERT_EQ(got.at(flat(y, x, kW)), residual.at(flat(y, x, kW))) << "touched (" << y << ", " << x << ")";
+    for (int row = 0; row < kH; ++row)
+      for (int col = 0; col < kW; ++col)
+        if (std::abs(row - peak.row) > 2 || std::abs(col - peak.col) > 2)
+          ASSERT_EQ(got.at(flat(row, col, kW)), residual.at(flat(row, col, kW)))
+              << "touched (" << row << ", " << col << ")";
   }
 }
 
@@ -99,7 +100,7 @@ TEST_F(SubtractComponent, EvenSizedPsfPinsCenterConvention)
   std::vector<float> psf(8 * 8);
   fdtest::fill_uniform(rng, psf, 0.0f, 1.0f);
 
-  const std::pair<int, int> peak{7, 9};
+  const common::index2d peak{7, 9};
   const auto got = run_2d(residual, psf, 8, 8, peak, 1.0f);
   const auto expected = host_subtract(residual, kH, kW, psf, 8, 8, peak, 1.0f);
   expect_matches_oracle(got, expected);
@@ -118,7 +119,7 @@ TEST_F(SubtractComponent, MultiFrequencyOverloadUsesPerChannelCoeffs)
 
   const auto sr = res().make_ctx();
 
-  for (const auto& peak : {std::pair<int, int>{8, 10}, {0, 0}, {kH - 1, kW - 1}}) {
+  for (const auto& peak : {common::index2d{8, 10}, {0, 0}, {kH - 1, kW - 1}}) {
     fdtest::device_buffer<float> d_res(sr, residual);
     fdtest::device_buffer<float> d_psf(sr, psf);
     fdtest::device_buffer<float> d_coeffs(sr, coeffs);
@@ -137,7 +138,7 @@ TEST_F(SubtractComponent, MultiFrequencyOverloadUsesPerChannelCoeffs)
       const auto expected = host_subtract(res_f, kH, kW, psf_f, ph, pw, peak, gain, coeffs.at(f));
       for (int i = 0; i < kH * kW; ++i)
         ASSERT_FLOAT_EQ(got.at(f * kH * kW + i), expected.at(i))
-            << "freq " << f << " flat index " << i << " peak (" << peak.first << ", " << peak.second << ")";
+            << "freq " << f << " flat index " << i << " peak (" << peak.row << ", " << peak.col << ")";
     }
   }
 }

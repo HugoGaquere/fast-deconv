@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <fast_deconv/common/convergence.hpp>
+#include <fast_deconv/common/region.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
@@ -103,8 +104,8 @@ struct context {
   int n_freq;
   float fft_padding;
 
-  std::vector<std::pair<int, int>> historical_peak_coords;  // across runs; feeds the auto-mask
-  std::vector<int> historical_scales;                       // scale of each historical component
+  std::vector<common::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
+  std::vector<int> historical_scales;                   // scale of each historical component
 
   /// Validates the dimensions and stores the inputs; allocates nothing.
   context(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
@@ -145,7 +146,7 @@ struct context {
 };
 
 struct ddmsc_result {
-  std::vector<std::pair<int, int>> peak_coords;
+  std::vector<std::pair<int, int>> peak_coords;  // pair, not index2d: bound read-only to Python as list[tuple]
   std::vector<int> scales;
   std::vector<float> gains;
   std::vector<std::vector<float>> coeffs;
@@ -162,9 +163,9 @@ struct ddmsc_result {
     coeffs.reserve(max_iter);
   };
 
-  void add_component(std::pair<int, int> coords, int scale, float gain)
+  void add_component(common::index2d coords, int scale, float gain)
   {
-    peak_coords.push_back(coords);
+    peak_coords.emplace_back(coords.row, coords.col);
     scales.push_back(scale);
     gains.push_back(gain);
   };
