@@ -34,6 +34,11 @@ class Recipe(ConanFile):
         self.requires("gtest/1.15.0")
         self.requires("nlohmann_json/3.11.3")
 
+        if self.options.backend == "host":
+            # cache_size keeps the twiddle plans alive across calls; the
+            # default of 0 re-plans on every transform.
+            self.requires("pocketfft/0.0.0.cci.20240801", options={"cache_size": 8})
+
     def layout(self):
         if self.options.python_module:
             # Using conan as CMAKE_PROJECT_TOP_LEVEL_INCLUDES cmake_layout does not work

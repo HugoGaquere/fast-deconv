@@ -90,6 +90,10 @@ find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(emu CONFIG REQUIRED)
 
+if(NOT FAST_DECONV_WITH_CUDA)
+  find_package(pocketfft CONFIG REQUIRED)
+endif()
+
 # Mark third-party imported targets as SYSTEM so their headers come through
 # as -isystem in compile_commands.json. clangd then suppresses diagnostics
 # from these headers while still indexing them for completion/hover.
@@ -98,6 +102,7 @@ foreach(_tp_target IN ITEMS
     spdlog::spdlog
     emu::emu
     emu::core
+    pocketfft::pocketfft
     CUDA::cublas
     CUDA::cufft
     CUDA::cudart
@@ -135,6 +140,8 @@ if(FAST_DECONV_WITH_CUDA)
 else()
   # emu::emu aggregates emu::cuda, which links cudart; emu::core is the CUDA-free half.
   target_link_libraries(fast_deconv PUBLIC emu::core)
+  # Header-only and used only in the backend sources, so it stays off the interface.
+  target_link_libraries(fast_deconv PRIVATE pocketfft::pocketfft)
   # nvtx3 ships with the CUDA toolkit, so the probes cannot compile without it.
   target_compile_definitions(fast_deconv PUBLIC FD_NVTX_DISABLE)
 endif()
