@@ -40,31 +40,29 @@ gtest_discover_tests(fast_deconv_unit_tests PROPERTIES LABELS "UNIT")
 
 #-------------------------------------------------------------------#
 # Non-regression test (label NONREG): full synthetic DDMSC run whose
-# scalar metrics are compared against a committed JSON baseline.
-# Still cuda-only: not ported alongside the rest.
+# scalar metrics are compared against a committed JSON baseline. Backend
+# agnostic like the unit tests; both backends share the one baseline.
 # Regenerate the baseline with FAST_DECONV_UPDATE_BASELINE=1.
 #-------------------------------------------------------------------#
-if(FAST_DECONV_WITH_CUDA)
-  find_package(nlohmann_json CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
-  add_executable(fast_deconv_nonreg_tests
-    test_ddmsc_nonreg.cu
-  )
+add_executable(fast_deconv_nonreg_tests
+  test_ddmsc_nonreg.cpp
+)
 
-  target_link_libraries(fast_deconv_nonreg_tests PRIVATE
-    fast_deconv
-    GTest::gtest_main
-    nlohmann_json::nlohmann_json
-  )
+target_link_libraries(fast_deconv_nonreg_tests PRIVATE
+  fast_deconv
+  GTest::gtest_main
+  nlohmann_json::nlohmann_json
+)
 
-  target_include_directories(fast_deconv_nonreg_tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-  )
+target_include_directories(fast_deconv_nonreg_tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
 
-  # Baseline lives in the source tree so a regeneration shows up as a git diff.
-  target_compile_definitions(fast_deconv_nonreg_tests PRIVATE
-    FAST_DECONV_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../baselines/ddmsc_synthetic.json"
-  )
+# Baseline lives in the source tree so a regeneration shows up as a git diff.
+target_compile_definitions(fast_deconv_nonreg_tests PRIVATE
+  FAST_DECONV_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../baselines/ddmsc_synthetic.json"
+)
 
-  gtest_discover_tests(fast_deconv_nonreg_tests PROPERTIES LABELS "NONREG" TIMEOUT 300)
-endif()
+gtest_discover_tests(fast_deconv_nonreg_tests PROPERTIES LABELS "NONREG" TIMEOUT 300)

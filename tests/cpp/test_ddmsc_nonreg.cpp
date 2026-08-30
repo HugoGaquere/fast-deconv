@@ -1,4 +1,3 @@
-#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -9,7 +8,6 @@
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/core/memory_types.hpp>
-#include <fast_deconv/util/cuda_macros.hpp>
 #include <fstream>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -212,16 +210,14 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
       .auto_mask_rms_threshold = std::nullopt,
   };
 
-  core::device_span3d<float> dirty_view(d_dirty.get(), kFreq, kNrow, kNcol);
-  core::device_span3d<float> jones_view(d_jones.get(), kFreq, kNrow, kNcol);
+  core::span3d<float> dirty_view(d_dirty.get(), kFreq, kNrow, kNcol);
+  core::span3d<float> jones_view(d_jones.get(), kFreq, kNrow, kNcol);
   core::span1d<float> weights_view(d_weights.get(), kFreq);
 
   // ---- Run the full minor-cycle driver. `dirty` is left as the residual.
   const auto result = ddmsc::run_ddmsc_cycles(ctx, p, dirty_view, jones_view, weights_view);
 
-  CHECK_CUDA(cudaMemcpyAsync(h_dirty.data(), d_dirty.get(), h_dirty.size() * sizeof(float), cudaMemcpyDeviceToHost,
-                             sr.cuda_stream));
-  sr.wait();
+  h_dirty = d_dirty.to_host();
 
   // ---- Derive scalar metrics.
   const auto residual = fdtest::weighted_sum(h_dirty, std::vector<float>(kFreq, 1.0f / kFreq), kNpix);
@@ -298,7 +294,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   const char* update = std::getenv("FAST_DECONV_UPDATE_BASELINE");
   if (update != nullptr && std::string(update) != "0") {
     json out = {{"schema_version", 1},
-                {"note", "regenerate with FAST_DECONV_UPDATE_BASELINE=1; tolerances live in test_ddmsc_nonreg.cu"},
+                {"note", "regenerate with FAST_DECONV_UPDATE_BASELINE=1; tolerances live in test_ddmsc_nonreg.cpp"},
                 {"config", config},
                 {"metrics", metrics}};
     std::ofstream f(baseline_path);
