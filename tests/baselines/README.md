@@ -1,7 +1,7 @@
 # Non-regression baselines
 
 `ddmsc_synthetic.json` holds the expected scalar metrics of the synthetic
-DDMSC non-regression run (`tests/cpp/test_ddmsc_nonreg.cu`). Values only —
+DDMSC non-regression run (`tests/cpp/test_ddmsc_nonreg.cpp`). Values only —
 per-metric tolerances live in the test code so a regeneration can never
 loosen them silently.
 
