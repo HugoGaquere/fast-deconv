@@ -3,9 +3,7 @@
 #-------------------------------------------------------------------#
 cmake_minimum_required(VERSION 3.26)
 
-# Selects include/fast_deconv/backend/<name> (headers) and
-# src/fast_deconv/backend/<name> (implementations). Read before project()
-# because it decides whether CUDA is enabled as a language at all.
+# Selects include/fast_deconv/backend/<name> (headers) and src/fast_deconv/backend/<name> (implementations).
 set(FAST_DECONV_BACKEND "cuda" CACHE STRING "Compute backend: cuda | host")
 set_property(CACHE FAST_DECONV_BACKEND PROPERTY STRINGS cuda host)
 
@@ -21,41 +19,58 @@ endif()
 
 set(_fd_languages CXX)
 if(FAST_DECONV_WITH_CUDA)
-  set(CMAKE_CUDA_ARCHITECTURES "native")
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES AND NOT DEFINED ENV{CUDAARCHS})
+    set(CMAKE_CUDA_ARCHITECTURES "native" CACHE STRING "CUDA architectures to build")
+  endif()
   list(APPEND _fd_languages CUDA)
 endif()
 
 project(fast_deconv LANGUAGES ${_fd_languages})
 
-if(FAST_DECONV_WITH_CUDA)
-  find_package(CUDAToolkit REQUIRED)
+# The provider reads CMAKE_CXX_STANDARD when constructing its Conan profile.
+# Keep the target feature below too, so consumers inherit the API requirement.
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 20)
 endif()
-
-# Build all objects as PIC so executables link cleanly on toolchains that
-# default to PIE (conda-forge, recent Debian/Ubuntu/Fedora).
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(
-  CONAN_ARGS
-  "" CACHE STRING
-  "Additional conan args"
-)
-
+option(FAST_DECONV_BUILD_TOOLS "Build the replay executable" OFF)
+option(FAST_DECONV_BUILD_BENCHMARKS "Build CUDA benchmarks" OFF)
 if(SKBUILD)
-  # The provider runs conan install from inside CMake, so the backend has to be
-  # forwarded or emu would be resolved for the wrong one.
-  set(CONAN_INSTALL_ARGS
-      "--build=missing;--options=fast-deconv/*:python_module=True;--options=fast-deconv/*:backend=${FAST_DECONV_BACKEND};${CONAN_ARGS}")
+  # Disable C++ tests for Python builds, even if the cache previously enabled them.
+  set(BUILD_TESTING OFF)
+endif()
+include(CTest)
+
+set(CONAN_ARGS "" CACHE STRING "Additional Conan arguments (semicolon-separated)")
+# The dependency provider runs on the first find_package(), including toolkit
+# discovery. Set all graph options before any such call.
+if(SKBUILD)
+  set(_fd_python_module True)
+else()
+  set(_fd_python_module False)
+endif()
+if(BUILD_TESTING)
+  set(_fd_with_tests True)
+else()
+  set(_fd_with_tests False)
+endif()
+list(APPEND CONAN_INSTALL_ARGS
+  ${CONAN_ARGS}
+  "--options=fast-deconv/*:python_module=${_fd_python_module}"
+  "--options=fast-deconv/*:backend=${FAST_DECONV_BACKEND}"
+  "--options=fast-deconv/*:with_tests=${_fd_with_tests}"
+)
+if(BUILD_TESTING)
+  list(APPEND CONAN_INSTALL_ARGS "--conf=tools.build:skip_test=False")
 endif()
 
 #-------------------------------------------------------------------#
 # Host sanitizers (ASan + UBSan)
 #-------------------------------------------------------------------#
-# Instruments HOST code only — device code is out of reach for these
-# sanitizers (use compute-sanitizer for kernels). Run the resulting test
-# binaries with:
+# Instruments host code; use compute-sanitizer for CUDA device code.
+# Environment workarounds for CUDA sanitizer test runs, when needed:
 #   ASAN_OPTIONS=protect_shadow_gap=0 \
 #   LSAN_OPTIONS=suppressions=<repo>/tests/lsan_suppressions.txt
 option(FAST_DECONV_SANITIZE "Build host code with ASan + UBSan" OFF)
@@ -78,46 +93,34 @@ if(FAST_DECONV_SANITIZE)
     "$<$<COMPILE_LANGUAGE:CXX>:${_fd_san_flags}>"
     "$<$<COMPILE_LANGUAGE:CUDA>:${_fd_san_flags_cuda}>"
   )
-  # CMake host-links CUDA targets with the CXX compiler, so plain flags work
-  # for both link languages.
+  # Sanitized executables and the Python module link with the CXX driver;
+  # CUDA benchmarks explicitly select that driver below.
   add_link_options(-fsanitize=address -fsanitize=undefined)
 endif()
 
 #-------------------------------------------------------------------#
 # Dependencies
 #-------------------------------------------------------------------#
+if(FAST_DECONV_WITH_CUDA)
+  find_package(CUDAToolkit REQUIRED)
+endif()
+
 find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(emu CONFIG REQUIRED)
 
 if(NOT FAST_DECONV_WITH_CUDA)
   find_package(pocketfft CONFIG REQUIRED)
+  find_package(nvtx CONFIG REQUIRED)
+  find_package(OpenMP REQUIRED COMPONENTS CXX)
 endif()
-
-# Mark third-party imported targets as SYSTEM so their headers come through
-# as -isystem in compile_commands.json. clangd then suppresses diagnostics
-# from these headers while still indexing them for completion/hover.
-foreach(_tp_target IN ITEMS
-    fmt::fmt
-    spdlog::spdlog
-    emu::emu
-    emu::core
-    pocketfft::pocketfft
-    CUDA::cublas
-    CUDA::cufft
-    CUDA::cudart
-    CUDA::cuda_driver)
-  if(TARGET ${_tp_target})
-    set_target_properties(${_tp_target} PROPERTIES SYSTEM TRUE)
-  endif()
-endforeach()
 
 #-------------------------------------------------------------------#
 # Core library
 #-------------------------------------------------------------------#
 
-# Implementations for the selected backend. Globbed because the file set churns
-# while the matrix/linalg modules migrate; swap for an explicit list once it settles.
+# Collect the selected backend's implementations. CONFIGURE_DEPENDS makes
+# additions and removals trigger CMake regeneration during the build.
 file(GLOB_RECURSE FAST_DECONV_BACKEND_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/fast_deconv/backend/${FAST_DECONV_BACKEND}/*.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/src/fast_deconv/backend/${FAST_DECONV_BACKEND}/*.cpp
@@ -126,6 +129,8 @@ file(GLOB_RECURSE FAST_DECONV_BACKEND_SOURCES CONFIGURE_DEPENDS
 add_library(fast_deconv STATIC
         src/fast_deconv/algorithm/ddmsc_cycles.cpp
         src/fast_deconv/algorithm/ddmsc.cpp
+        src/fast_deconv/algorithm/conv_psf_cache.cpp
+        src/fast_deconv/algorithm/scales.cpp
         src/fast_deconv/common/convergence.cpp
         ${FAST_DECONV_BACKEND_SOURCES}
 )
@@ -137,13 +142,17 @@ target_link_libraries(fast_deconv PUBLIC
 
 if(FAST_DECONV_WITH_CUDA)
   target_link_libraries(fast_deconv PUBLIC emu::emu CUDA::cublas CUDA::cufft)
+  # CUDA builds use the toolkit's NVTX3 headers.
+  target_link_libraries(fast_deconv PUBLIC CUDA::nvtx3)
 else()
-  # emu::emu aggregates emu::cuda, which links cudart; emu::core is the CUDA-free half.
+  # Use only the backend-neutral emu component for host builds.
   target_link_libraries(fast_deconv PUBLIC emu::core)
-  # Header-only and used only in the backend sources, so it stays off the interface.
+  # PocketFFT headers are needed only when compiling backend sources.
   target_link_libraries(fast_deconv PRIVATE pocketfft::pocketfft)
-  # nvtx3 ships with the CUDA toolkit, so the probes cannot compile without it.
-  target_compile_definitions(fast_deconv PUBLIC FD_NVTX_DISABLE)
+  # Static-library link dependencies still reach consumers with PRIVATE scope.
+  target_link_libraries(fast_deconv PRIVATE OpenMP::OpenMP_CXX)
+  # PUBLIC: core/nvtx.hpp is a public header, so consumers need the include dir too.
+  target_link_libraries(fast_deconv PUBLIC nvtx::nvtx)
 endif()
 
 target_include_directories(fast_deconv PUBLIC
@@ -151,38 +160,38 @@ target_include_directories(fast_deconv PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/fast_deconv/backend/${FAST_DECONV_BACKEND}>
 )
 
+# The static core is linked into the Python shared module.
+set_target_properties(fast_deconv PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(fast_deconv PUBLIC cxx_std_20)
+if(FAST_DECONV_WITH_CUDA)
+  target_compile_features(fast_deconv PUBLIC cuda_std_20)
+endif()
 
 target_compile_definitions(fast_deconv PUBLIC
-  $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO> # SPDLOG_LEVEL_OFF
+  $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO>
   $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
 )
 
+# Propagate CUDA language-extension flags to consumers compiling CUDA sources.
 target_compile_options(fast_deconv PUBLIC
-  $<$<COMPILE_LANGUAGE:CUDA>:
-  --extended-lambda
-  --expt-relaxed-constexpr
-  --compiler-options=-Wall
-    $<$<CONFIG:Release>:
-      # --use_fast_math
-      # -dlto
-      --restrict
-      --generate-line-info
-    >
-    $<$<CONFIG:Debug>:
-      -g  # host debug
-      # -G  # device debug
-    >
-  >
+  "$<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda;--expt-relaxed-constexpr>"
 )
 
+# Apply build preferences to our CUDA targets without exporting them to consumers.
+function(fast_deconv_cuda_options target)
+  target_compile_options(${target} PRIVATE
+    "$<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-Wall>"
+    "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Release>>:--restrict;--generate-line-info>"
+  )
+endfunction()
+fast_deconv_cuda_options(fast_deconv)
 
 #-------------------------------------------------------------------#
 # Python extension
 #-------------------------------------------------------------------#
 
-if (SKBUILD)
-  # Let pybind11 find the python interpreter by itself.
+if(SKBUILD)
+  # Use pybind11's CMake FindPython mode.
   set(PYBIND11_FINDPYTHON ON)
   find_package(pybind11 CONFIG REQUIRED)
 
@@ -195,42 +204,50 @@ if (SKBUILD)
 
   target_link_libraries(_fast_deconv PRIVATE fast_deconv)
 
-  # We only install the module and library. No need to install the headers for fast_deconv and _fast_deconv.
-  install(TARGETS _fast_deconv DESTINATION ${SKBUILD_PROJECT_NAME})
-
-  # We install all the libs next to each other in the fast_deconv package.
-  # Let them simply link with each other when installed.
-  set(CMAKE_INSTALL_RPATH "$ORIGIN")
-
-  # We also copy/bundle every shared libraries to the destination
-  # install(TARGETS fast_deconv DESTINATION ${SKBUILD_PROJECT_NAME})
-  file(GLOB SHARED_LIBS "${CMAKE_BINARY_DIR}/[!_]*.so*")
-  install(FILES ${SHARED_LIBS} DESTINATION ${SKBUILD_PROJECT_NAME})
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_target_properties(_fast_deconv PROPERTIES INSTALL_RPATH "$ORIGIN")
+    # Resolve the built module's dependency graph at install time. Keep the
+    # platform C/C++ runtime and NVIDIA driver external; bundle other shared
+    # dependencies (including the OpenMP and CUDA math runtimes) beside it.
+    install(TARGETS _fast_deconv LIBRARY DESTINATION "${SKBUILD_PROJECT_NAME}")
+    install(CODE "
+      set(_fd_module \"$<TARGET_FILE:_fast_deconv>\")
+      set(_fd_runtime_destination \"\${CMAKE_INSTALL_PREFIX}/${SKBUILD_PROJECT_NAME}\")
+    ")
+    install(SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cmake/install_runtime_dependencies.cmake")
+  else()
+    if(APPLE)
+      set_target_properties(_fast_deconv PROPERTIES INSTALL_RPATH "@loader_path")
+    endif()
+    # Non-Linux dependency bundling is left to external wheel-repair tooling.
+    install(TARGETS _fast_deconv DESTINATION "${SKBUILD_PROJECT_NAME}")
+  endif()
 endif()
 
 #-------------------------------------------------------------------#
-# Example executable
+# Executables
 #-------------------------------------------------------------------#
-# Sources here are all .cu, so they only build for the cuda backend.
-if (NOT SKBUILD AND FAST_DECONV_WITH_CUDA)
-  add_executable(fast_deconv_app src/main.cu)
-  target_link_libraries(fast_deconv_app PRIVATE fast_deconv)
+# Plain C++ driving the public API, so it builds for both backends.
+if(FAST_DECONV_BUILD_TOOLS AND NOT SKBUILD)
+  add_executable(replay_ddmsc src/replay_ddmsc.cpp)
+  target_link_libraries(replay_ddmsc PRIVATE fast_deconv)
+endif()
 
-  add_executable(example_ddmsc src/example_ddmsc.cu)
-  target_link_libraries(example_ddmsc PRIVATE fast_deconv)
-
+# The benchmarks are .cu, so they only build for the cuda backend.
+if(FAST_DECONV_BUILD_BENCHMARKS AND NOT SKBUILD AND FAST_DECONV_WITH_CUDA)
   add_executable(bench_ddmsc src/bench_ddmsc.cu)
   target_link_libraries(bench_ddmsc PRIVATE fast_deconv)
+  fast_deconv_cuda_options(bench_ddmsc)
 
   add_executable(bench_tiled_argmax src/bench_tiled_argmax.cu)
   target_link_libraries(bench_tiled_argmax PRIVATE fast_deconv)
+  fast_deconv_cuda_options(bench_tiled_argmax)
 
   if(FAST_DECONV_SANITIZE)
-    # nvcc's host compiler (g++-15 here) has no sanitizer link files on
-    # Fedora — they ship only for the default gcc. Host-link the CUDA
-    # executables with the CXX driver instead, like the test binaries.
+    # Use the CXX driver's sanitizer runtime, like the test binaries.
+    # It may differ from nvcc's host compiler and its available runtimes.
     set_target_properties(
-      fast_deconv_app example_ddmsc bench_ddmsc bench_tiled_argmax
+      bench_ddmsc bench_tiled_argmax
       PROPERTIES LINKER_LANGUAGE CXX
     )
   endif()
@@ -239,62 +256,6 @@ endif()
 #-------------------------------------------------------------------#
 # Tests
 #-------------------------------------------------------------------#
-option(BUILD_TESTS "Build unit tests" ON)
-
-if(BUILD_TESTS AND NOT SKBUILD)
-  enable_testing()
+if(BUILD_TESTING AND NOT SKBUILD)
   add_subdirectory(tests/cpp)
 endif()
-
-#-------------------------------------------------------------------#
-# Archives, not used for now
-#-------------------------------------------------------------------#
-
-#-------------------------------------------------------------------#
-# MathDx configuration
-#-------------------------------------------------------------------#
-# if(FAST_DECONV_HAS_MATHDX)
-#   target_compile_definitions(fast_deconv INTERFACE FAST_DECONV_HAS_MATHDX)
-# endif()
-# if(DEFINED ENV{MATHDX_ROOT})
-#   set(MATHDX_ROOT "$ENV{MATHDX_ROOT}")
-# endif()
-#
-# if(DEFINED MATHDX_ROOT)
-#   message(STATUS "Looking for MathDx in ${MATHDX_ROOT}")
-#   find_package(mathdx
-#     COMPONENTS cublasdx cufftdx
-#     CONFIG
-#     PATHS "${MATHDX_ROOT}"
-#   )
-#   if(mathdx_FOUND)
-#     message(STATUS "MathDx found: ${mathdx_VERSION}")
-#     set(FAST_DECONV_HAS_MATHDX ON)
-#   else()
-#     message(WARNING "MathDx not found at ${MATHDX_ROOT}")
-#   endif()
-# endif()
-#-------------------------------------------------------------------#
-# cuTensor configuration
-#-------------------------------------------------------------------#
-# if(NOT DEFINED ENV{CUTENSOR_ROOT} AND NOT DEFINED CUTENSOR_ROOT)
-#   message(FATAL_ERROR "CUTENSOR_ROOT not set!")
-# else()
-#   if(DEFINED ENV{CUTENSOR_ROOT})
-#     set(CUTENSOR_ROOT "$ENV{CUTENSOR_ROOT}")
-#   endif()
-#   message("-- Looking for cuTENSOR in ${CUTENSOR_ROOT}")
-#   if(NOT EXISTS ${CUTENSOR_ROOT})
-#     message(FATAL_ERROR "Cannot find CUTENSOR_ROOT")
-#   endif()
-# endif()
-#
-# if(NOT TARGET cutensor)
-#   add_library(cutensor SHARED IMPORTED)
-#   set(LIB_DIR "/lib64/libcutensor/${CUDA_VERSION_MAJOR}")
-#   set(CUTENSOR_LIBRARY_NAME "libcutensor.so")
-#   set_target_properties(cutensor PROPERTIES
-#     IMPORTED_LOCATION "${CUTENSOR_ROOT}/${LIB_DIR}/${CUTENSOR_LIBRARY_NAME}"
-#     IMPORTED_IMPLIB "${CUTENSOR_ROOT}/${LIB_DIR}/${CUTENSOR_LIBRARY_DEF}"
-#     INTERFACE_INCLUDE_DIRECTORIES "${CUTENSOR_ROOT}/include")
-# endif()
