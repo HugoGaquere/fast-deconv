@@ -52,7 +52,7 @@ TEST_F(TiledArgmax, UniquePeakIndexAcrossTiles)
 }
 
 // All-negative image. Catches the classic bug of initialising the running max
-// to 0.0f / data[0] instead of -FLT_MAX: a buggy kernel reports 0 at a bogus
+// to 0.0f / data[0] instead of -inf: a buggy kernel reports 0 at a bogus
 // index here. The planted -0.5 is the unique (least-negative) maximum.
 TEST_F(TiledArgmax, AllNegativeInitialisesToNegInf)
 {

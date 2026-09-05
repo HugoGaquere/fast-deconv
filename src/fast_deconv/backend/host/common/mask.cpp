@@ -22,6 +22,7 @@ void mask_and_abs_async(const core::exec_ctx& ctx, core::span2d<float> data, cor
   // Flat: indexing through operator() blocks if-conversion, hence vectorization.
   float* d = data.data_handle();
   const bool* m = mask.data_handle();
+#pragma omp parallel for
   for (std::size_t i = 0; i < data.size(); i++) d[i] = m[i] ? fill_value : (abs ? std::fabs(d[i]) : d[i]);
 }
 
@@ -50,6 +51,7 @@ void mask_less_than_threshold(const core::exec_ctx& ctx, core::span2d<float> dat
   assert(data.is_exhaustive());
 
   float* d = data.data_handle();
+#pragma omp parallel for
   for (std::size_t i = 0; i < data.size(); i++) d[i] = d[i] < threshold ? fill_value : d[i];
 }
 

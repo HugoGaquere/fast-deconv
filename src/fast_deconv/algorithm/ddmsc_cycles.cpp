@@ -5,7 +5,6 @@
 #include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/common/clean.hpp>
 #include <fast_deconv/common/convergence.hpp>
-#include <fast_deconv/common/gain.hpp>
 #include <fast_deconv/common/mask.hpp>
 #include <fast_deconv/common/multi_frequency.hpp>
 #include <fast_deconv/core/logger.hpp>
@@ -18,6 +17,7 @@
 #include <fast_deconv/matrix/tiled_argmax.hpp>
 #include <fast_deconv/util/utils.hpp>
 #include <stdexcept>
+#include <vector>
 
 namespace fast_deconv::algorithm::ddmsc {
 
@@ -154,22 +154,17 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   // of rescanning all of mean_residual. Re-seeded with a full pass each outer iter.
   matrix::tiled_argmax_ctx tiled_ws{stream_a, mean_residual.extents(), 64};
 
-  FD_NVTX_MARK("init/precompute_psfs begin");
-  // auto all_conv_psfs =
-  //     stream_a.alloc_mdcontainer_async<float>(n_scales, n_facets, n_freq, psf_dims.input_nrow, psf_dims.input_ncol);
-  // auto all_conv2_psfs =
-  //     stream_a.alloc_mdcontainer_async<float>(n_scales, n_facets, psf_dims.input_nrow, psf_dims.input_ncol);
-  // scale::convolve_psfs_with_scales_async(psf_ctx, device.raw_psfs_d, device.scale_sigmas_d, weights_freq,
-  // all_conv_psfs,
-  //                                        all_conv2_psfs);
-
-  // TEMP: test no conv psf precomputation
-  auto conv_psfs = stream_a.alloc_mdcontainer_async<float>(n_facets, n_freq, psf_dims.input_nrow, psf_dims.input_ncol);
-  auto conv2_psfs = stream_a.alloc_mdcontainer_async<float>(n_facets, psf_dims.input_nrow, psf_dims.input_ncol);
-  FD_NVTX_MARK("init/precompute_psfs end");
-  FD_NVTX_MARK("init/compute_gains begin");
-  // auto all_gains = common::compute_all_gains_batched(stream_a, all_conv_psfs, weights_freq, p.gamma);
-  FD_NVTX_MARK("init/compute_gains end");
+  FD_NVTX_MARK("init/psf_cache_guard begin");
+  // The convolved PSFs are a pure function of raw_psfs and scale_sigmas (session
+  // constants) plus weights_freq and gamma, so only those two can drop the cache.
+  auto& psf_cache = device.psf_cache;
+  std::vector<float> weights_host(n_freq);
+  stream_a.download(weights_freq, weights_host.data());
+  stream_a.wait();
+  psf_cache.set_budget_bytes(p.psf_cache_budget_bytes);
+  psf_cache.configure(weights_freq, std::move(weights_host), p.gamma);
+  if (p.psf_cache_policy == psf_cache_mode::eager_all) psf_cache.prefetch_all();
+  FD_NVTX_MARK("init/psf_cache_guard end");
 
   // Loop-only buffers
   auto scale_kernels = stream_a.alloc_mdcontainer_async<float>(n_scales, scale_dims.freq_nrow, scale_dims.freq_ncol);
@@ -189,10 +184,6 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   bool is_auto_mask_initialized = false;
 
   int last_selected_scale = -1;
-
-  // Convolved PSFs are recomputed only when the selected scale changes.
-  std::vector<float> gains;
-  int cached_scale = -1;
 
   stream_a.wait();
   // Loop over scales
@@ -246,16 +237,9 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
 
     mean_residual = emu::submdspan(scales_x_dirty, selected_scale_idx);
 
-    // Filled on stream_a; the argmax/gain host syncs below retire it before stream_b reads it.
-    if (selected_scale_idx != cached_scale) {
-      core::span1d<float> sigma_view(device.scale_sigmas_d.data_handle() + selected_scale_idx, 1);
-      scale::convolve_psfs_with_scale_async(psf_ctx, device.raw_psfs_d, sigma_view, selected_scale_idx, weights_freq,
-                                            conv_psfs, conv2_psfs);
-      // Scale 0 is the identity kernel, so gain == gamma (as compute_all_gains_batched does).
-      gains = (selected_scale_idx == 0) ? std::vector<float>(n_facets, p.gamma)
-                                        : common::compute_gain_batched(stream_a, conv_psfs, weights_freq, p.gamma);
-      cached_scale = selected_scale_idx;
-    }
+    // Under lazy_scale the whole scale is built here; the other policies leave
+    // the misses to the per-facet get() in the clean loop below.
+    if (p.psf_cache_policy == psf_cache_mode::lazy_scale) psf_cache.prefetch_scale(selected_scale_idx);
 
     auto [peak_value, peak_index] = peak_ws.run(mean_residual);
 
@@ -278,16 +262,17 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
       FD_NVTX_RANGE("minor_iter");
       const auto peak_coords = util::unravel_index_2D(peak_index, dirty_ncols);
       const int facet_idx = ctx.map_pixel_facet(peak_coords.row, peak_coords.col);
-      // const float gain = all_gains.at(gain_offset + facet_idx);
-      const float gain = gains.at(facet_idx);
+      // A copy, so the buffers survive a later miss evicting this entry.
+      const conv_psf_cache::entry psf = psf_cache.get(selected_scale_idx, facet_idx);
+      const float gain = psf.gain;
 
       result.add_component(peak_coords, selected_scale_idx, gain);
 
       FD_LOG_DEBUG("run_ddmsc:   [sub={}] peak={:.8f} at ({},{}) facet={} gain={:.6f}", n_clean_iter, peak_value,
                    peak_coords.row, peak_coords.col, facet_idx, gain);
 
-      core::span3d<float> conv_psf = emu::submdspan(conv_psfs, facet_idx);
-      core::span2d<float> conv2_psf = emu::submdspan(conv2_psfs, facet_idx);
+      core::span3d<float> conv_psf = psf.conv;
+      core::span2d<float> conv2_psf = psf.conv2;
 
       const std::size_t coeffs_offset = (total_iterations + n_clean_iter) * n_order;
       auto spectral_coeffs = core::span1d<float>(all_coeffs.data_handle() + coeffs_offset, n_order);

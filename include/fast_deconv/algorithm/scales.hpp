@@ -45,6 +45,64 @@ int scale_selection(const core::exec_ctx& stream_res, core::span3d<float> scaled
                     const std::vector<int>& retired_scales);
 
 /**
+ * @brief   Reusable scratch for a PSF convolution, sized once from @p dims.
+ * @details A per-facet build would otherwise re-allocate six padded buffers on
+ *          every call. The Gaussian kernel is memoized across facets of the
+ *          same scale through @p kernel_scale_idx.
+ */
+struct psf_convolve_scratch {
+  core::owned_ptr<float> padded_psf;
+  core::owned_ptr<linalg::complex_type> freq_psf;
+  core::owned_ptr<linalg::complex_type> freq_conv;
+  core::owned_ptr<linalg::complex_type> freq_conv2;
+  core::owned_ptr<float> padded_conv;
+  core::owned_ptr<float> padded_conv2;
+  core::cont3d<float> conv2_cropped;
+  core::cont3d<float> scale_kernel;
+  int kernel_scale_idx = -1;  // scale the cached Gaussian kernel belongs to
+
+  psf_convolve_scratch(const core::exec_ctx& ctx, const linalg::fft_dims& dims, int n_freq)
+      : padded_psf(ctx.alloc_ptr_async<float>(static_cast<std::size_t>(n_freq) * dims.padded_total())),
+        freq_psf(ctx.alloc_ptr_async<linalg::complex_type>(static_cast<std::size_t>(n_freq) * dims.freq_total())),
+        freq_conv(ctx.alloc_ptr_async<linalg::complex_type>(static_cast<std::size_t>(n_freq) * dims.freq_total())),
+        freq_conv2(ctx.alloc_ptr_async<linalg::complex_type>(static_cast<std::size_t>(n_freq) * dims.freq_total())),
+        padded_conv(ctx.alloc_ptr_async<float>(static_cast<std::size_t>(n_freq) * dims.padded_total())),
+        padded_conv2(ctx.alloc_ptr_async<float>(static_cast<std::size_t>(n_freq) * dims.padded_total())),
+        conv2_cropped(ctx.alloc_mdcontainer_async<float>(n_freq, dims.input_nrow, dims.input_ncol)),
+        scale_kernel(ctx.alloc_mdcontainer_async<float>(1, dims.freq_nrow, dims.freq_ncol))
+  {
+  }
+
+  /// Bytes held, so a cache can report its true footprint.
+  static std::size_t byte_size(const linalg::fft_dims& dims, int n_freq)
+  {
+    const std::size_t n = n_freq;
+    return n * dims.padded_total() * sizeof(float) * 3 + n * dims.freq_total() * sizeof(linalg::complex_type) * 3 +
+           n * dims.input_total() * sizeof(float) + static_cast<std::size_t>(dims.freq_total()) * sizeof(float);
+  }
+};
+
+/**
+ * @brief   Convolve one facet's PSFs with Gaussian(sigma).
+ * @details The single-facet primitive both batched entry points below are built
+ *          from: batches over n_freq, writes conv_psf per channel and the
+ *          weighted-mean conv2. Scale 0 (sigma == 0) copies instead of convolving.
+ *
+ * @param[in]     conv           Convolution plans over the PSF grid.
+ * @param[in]     psf            One facet's PSFs, device, shape (n_freq, psf_h, psf_w).
+ * @param[in]     d_sigma        Gaussian sigma for this scale, device, shape (1,).
+ * @param[in]     scale_idx      Index of the selected scale (0 = delta / no convolution).
+ * @param[in]     weights        Per-channel weights, device, size n_freq.
+ * @param[in,out] scratch        Caller-owned scratch, sized for conv.dims() and n_freq.
+ * @param[out]    out_conv_psf   Single-convolved PSFs, device, shape (n_freq, psf_h, psf_w).
+ * @param[out]    out_conv2_mean Double-convolved weighted mean, device, shape (psf_h, psf_w).
+ */
+void convolve_psf_with_scale_async(const linalg::convolve_ctx& conv, core::span3d<float> psf,
+                                   core::span1d<float> d_sigma, int scale_idx, core::span1d<const float> weights,
+                                   psf_convolve_scratch& scratch, core::span3d<float> out_conv_psf,
+                                   core::span2d<float> out_conv2_mean);
+
+/**
  * @brief   Convolve PSFs with Gaussian(sigma) for all facets, producing
  *          single-convolved and double-convolved (weighted mean) PSFs.
  * @details For each facet, batches over n_freq frequency channels:

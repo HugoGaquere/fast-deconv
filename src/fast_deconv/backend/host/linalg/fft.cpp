@@ -1,3 +1,4 @@
+#include <omp.h>
 #include <pocketfft_hdronly.h>
 
 #include <algorithm>
@@ -19,12 +20,20 @@ pf::stride_t byte_strides(int nrow, int ncol)
 
 // Axis 0 is the batch and stays untransformed; the r2c/c2r axis must come last.
 const pf::shape_t kFftAxes{1, 2};
+
+// One knob for both pools: pocketfft caps this by the transform's own parallelism.
+std::size_t fft_threads() { return static_cast<std::size_t>(omp_get_max_threads()); }
 }  // namespace
 
 void pad_ifftshift_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output)
 {
-  std::fill_n(output, dims.padded_total(), 0.0f);
+  // Parallel fill: the padded plane is gigabytes here, and this first-touches it.
+  const int padded_total = dims.padded_total();
+#pragma omp parallel for
+  for (int i = 0; i < padded_total; i++) output[i] = 0.0f;
 
+  // The (row, col) -> (out_row, out_col) map is a bijection, so writes never collide.
+#pragma omp parallel for
   for (int i = 0; i < dims.input_nrow; i++) {
     for (int j = 0; j < dims.input_ncol; j++) {
       // Position in padded array (input centered)
@@ -54,11 +63,12 @@ void pad_ifftshift_batched_async(const core::exec_ctx& ctx, const fft_dims& dims
 void fftshift_crop_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output,
                          int n_batch)
 {
+  // Collapsed: n_batch alone is a handful of slices, too few to fill the pool.
+#pragma omp parallel for collapse(2)
   for (int b = 0; b < n_batch; b++) {
-    const float* in = input + static_cast<std::ptrdiff_t>(b) * dims.padded_total();
-    float* out = output + static_cast<std::ptrdiff_t>(b) * dims.input_total();
-
     for (int i = 0; i < dims.input_nrow; i++) {
+      const float* in = input + static_cast<std::ptrdiff_t>(b) * dims.padded_total();
+      float* out = output + static_cast<std::ptrdiff_t>(b) * dims.input_total();
       const int src_row = (i + dims.padding_nrow + (dims.padded_nrow + 1) / 2) % dims.padded_nrow;
 
       for (int j = 0; j < dims.input_ncol; j++) {
@@ -75,7 +85,8 @@ void convolve_ctx::forward_async(float* input, complex_type* output) const
   const pf::shape_t shape{static_cast<std::size_t>(forward_batch_), static_cast<std::size_t>(dims_.padded_nrow),
                           static_cast<std::size_t>(dims_.padded_ncol)};
   pf::r2c(shape, byte_strides<float>(dims_.padded_nrow, dims_.padded_ncol),
-          byte_strides<complex_type>(dims_.freq_nrow, dims_.freq_ncol), kFftAxes, pf::FORWARD, input, output, 1.0f);
+          byte_strides<complex_type>(dims_.freq_nrow, dims_.freq_ncol), kFftAxes, pf::FORWARD, input, output, 1.0f,
+          fft_threads());
 }
 
 // plan_idx selects one of the cuFFT plans; pocketfft caches its own, so it is inert here.
@@ -84,7 +95,8 @@ void convolve_ctx::backward_async(complex_type* input, float* output, int plan_i
   const pf::shape_t shape{static_cast<std::size_t>(backward_batch_), static_cast<std::size_t>(dims_.padded_nrow),
                           static_cast<std::size_t>(dims_.padded_ncol)};
   pf::c2r(shape, byte_strides<complex_type>(dims_.freq_nrow, dims_.freq_ncol),
-          byte_strides<float>(dims_.padded_nrow, dims_.padded_ncol), kFftAxes, pf::BACKWARD, input, output, 1.0f);
+          byte_strides<float>(dims_.padded_nrow, dims_.padded_ncol), kFftAxes, pf::BACKWARD, input, output, 1.0f,
+          fft_threads());
 }
 
 }  // namespace fast_deconv::linalg

@@ -35,3 +35,18 @@ TEST_F(Resources, MdcontainerAllocFreeRoundTrip)
   sr.wait();
   EXPECT_EQ(res().pool_used_bytes(), baseline);
 }
+
+TEST_F(Resources, PoolHandsBackAFreedBlock)
+{
+  const auto sr = res().make_ctx();
+
+  void* first = nullptr;
+  {
+    auto buf = sr.alloc_mdcontainer_async<float>(kRows, kCols);
+    first = buf.data_handle();
+  }
+  sr.wait();
+
+  const auto again = sr.alloc_mdcontainer_async<float>(kRows, kCols);
+  EXPECT_EQ(again.data_handle(), first);
+}

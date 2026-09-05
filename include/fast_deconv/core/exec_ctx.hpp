@@ -114,7 +114,7 @@ class exec_ctx : public exec_ctx_impl {
   /// Copies backend memory back into caller-owned host memory. Async like
   /// upload(), so wait() before reading @p host_dst.
   template <typename Span>
-  void download(const Span& src, typename Span::element_type* host_dst) const
+  void download(const Span& src, std::remove_const_t<typename Span::element_type>* host_dst) const
   {
     using T = typename Span::element_type;
     this->copy_to_host_bytes(host_dst, src.data_handle(), src.size() * sizeof(T));

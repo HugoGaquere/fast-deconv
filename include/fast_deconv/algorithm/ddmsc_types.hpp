@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <fast_deconv/algorithm/conv_psf_cache.hpp>
 #include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/common/region.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
@@ -46,6 +47,10 @@ struct params {
   bool force_enable_auto_mask;                    // engage masking unconditionally, bypassing thresholds
   std::optional<float> auto_mask_peak_threshold;  // engage when residual peak <= this (absolute flux)
   std::optional<float> auto_mask_rms_threshold;   // engage when residual peak <= this * running RMS
+
+  // conv-PSF cache params
+  psf_cache_mode psf_cache_policy;     // when the convolved PSFs get built
+  std::size_t psf_cache_budget_bytes;  // resident cap on the cached PSFs; 0 = unbounded
 };
 
 struct device_state {
@@ -62,6 +67,10 @@ struct device_state {
   // Batched over n_freq channels, with two C2R plans: one for conv, one for conv^2.
   linalg::convolve_ctx psf_convolve;
 
+  // Convolved PSFs and their gains, built per (scale, facet) on demand and held
+  // under a byte budget; run_ddmsc_cycles configures it at the start of each run.
+  conv_psf_cache psf_cache;
+
   device_state(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
                const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas, int dirty_nrow,
                int dirty_ncol, int n_freq, float fft_padding)
@@ -76,7 +85,9 @@ struct device_state {
                        /*backward_batch=*/std::max(1, static_cast<int>(scale_sigmas.size()) - 1),
                        /*n_backward_plans=*/1, fft_padding),
         psf_convolve(compute_stream, raw_psfs_d.extent(2), raw_psfs_d.extent(3), /*forward_batch=*/n_freq,
-                     /*backward_batch=*/n_freq, /*n_backward_plans=*/2, fft_padding)
+                     /*backward_batch=*/n_freq, /*n_backward_plans=*/2, fft_padding),
+        // aux_stream is the reader lane: it subtracts conv_psf off the dirty image.
+        psf_cache(psf_convolve, aux_stream, raw_psfs_d, scale_sigmas_d, /*budget_bytes=*/0)
   {
     const size_t shared_work_size = std::max(scale_convolve.required_work_size(), psf_convolve.required_work_size());
     if (shared_work_size > 0) fft_work_area = compute_stream.alloc_ptr_async<std::byte>(shared_work_size);

@@ -34,6 +34,8 @@ template <typename T>
 using device_cont3d = device_mdcontainer<T, 3>;
 template <typename T>
 using device_cont4d = device_mdcontainer<T, 4>;
+template <typename T>
+using device_cont5d = device_mdcontainer<T, 5>;
 
 // Backend-resident memory for this build: device memory.
 template <typename T, std::size_t N>
@@ -60,5 +62,7 @@ template <typename T>
 using cont3d = device_cont3d<T>;
 template <typename T>
 using cont4d = device_cont4d<T>;
+template <typename T>
+using cont5d = device_cont5d<T>;
 
 }  // namespace fast_deconv::core

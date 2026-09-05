@@ -12,22 +12,26 @@
 #   ./scripts/build.sh host            # host, Release
 #   ./scripts/build.sh all             # both backends, Release
 #   ./scripts/build.sh cuda Debug      # cuda, Debug
+#   ./scripts/build.sh --flamegraph    # cuda, Release, with perf-friendly stacks
 #   ./scripts/build.sh all -t          # both backends, Release, then ctest
+#   ./scripts/build.sh -t=Mask         # cuda, Release, then ctest -R Mask
 #   ./scripts/build.sh --python        # cuda wheel into dist/cuda
 #   ./scripts/build.sh all --python    # both wheels, dist/<backend>/
 #
-# --python builds the wheel instead of the C++ tree. -t does not apply to it:
-# the test suite is C++/GTest only.
+# --python builds the wheel instead of the C++ tree. -t and --flamegraph do not
+# apply to it: the test suite is C++/GTest only.
 
 set -euo pipefail
 
-REPO="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
 BACKENDS=(cuda)
 BUILD_TYPE=Release
 RUN_TESTS=0
+CTEST_FILTER=
 BUILD_PYTHON=0
+BUILD_FLAMEGRAPH=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -35,9 +39,11 @@ for arg in "$@"; do
     all)           BACKENDS=(cuda host) ;;
     Release|Debug) BUILD_TYPE="$arg" ;;
     -t|--test)     RUN_TESTS=1 ;;
+    -t=*|--test=*) RUN_TESTS=1; CTEST_FILTER="${arg#*=}" ;;
     -p|--python)   BUILD_PYTHON=1 ;;
-    -h|--help)     sed -n '3,21p' "${BASH_SOURCE[0]}"; exit 0 ;;
-    *) echo "usage: $0 [cuda|host|all] [Release|Debug] [-t] [--python]" >&2; exit 2 ;;
+    -f|--flamegraph) BUILD_FLAMEGRAPH=1 ;;
+    -h|--help)     sed -n '3,23p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "usage: $0 [cuda|host|all] [Release|Debug] [-t[=REGEX]] [--flamegraph] [--python]" >&2; exit 2 ;;
   esac
 done
 
@@ -47,6 +53,27 @@ banner() { printf '\n\033[1;34m========== %s ==========\033[0m\n' "$1"; }
 if [ "$BUILD_PYTHON" -eq 1 ] && ! command -v uv >/dev/null; then
   echo "--python needs uv on PATH (the wheel build is driven by scikit-build-core)" >&2
   exit 1
+fi
+
+if [ "$BUILD_PYTHON" -eq 1 ] && [ "$BUILD_FLAMEGRAPH" -eq 1 ]; then
+  echo "--flamegraph cannot be combined with --python" >&2
+  exit 2
+fi
+
+# Pass empty values in normal builds so profiling flags from an earlier CMake
+# configure do not remain cached after --flamegraph is removed.
+CMAKE_CXX_PROFILE_FLAGS=
+CMAKE_CUDA_PROFILE_FLAGS=
+if [ "$BUILD_FLAMEGRAPH" -eq 1 ]; then
+  CMAKE_CXX_PROFILE_FLAGS="-g -fno-omit-frame-pointer"
+  CMAKE_CUDA_PROFILE_FLAGS="-g -Xcompiler=-fno-omit-frame-pointer"
+fi
+
+CONAN_WITH_TESTS=False
+CONAN_SKIP_TESTS=True
+if [ "$RUN_TESTS" -eq 1 ]; then
+  CONAN_WITH_TESTS=True
+  CONAN_SKIP_TESTS=False
 fi
 
 for BACKEND in "${BACKENDS[@]}"; do
@@ -67,7 +94,10 @@ for BACKEND in "${BACKENDS[@]}"; do
 
   banner "conan install (${BACKEND}, ${BUILD_TYPE})"
   # --build=missing matters for host: the cuda=False emu binary is not prebuilt.
-  conan install . -o "fast-deconv/*:backend=${BACKEND}" --build=missing -s "build_type=${BUILD_TYPE}"
+  conan install . -o "fast-deconv/*:backend=${BACKEND}" \
+        -o "fast-deconv/*:with_tests=${CONAN_WITH_TESTS}" \
+        -c "tools.build:skip_test=${CONAN_SKIP_TESTS}" \
+        --build=missing -s "build_type=${BUILD_TYPE}"
 
   banner "cmake configure (${BACKEND})"
   # FAST_DECONV_BACKEND is passed explicitly: conan puts its cache_variables in
@@ -76,14 +106,19 @@ for BACKEND in "${BACKENDS[@]}"; do
   cmake -S . -B "$BUILD_DIR" \
         -DCMAKE_TOOLCHAIN_FILE="${REPO}/${BUILD_DIR}/generators/conan_toolchain.cmake" \
         -DFAST_DECONV_BACKEND="$BACKEND" \
-        -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
+        -DBUILD_TESTING="$RUN_TESTS" \
+        -DFAST_DECONV_BUILD_TOOLS=ON \
+        -DFAST_DECONV_BUILD_BENCHMARKS=ON \
+        -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+        -DCMAKE_CXX_FLAGS="$CMAKE_CXX_PROFILE_FLAGS" \
+        -DCMAKE_CUDA_FLAGS="$CMAKE_CUDA_PROFILE_FLAGS"
 
   banner "cmake build (${BACKEND})"
   cmake --build "$BUILD_DIR" -j
 
   if [ "$RUN_TESTS" -eq 1 ]; then
     banner "ctest (${BACKEND})"
-    ctest --test-dir "$BUILD_DIR" --output-on-failure
+    ctest --test-dir "$BUILD_DIR" --output-on-failure ${CTEST_FILTER:+-R "$CTEST_FILTER"}
   fi
 
   printf '\n\033[1;32m%s\033[0m\n' "built ${BACKEND} (${BUILD_TYPE}) in ${BUILD_DIR}"

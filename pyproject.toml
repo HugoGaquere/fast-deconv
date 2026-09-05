@@ -32,7 +32,7 @@ define = {CMAKE_PROJECT_TOP_LEVEL_INCLUDES = "cmake/conan_provider.cmake"}
 [tool.uv]
 cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.{h,c,hpp,cpp}" }, { file = "CMakeLists.txt" }]
 
-# Tests are C++/GTest only (they need a GPU): no wheel test-command.
+# Tests are C++/GTest; CUDA tests need a GPU. No wheel test-command.
 [tool.cibuildwheel]
 build-frontend = "build[uv]"
 

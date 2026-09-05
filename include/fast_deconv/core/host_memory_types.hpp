@@ -34,5 +34,7 @@ template <typename T>
 using host_cont3d = h_mdcontainer<T, 3>;
 template <typename T>
 using host_cont4d = h_mdcontainer<T, 4>;
+template <typename T>
+using host_cont5d = h_mdcontainer<T, 5>;
 
 }  // namespace fast_deconv::core
