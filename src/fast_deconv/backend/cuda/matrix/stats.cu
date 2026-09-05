@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cfloat>
 #include <cmath>
 #include <cub/device/device_reduce.cuh>
 #include <fast_deconv/matrix/stats.hpp>
@@ -24,7 +23,7 @@ struct masked_stats_op {
   __host__ __device__ __forceinline__ stats_acc operator()(int idx) const
   {
     const float v = data[idx];
-    const float max_v = mask[idx] ? -FLT_MAX : (use_abs ? fabsf(v) : v);
+    const float max_v = mask[idx] ? -INFINITY : (use_abs ? fabsf(v) : v);
     return {max_v, v, v * v, 1};
   }
 };
@@ -44,7 +43,9 @@ inline transform_it make_iter(const float* data, const bool* mask, bool use_abs)
   return thrust::make_transform_iterator(counting_it{0}, masked_stats_op{data, mask, use_abs});
 }
 
-constexpr stats_acc kIdentity = {-FLT_MAX, 0.f, 0.f, 0};
+// -inf is the masked-pixel fill, so the max sentinel ties with it instead of
+// beating it: an all-masked image reports -inf, not a finite floor.
+constexpr stats_acc kIdentity = {-INFINITY, 0.f, 0.f, 0};
 
 }  // namespace
 
@@ -81,7 +82,7 @@ stats_result stats_ctx::run(core::span2d<float> data, core::span2d<bool> mask)
   CHECK_CUDA(cudaMemcpyAsync(&h_state_, d_state_.get(), sizeof(stats_acc), cudaMemcpyDeviceToHost, ctx_.cuda_stream));
   ctx_.wait();
 
-  if (h_state_.count == 0) return {-FLT_MAX, 0.f};
+  if (h_state_.count == 0) return {-INFINITY, 0.f};
 
   const float inv_n = 1.f / static_cast<float>(h_state_.count);
   const float mean = h_state_.sum * inv_n;

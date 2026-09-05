@@ -2,6 +2,7 @@
 #include <emu/submdspan.hpp>
 #include <fast_deconv/common/gain.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
+#include <limits>
 
 namespace fast_deconv::common {
 
@@ -15,8 +16,12 @@ std::vector<float> compute_gain_batched(const core::exec_ctx& ctx, const core::s
 
   for (int b = 0; b < n_batch; b++) {
     linalg::weighted_sum_async(ctx, emu::submdspan(psfs, b), weights_freq, pmean);
-    float* pmean_ptr = pmean.data_handle();
-    gains.at(b) = gamma / *std::max_element(pmean_ptr, pmean_ptr + psf_npix);
+    const float* pmean_ptr = pmean.data_handle();
+    float pmean_max = -std::numeric_limits<float>::infinity();
+#pragma omp parallel for reduction(max : pmean_max)
+    for (int i = 0; i < psf_npix; i++) pmean_max = std::max(pmean_max, pmean_ptr[i]);
+
+    gains.at(b) = gamma / pmean_max;
   }
 
   return gains;

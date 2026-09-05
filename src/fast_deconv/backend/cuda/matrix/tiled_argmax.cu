@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <cassert>
-#include <cfloat>
+#include <cmath>
 #include <cstdint>
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
@@ -65,7 +65,7 @@ __global__ void tiled_argmax_reduce(const float* data, peak* d_tiles, int image_
   int row = threadIdx.x / tw;
 
   // Reduce to a best per thread
-  peak best{-FLT_MAX, 0};
+  peak best{-INFINITY, 0};
   while (row < th) {
     const int g = (oy + row) * image_width + (ox + col);
     const float v = data[g];
@@ -92,10 +92,10 @@ namespace fast_deconv::matrix {
 
 namespace {
 
-// Identity for the max-by-value reduction: a value of -FLT_MAX never wins, and the
-// largest possible index loses every tie, so this entry is overridden by any real
-// tile (it only survives an all-(-FLT_MAX) input, which the image never produces).
-constexpr peak kReduceIdentity{-FLT_MAX, INT64_MAX};
+// Identity for the max-by-value reduction: -inf is the masked-pixel fill, so it
+// ties rather than wins, and the largest possible index loses that tie. Any real
+// tile overrides it.
+constexpr peak kReduceIdentity{-INFINITY, INT64_MAX};
 
 }  // namespace
 

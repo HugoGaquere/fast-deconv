@@ -1,8 +1,10 @@
-#include <algorithm>
 #include <cassert>
-#include <cfloat>
+#include <cstddef>
 #include <cstdint>
 #include <fast_deconv/matrix/argmax.hpp>
+#include <limits>
+
+#include "../detail/peak_reduce.hpp"
 
 namespace fast_deconv::matrix {
 
@@ -12,14 +14,17 @@ void argmax_ctx::run_async(core::span2d<float> data)
   assert(data.size() == n_elements_);
 
   if (n_elements_ == 0) {
-    last_ = {-FLT_MAX, 0};
+    last_ = {-std::numeric_limits<float>::infinity(), 0};
     return;
   }
 
-  // std::max_element keeps the first maximum, matching CUB's smaller-index tie-break.
-  const float* begin = data.data_handle();
-  const float* best = std::max_element(begin, begin + n_elements_);
-  last_ = {*best, static_cast<std::int64_t>(best - begin)};
+  // Keeps the first maximum, matching CUB's smaller-index tie-break, at any thread count.
+  const float* d = data.data_handle();
+  peak best = detail::kPeakIdentity;
+#pragma omp parallel for reduction(peak_max : best)
+  for (std::size_t i = 0; i < n_elements_; i++) best = detail::max_by_value(best, {d[i], static_cast<std::int64_t>(i)});
+
+  last_ = best;
 }
 
 peak argmax_ctx::run(core::span2d<float> data)

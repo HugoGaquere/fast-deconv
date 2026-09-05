@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <fast_deconv/linalg/linalg.hpp>
 
@@ -7,13 +8,15 @@ namespace fast_deconv::linalg {
 void weighted_sum_async(const core::exec_ctx& ctx, const float* __restrict A, const float* __restrict weights,
                         float* __restrict out, int w, int n)
 {
-  std::fill_n(out, n, 0.0f);
-
-  for (int c = 0; c < w; c++) {
-    const float wc = weights[c];
-    for (int i = 0; i < n; i++) {
-      out[i] += A[c * n + i] * wc;
+  // Pixel-major: each thread owns a slice of `out`, and the accumulator stays in a register.
+#pragma omp parallel for
+  for (int i = 0; i < n; i++) {
+    float acc = 0.0f;
+    for (int c = 0; c < w; c++) {
+      // Widened before the multiply: w * n can exceed INT_MAX.
+      acc += A[static_cast<std::ptrdiff_t>(c) * n + i] * weights[c];
     }
+    out[i] = acc;
   }
 }
 

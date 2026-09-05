@@ -25,6 +25,8 @@ Ddmsc::Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<f
           .force_enable_auto_mask = false,
           .auto_mask_peak_threshold = std::nullopt,
           .auto_mask_rms_threshold = std::nullopt,
+          .psf_cache_policy = psf_cache_mode::lazy_pair,
+          .psf_cache_budget_bytes = 0,
       }
 {
 }

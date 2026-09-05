@@ -322,6 +322,9 @@ static ddmsc::params make_fixed_params(const bench_config& c)
   p.force_enable_auto_mask = false;
   p.auto_mask_peak_threshold = std::nullopt;
   p.auto_mask_rms_threshold = std::nullopt;
+  // Build every convolved PSF up front so the timed loop never takes a cache miss.
+  p.psf_cache_policy = fast_deconv::algorithm::psf_cache_mode::eager_all;
+  p.psf_cache_budget_bytes = 0;
   return p;
 }
 
@@ -400,8 +403,7 @@ static std::size_t cufft_work_bytes(int padded_nrow, int padded_ncol, int forwar
 //       gain over a closed-form guess.
 //   (3) The peak working set of run_ddmsc_cycles inside the pool. Buffer sizes
 //       are exact element counts mirroring the alloc_async calls in ddmsc.cu /
-//       scales.cu; we take the max across the two heavy, non-overlapping phases
-//       (PSF-domain precompute vs. per-iteration scale-domain convolve).
+//       scales.cu / conv_psf_cache.cpp.
 //
 // The only non-modeled terms are tiny CUB reduction scratch buffers (a few KB,
 // covered by a flat allowance) and fixed CUDA/cuBLAS/cuFFT context overhead
@@ -452,11 +454,9 @@ static std::size_t estimate_bytes(const bench_config& c)
   // Always-live for the whole call (allocated before PSF precompute, freed last):
   const std::size_t coeffs_cap = static_cast<std::size_t>(p.max_iteration + p.max_clean_iteration) * no;
   std::size_t live = 0;
-  live += npix * F;                       // mean_residual
-  live += coeffs_cap * F;                 // d_all_coeffs
-  live += ns * nfac * psf_npix * F;       // conv2_psfs
-  live += ns * nfac * nf * psf_npix * F;  // conv_psfs
-  live += 2 * kCubTemp;                   // stats_ctx + argmax_ctx (peak) scratch
+  live += npix * F;        // mean_residual
+  live += coeffs_cap * F;  // d_all_coeffs
+  live += 2 * kCubTemp;    // stats_ctx + argmax_ctx (peak) scratch
 
   // Allocated only after the PSF precompute, then live for the rest of the call:
   std::size_t scale_loop = 0;
@@ -465,18 +465,24 @@ static std::size_t estimate_bytes(const bench_config& c)
   if (p.enable_auto_mask || p.force_enable_auto_mask)
     scale_loop += ns * npix * sizeof(bool);  // mask_per_scale (lazily allocated)
 
-  // Phase A -- PSF-domain precompute transients (convolve_psfs_with_scale_async):
-  //   padded_psf + padded_conv + padded_conv2 (3 x), freq_psf/conv/conv2 (3 x),
-  //   conv2_cropped, and the per-scale kernel.
-  const std::size_t phase_psf = 3 * nf * psf_pad * F + 3 * nf * psf_freq * CX + nf * psf_npix * F + psf_freq * F;
+  // conv_psf_cache scratch (psf_convolve_scratch), allocated once by the cache and
+  //   held for the session: padded_psf + padded_conv + padded_conv2 (3 x),
+  //   freq_psf/conv/conv2 (3 x), conv2_cropped, and the memoized scale kernel.
+  live += 3 * nf * psf_pad * F + 3 * nf * psf_freq * CX + nf * psf_npix * F + psf_freq * F;
+
+  // conv_psf_cache entries: one conv (nf planes) + one conv2 plane per (scale, facet),
+  //   built on demand and capped by the budget. Scale 0 aliases raw_psfs, so it only
+  //   owns its conv2. With no budget the worst case is every pair resident.
+  const std::size_t entry_bytes = (nf + 1) * psf_npix * F;
+  const std::size_t cache_worst = nfac * psf_npix * F + (ns - 1) * nfac * entry_bytes;
+  live += p.psf_cache_budget_bytes != 0 ? std::min(p.psf_cache_budget_bytes, cache_worst) : cache_worst;
 
   // Phase B -- scale-domain convolve transients (convolve_with_scales):
   //   dirty_padded + scaled_dirty (ns x img_pad) and dirty_freq + scaled_dirty_freq (ns x img_freq).
   const std::size_t phase_scale = ns * img_pad * F + ns * img_freq * CX;
 
-  // Peak pool usage: work areas + always-live + the heavier of the two phases
-  // (phase A runs before the scale_loop buffers exist; phase B runs after).
-  const std::size_t pool_peak = work_areas + live + std::max(phase_psf, scale_loop + phase_scale);
+  // Peak pool usage: work areas + always-live + the scale-domain loop buffers.
+  const std::size_t pool_peak = work_areas + live + scale_loop + phase_scale;
 
   const std::size_t total = input_buffers + pool_peak;
   return static_cast<std::size_t>(total * 1.03);  // pool sub-allocation rounding

@@ -1,8 +1,8 @@
 #pragma once
 
-#include <cfloat>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -74,10 +74,10 @@ inline std::vector<float> weighted_sum(const std::vector<float>& data, const std
 }
 
 // Max over pixels where mask == 0 (mask nonzero means excluded, matching the
-// library convention). Returns -FLT_MAX when every pixel is masked.
+// library convention). Returns -inf when every pixel is masked.
 inline float masked_max(const std::vector<float>& data, const std::vector<uint8_t>& mask, bool use_abs)
 {
-  float best = -FLT_MAX;
+  float best = -std::numeric_limits<float>::infinity();
   for (std::size_t i = 0; i < data.size(); ++i) {
     if (mask.at(i)) continue;
     const float v = use_abs ? std::fabs(data.at(i)) : data.at(i);

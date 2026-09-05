@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include <fast_deconv/core/dims.hpp>
 #include <utility>
 
 namespace fast_deconv::linalg {
@@ -51,6 +52,8 @@ struct fft_dims {
     padding_ncol = (padded_ncol - ncol) / 2;
     freq_nrow = padded_nrow;
     freq_ncol = padded_ncol / 2 + 1;
+    // padded_total()/freq_total()/input_total() all return int; padding is the caller's.
+    core::check_plane_fits_int32(padded_nrow, padded_ncol, "padded fft");
   }
 
   int input_total() const { return input_nrow * input_ncol; }

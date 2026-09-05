@@ -4,13 +4,10 @@ find_package(GTest CONFIG REQUIRED)
 # Unit tests (label UNIT). The sources are backend-agnostic: every
 # transfer goes through core::exec_ctx's neutral primitives, so the
 # same files compile for both backends.
-#
-# They only PASS on cuda — each host kernel is still a stub that throws
-# "host backend not implemented yet", so on host the ones that drive a
-# kernel fail until it lands.
 #-------------------------------------------------------------------#
 add_executable(fast_deconv_unit_tests
   test_convergence.cpp
+  test_large_index.cpp
   test_resources.cpp
   test_fft.cpp
   test_linalg.cpp
@@ -23,6 +20,7 @@ add_executable(fast_deconv_unit_tests
   test_gain.cpp
   test_multi_frequency.cpp
   test_scales.cpp
+  test_conv_psf_cache.cpp
   test_ddmsc_class.cpp
 )
 

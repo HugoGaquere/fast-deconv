@@ -28,6 +28,12 @@ void bind_ddmsc(py::module_& m)
       .value("no_components", fast_deconv::common::convergence_status::no_components)
       .finalize();
 
+  py::native_enum<fast_deconv::algorithm::psf_cache_mode>(ddmsc_module, "PsfCacheMode", "enum.Enum")
+      .value("lazy_pair", fast_deconv::algorithm::psf_cache_mode::lazy_pair)
+      .value("lazy_scale", fast_deconv::algorithm::psf_cache_mode::lazy_scale)
+      .value("eager_all", fast_deconv::algorithm::psf_cache_mode::eager_all)
+      .finalize();
+
   py::class_<ddmsc::ddmsc_result>(ddmsc_module, "DDMSCResult")
       .def_readonly("peak_coords", &ddmsc::ddmsc_result::peak_coords)
       .def_readonly("scales", &ddmsc::ddmsc_result::scales)
@@ -71,6 +77,9 @@ void bind_ddmsc(py::module_& m)
       .def_property("auto_mask_peak_threshold", &ddmsc::Ddmsc::auto_mask_peak_threshold,
                     &ddmsc::Ddmsc::set_auto_mask_peak_threshold)
       .def_property("auto_mask_rms_threshold", &ddmsc::Ddmsc::auto_mask_rms_threshold,
-                    &ddmsc::Ddmsc::set_auto_mask_rms_threshold);
+                    &ddmsc::Ddmsc::set_auto_mask_rms_threshold)
+      .def_property("psf_cache_policy", &ddmsc::Ddmsc::psf_cache_policy, &ddmsc::Ddmsc::set_psf_cache_policy)
+      .def_property("psf_cache_budget_bytes", &ddmsc::Ddmsc::psf_cache_budget_bytes,
+                    &ddmsc::Ddmsc::set_psf_cache_budget_bytes);
 }
 }  // namespace fast_deconv::python
