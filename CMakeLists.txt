@@ -37,6 +37,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(FAST_DECONV_BUILD_TOOLS "Build the replay executable" OFF)
 option(FAST_DECONV_BUILD_BENCHMARKS "Build CUDA benchmarks" OFF)
+option(FAST_DECONV_WITH_TRACY "Link the Tracy client so core/profiler.hpp emits Tracy zones" OFF)
 if(SKBUILD)
   # Disable C++ tests for Python builds, even if the cache previously enabled them.
   set(BUILD_TESTING OFF)
@@ -109,6 +110,22 @@ find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(emu CONFIG REQUIRED)
 
+if(FAST_DECONV_WITH_TRACY)
+  # Not from conan: conancenter tops out at 0.13.1, and the client must match
+  # the server version exactly. One .cpp file, so building it here is cheap.
+  include(FetchContent)
+  FetchContent_Declare(tracy
+    GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+    GIT_TAG v0.14.1
+    GIT_SHALLOW TRUE
+  )
+  # Both default OFF upstream; TRACY_ENABLE is what compiles the client in at all,
+  # and on_demand keeps a run with no profiler attached from buffering or costing.
+  set(TRACY_ENABLE ON CACHE BOOL "" FORCE)
+  set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(tracy)
+endif()
+
 if(NOT FAST_DECONV_WITH_CUDA)
   find_package(pocketfft CONFIG REQUIRED)
   find_package(nvtx CONFIG REQUIRED)
@@ -140,6 +157,11 @@ target_link_libraries(fast_deconv PUBLIC
   spdlog::spdlog
 )
 
+if(FAST_DECONV_WITH_TRACY)
+  # PUBLIC: core/profiler.hpp is a public header, so consumers need TRACY_ENABLE too.
+  target_link_libraries(fast_deconv PUBLIC Tracy::TracyClient)
+endif()
+
 if(FAST_DECONV_WITH_CUDA)
   target_link_libraries(fast_deconv PUBLIC emu::emu CUDA::cublas CUDA::cufft)
   # CUDA builds use the toolkit's NVTX3 headers.
@@ -151,7 +173,7 @@ else()
   target_link_libraries(fast_deconv PRIVATE pocketfft::pocketfft)
   # Static-library link dependencies still reach consumers with PRIVATE scope.
   target_link_libraries(fast_deconv PRIVATE OpenMP::OpenMP_CXX)
-  # PUBLIC: core/nvtx.hpp is a public header, so consumers need the include dir too.
+  # PUBLIC: core/profiler.hpp is a public header, so consumers need the include dir too.
   target_link_libraries(fast_deconv PUBLIC nvtx::nvtx)
 endif()
 

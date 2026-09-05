@@ -5,6 +5,7 @@
 #include <cstring>
 #include <emu/submdspan.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
+#include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
 #include <limits>
 #include <stdexcept>
@@ -42,6 +43,7 @@ void make_gaussian_kernels_async(const core::exec_ctx& ctx, core::span1d<float> 
 void convolve_with_scales(const linalg::convolve_ctx& conv, core::span2d<float> dirty, core::span3d<float> scales,
                           core::span3d<float> out_scaled_dirty)
 {
+  FD_PROFILE_FN();
   const core::exec_ctx& ctx = conv.ctx();  // plans run on this lane
   const linalg::fft_dims& dims = conv.dims();
   const int n_scales = out_scaled_dirty.extent(0);
@@ -108,6 +110,7 @@ void convolve_with_scales(const linalg::convolve_ctx& conv, core::span2d<float> 
 int scale_selection(const core::exec_ctx& ctx, core::span3d<float> scaled_dirty, core::host_span1d<float> bias,
                     const std::vector<int>& retired_scales)
 {
+  FD_PROFILE_FN();
   assert(scaled_dirty.is_exhaustive());
 
   const int n_scales = scaled_dirty.extent(0);
@@ -140,6 +143,7 @@ void convolve_psf_with_scale_async(const linalg::convolve_ctx& conv, core::span3
                                    psf_convolve_scratch& scratch, core::span3d<float> out_conv_psf,
                                    core::span2d<float> out_conv2_mean)
 {
+  FD_PROFILE_FN();
   const core::exec_ctx& ctx = conv.ctx();  // plans run on this lane
   const linalg::fft_dims& dims = conv.dims();
   const int n_freq = psf.extent(0);

@@ -13,6 +13,7 @@
 #   ./scripts/build.sh all             # both backends, Release
 #   ./scripts/build.sh cuda Debug      # cuda, Debug
 #   ./scripts/build.sh --flamegraph    # cuda, Release, with perf-friendly stacks
+#   ./scripts/build.sh host --tracy    # host, Release, Tracy client linked in
 #   ./scripts/build.sh all -t          # both backends, Release, then ctest
 #   ./scripts/build.sh -t=Mask         # cuda, Release, then ctest -R Mask
 #   ./scripts/build.sh --python        # cuda wheel into dist/cuda
@@ -20,6 +21,11 @@
 #
 # --python builds the wheel instead of the C++ tree. -t and --flamegraph do not
 # apply to it: the test suite is C++/GTest only.
+#
+# --tracy reuses the same tree as a plain build, so toggling it rebuilds. It
+# implies the --flamegraph flags: Tracy's sampler needs frame pointers and
+# symbols. The client is fetched at configure time and must match the server
+# version: v0.14.1, which is what `dnf install tracy` provides.
 
 set -euo pipefail
 
@@ -32,6 +38,7 @@ RUN_TESTS=0
 CTEST_FILTER=
 BUILD_PYTHON=0
 BUILD_FLAMEGRAPH=0
+BUILD_TRACY=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -42,8 +49,9 @@ for arg in "$@"; do
     -t=*|--test=*) RUN_TESTS=1; CTEST_FILTER="${arg#*=}" ;;
     -p|--python)   BUILD_PYTHON=1 ;;
     -f|--flamegraph) BUILD_FLAMEGRAPH=1 ;;
-    -h|--help)     sed -n '3,23p' "${BASH_SOURCE[0]}"; exit 0 ;;
-    *) echo "usage: $0 [cuda|host|all] [Release|Debug] [-t[=REGEX]] [--flamegraph] [--python]" >&2; exit 2 ;;
+    --tracy)       BUILD_TRACY=1 ;;
+    -h|--help)     sed -n '3,29p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "usage: $0 [cuda|host|all] [Release|Debug] [-t[=REGEX]] [--flamegraph] [--tracy] [--python]" >&2; exit 2 ;;
   esac
 done
 
@@ -60,13 +68,23 @@ if [ "$BUILD_PYTHON" -eq 1 ] && [ "$BUILD_FLAMEGRAPH" -eq 1 ]; then
   exit 2
 fi
 
+if [ "$BUILD_PYTHON" -eq 1 ] && [ "$BUILD_TRACY" -eq 1 ]; then
+  echo "--tracy cannot be combined with --python" >&2
+  exit 2
+fi
+
 # Pass empty values in normal builds so profiling flags from an earlier CMake
 # configure do not remain cached after --flamegraph is removed.
 CMAKE_CXX_PROFILE_FLAGS=
 CMAKE_CUDA_PROFILE_FLAGS=
-if [ "$BUILD_FLAMEGRAPH" -eq 1 ]; then
+if [ "$BUILD_FLAMEGRAPH" -eq 1 ] || [ "$BUILD_TRACY" -eq 1 ]; then
   CMAKE_CXX_PROFILE_FLAGS="-g -fno-omit-frame-pointer"
   CMAKE_CUDA_PROFILE_FLAGS="-g -Xcompiler=-fno-omit-frame-pointer"
+fi
+
+CMAKE_WITH_TRACY=OFF
+if [ "$BUILD_TRACY" -eq 1 ]; then
+  CMAKE_WITH_TRACY=ON
 fi
 
 CONAN_WITH_TESTS=False
@@ -109,6 +127,7 @@ for BACKEND in "${BACKENDS[@]}"; do
         -DBUILD_TESTING="$RUN_TESTS" \
         -DFAST_DECONV_BUILD_TOOLS=ON \
         -DFAST_DECONV_BUILD_BENCHMARKS=ON \
+        -DFAST_DECONV_WITH_TRACY="$CMAKE_WITH_TRACY" \
         -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
         -DCMAKE_CXX_FLAGS="$CMAKE_CXX_PROFILE_FLAGS" \
         -DCMAKE_CUDA_FLAGS="$CMAKE_CUDA_PROFILE_FLAGS"

@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/matrix/argmax.hpp>
 #include <limits>
 
@@ -10,6 +11,7 @@ namespace fast_deconv::matrix {
 
 void argmax_ctx::run_async(core::span2d<float> data)
 {
+  FD_PROFILE_FN();
   assert(data.is_exhaustive());
   assert(data.size() == n_elements_);
 
