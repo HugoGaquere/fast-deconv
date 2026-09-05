@@ -3,7 +3,7 @@
 #include <fast_deconv/algorithm/conv_psf_cache.hpp>
 #include <fast_deconv/common/gain.hpp>
 #include <fast_deconv/core/logger.hpp>
-#include <fast_deconv/core/nvtx.hpp>
+#include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
 #include <stdexcept>
 #include <utility>
@@ -45,7 +45,7 @@ void conv_psf_cache::configure(core::span1d<const float> weights, std::vector<fl
 
 conv_psf_cache::entry conv_psf_cache::build(int scale, int facet)
 {
-  FD_NVTX_RANGE("conv_psf_cache/build");
+  FD_PROFILE_SCOPE("conv_psf_cache/build");
   const core::exec_ctx& lane = conv_.ctx();
   core::span3d<float> raw = emu::submdspan(raw_psfs_, facet);
 
@@ -121,13 +121,13 @@ conv_psf_cache::entry conv_psf_cache::get(int scale, int facet)
 
 void conv_psf_cache::prefetch_scale(int scale)
 {
-  FD_NVTX_RANGE("conv_psf_cache/prefetch_scale");
+  FD_PROFILE_SCOPE_FMT("conv_psf_cache/prefetch_scale[{}]", scale);
   for (int f = 0; f < n_facets_; f++) get(scale, f);
 }
 
 void conv_psf_cache::prefetch_all()
 {
-  FD_NVTX_RANGE("conv_psf_cache/prefetch_all");
+  FD_PROFILE_SCOPE("conv_psf_cache/prefetch_all");
   for (int s = 0; s < n_scales_; s++) prefetch_scale(s);
 }
 

@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/matrix/tiled_argmax.hpp>
 #include <stdexcept>
 
@@ -65,6 +66,7 @@ peak tiled_argmax_ctx::final_combine() const
 
 peak tiled_argmax_ctx::run(core::span2d<float> data)
 {
+  FD_PROFILE_FN();
   assert(data.is_exhaustive());
   assert(data.extent(0) == extents_.extent(0) && data.extent(1) == extents_.extent(1));
 
@@ -79,6 +81,7 @@ peak tiled_argmax_ctx::run(core::span2d<float> data)
 peak tiled_argmax_ctx::run_incremental(core::span2d<float> data, int peak_row, int peak_col, int foot_height,
                                        int foot_width)
 {
+  FD_PROFILE_FN();
   assert(data.is_exhaustive());
   assert(data.extent(0) == extents_.extent(0) && data.extent(1) == extents_.extent(1));
 

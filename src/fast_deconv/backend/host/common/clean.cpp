@@ -1,4 +1,5 @@
 #include <fast_deconv/common/clean.hpp>
+#include <fast_deconv/core/profiler.hpp>
 
 namespace fast_deconv::common {
 
@@ -10,6 +11,7 @@ constexpr long kMinParallelPixels = 64 * 1024;
 void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> residual, core::span2d<float> psf,
                               index2d peak_coords, float gain)
 {
+  FD_PROFILE_FN();
   auto ovr = compute_overlap_region(peak_coords, residual.extent(0), residual.extent(1), psf.extent(0), psf.extent(1));
 
 #pragma omp parallel for if (static_cast<long>(ovr.nrow) * ovr.ncol > kMinParallelPixels)
@@ -23,6 +25,7 @@ void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> res
 void subtract_component_async(const core::exec_ctx& ctx, core::span3d<float> residual, core::span3d<float> psf,
                               core::span1d<float> spectral_coeffs, index2d peak_coords, float gain)
 {
+  FD_PROFILE_FN();
   int n_freq = residual.extent(0);
   auto ovr = compute_overlap_region(peak_coords, residual.extent(1), residual.extent(2), psf.extent(1), psf.extent(2));
 
