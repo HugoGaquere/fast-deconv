@@ -100,6 +100,35 @@ std::vector<float> iota_image(int n, float offset = 0.0f)
 
 class FftLayout : public fdtest::BackendTest {};
 
+TEST_F(FftLayout, BatchedTransformRoundTripPreservesShapeAndNormalization)
+{
+  const auto sr = res().make_ctx();
+  for (const auto& [rows, cols] : {std::pair{8, 10}, std::pair{9, 15}, std::pair{10, 9}}) {
+    for (int batch : {1, 3, 9}) {
+      SCOPED_TRACE(::testing::Message() << rows << 'x' << cols << " batch=" << batch);
+      linalg::convolve_ctx conv(sr, rows, cols, batch, batch, 1, 1.0f);
+      fdtest::scoped_work_area work(sr, conv);
+      const auto& dims = conv.dims();
+      const auto count = static_cast<std::size_t>(batch) * dims.padded_total();
+      fdtest::device_buffer<float> real(sr, count), output(sr, count);
+      fdtest::device_buffer<linalg::complex_type> spectrum(sr, static_cast<std::size_t>(batch) * dims.freq_total());
+      std::vector<float> input(count);
+      // The inverse consumes its spectrum. Exercise reuse with fresh input on
+      // the same context/buffers, as successive scale convolutions do.
+      for (int rep = 0; rep < 2; ++rep) {
+        for (std::size_t i = 0; i < count; ++i)
+          input[i] = static_cast<float>((i * 17 + rep * 11) % 101) / 101.0f - 0.5f;
+        real.from_host(input);
+        conv.forward_async(real.get(), spectrum.get());
+        conv.backward_async(spectrum.get(), output.get());
+        const auto actual = output.to_host();
+        for (std::size_t i = 0; i < count; ++i)
+          ASSERT_NEAR(actual[i] / dims.padded_total(), input[i], 2e-5f) << "rep=" << rep << " index=" << i;
+      }
+    }
+  }
+}
+
 TEST_F(FftLayout, PadIfftshiftMatchesHostOracle)
 {
   // Odd pad deltas on both axes (8-5=3, 9-6=3) exercise the convention where

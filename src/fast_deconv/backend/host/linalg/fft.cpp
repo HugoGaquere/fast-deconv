@@ -100,9 +100,15 @@ void convolve_ctx::backward_async(complex_type* input, float* output, int plan_i
   FD_PROFILE_FN();
   const pf::shape_t shape{static_cast<std::size_t>(backward_batch_), static_cast<std::size_t>(dims_.padded_nrow),
                           static_cast<std::size_t>(dims_.padded_ncol)};
-  pf::c2r(shape, byte_strides<complex_type>(dims_.freq_nrow, dims_.freq_ncol),
-          byte_strides<float>(dims_.padded_nrow, dims_.padded_ncol), kFftAxes, pf::BACKWARD, input, output, 1.0f,
-          fft_threads());
+  const pf::shape_t freq_shape{static_cast<std::size_t>(backward_batch_), static_cast<std::size_t>(dims_.freq_nrow),
+                               static_cast<std::size_t>(dims_.freq_ncol)};
+  const auto freq_strides = byte_strides<complex_type>(dims_.freq_nrow, dims_.freq_ncol);
+  const auto threads = fft_threads();
+  // Consume the caller's disposable spectrum as the row-transform intermediate.
+  // Avoiding pocketfft to allocate during its processing.
+  pf::c2c(freq_shape, freq_strides, freq_strides, pf::shape_t{1}, pf::BACKWARD, input, input, 1.0f, threads);
+  pf::c2r(shape, freq_strides, byte_strides<float>(dims_.padded_nrow, dims_.padded_ncol), std::size_t{2}, pf::BACKWARD,
+          input, output, 1.0f, threads);
 }
 
 }  // namespace fast_deconv::linalg
