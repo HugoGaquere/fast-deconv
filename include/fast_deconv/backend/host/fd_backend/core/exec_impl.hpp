@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <fast_deconv/core/profiler.hpp>
 #include <mutex>
 #include <new>
 #include <unordered_map>
@@ -54,6 +55,8 @@ class block_pool {
       throw;
     }
     used_bytes_ += num_bytes;
+    // Under the lock: Tracy needs the reported order to match the real one.
+    FD_PROFILE_ALLOC(ptr, num_bytes);
     return ptr;
   }
 
@@ -71,6 +74,7 @@ class block_pool {
     const std::uint64_t num_bytes = it->second;
     live_.erase(it);
     used_bytes_ -= num_bytes;
+    FD_PROFILE_FREE(ptr);
 
     try {
       free_lists_[num_bytes].push_back(ptr);

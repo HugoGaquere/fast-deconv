@@ -37,7 +37,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(FAST_DECONV_BUILD_TOOLS "Build the replay executable" OFF)
 option(FAST_DECONV_BUILD_BENCHMARKS "Build CUDA benchmarks" OFF)
-option(FAST_DECONV_WITH_TRACY "Link the Tracy client so core/profiler.hpp emits Tracy zones" OFF)
+option(FAST_DECONV_WITH_PROFILER "Enable core/profiler.hpp: NVTX on cuda, Tracy on host" OFF)
 if(SKBUILD)
   # Disable C++ tests for Python builds, even if the cache previously enabled them.
   set(BUILD_TESTING OFF)
@@ -110,7 +110,7 @@ find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(emu CONFIG REQUIRED)
 
-if(FAST_DECONV_WITH_TRACY)
+if(FAST_DECONV_WITH_PROFILER AND NOT FAST_DECONV_WITH_CUDA)
   # Not from conan: conancenter tops out at 0.13.1, and the client must match
   # the server version exactly. One .cpp file, so building it here is cheap.
   include(FetchContent)
@@ -128,7 +128,6 @@ endif()
 
 if(NOT FAST_DECONV_WITH_CUDA)
   find_package(pocketfft CONFIG REQUIRED)
-  find_package(nvtx CONFIG REQUIRED)
   find_package(OpenMP REQUIRED COMPONENTS CXX)
 endif()
 
@@ -157,15 +156,13 @@ target_link_libraries(fast_deconv PUBLIC
   spdlog::spdlog
 )
 
-if(FAST_DECONV_WITH_TRACY)
-  # PUBLIC: core/profiler.hpp is a public header, so consumers need TRACY_ENABLE too.
-  target_link_libraries(fast_deconv PUBLIC Tracy::TracyClient)
-endif()
-
 if(FAST_DECONV_WITH_CUDA)
   target_link_libraries(fast_deconv PUBLIC emu::emu CUDA::cublas CUDA::cufft)
-  # CUDA builds use the toolkit's NVTX3 headers.
-  target_link_libraries(fast_deconv PUBLIC CUDA::nvtx3)
+  if(FAST_DECONV_WITH_PROFILER)
+    # PUBLIC: core/profiler.hpp is a public header, so consumers need FD_NVTX_ENABLE too.
+    target_link_libraries(fast_deconv PUBLIC CUDA::nvtx3)
+    target_compile_definitions(fast_deconv PUBLIC FD_NVTX_ENABLE)
+  endif()
 else()
   # Use only the backend-neutral emu component for host builds.
   target_link_libraries(fast_deconv PUBLIC emu::core)
@@ -173,8 +170,10 @@ else()
   target_link_libraries(fast_deconv PRIVATE pocketfft::pocketfft)
   # Static-library link dependencies still reach consumers with PRIVATE scope.
   target_link_libraries(fast_deconv PRIVATE OpenMP::OpenMP_CXX)
-  # PUBLIC: core/profiler.hpp is a public header, so consumers need the include dir too.
-  target_link_libraries(fast_deconv PUBLIC nvtx::nvtx)
+  if(FAST_DECONV_WITH_PROFILER)
+    # PUBLIC: core/profiler.hpp is a public header, so consumers need TRACY_ENABLE too.
+    target_link_libraries(fast_deconv PUBLIC Tracy::TracyClient)
+  endif()
 endif()
 
 target_include_directories(fast_deconv PUBLIC

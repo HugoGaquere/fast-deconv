@@ -1,115 +1,65 @@
 #pragma once
 
-// Single instrumentation front end for the project: these macros fan out to
-// NVTX (Nsight Systems, next to the GPU timeline) and to Tracy (host timeline).
-// Nothing else in the codebase includes either tool directly (mirrors how
-// logger.hpp wraps spdlog).
-//
-// NVTX is on unless the build defines FD_NVTX_DISABLE.
-// Tracy is on when the Tracy client is linked (CMake option
-// FAST_DECONV_WITH_TRACY, or ./scripts/build.sh --tracy), which defines TRACY_ENABLE.
-//
-// Usage:
+// NVTX (CUDA) / Tracy (host) front end, enabled by FAST_DECONV_WITH_PROFILER.
 //   FD_PROFILE_FN();                        // zone named after the enclosing function
 //   FD_PROFILE_SCOPE("clean_loop");         // zone, literal name
 //   FD_PROFILE_SCOPE_FMT("outer[{}]", it);  // zone, fmt-formatted name
-//   FD_PROFILE_MARK("checkpoint");          // instantaneous event
-//   FD_PROFILE_FRAME();                     // end-of-frame marker (Tracy only)
-//
-// One zone per scope: Tracy names its RAII object after the scope, so two zones
-// in the same scope collide. Open a nested block if you need both.
+//   FD_PROFILE_MARK("checkpoint");          // instantaneous event, literal only
+// Tracy only:
+//   FD_PROFILE_FRAME();  FD_PROFILE_PLOT("rms", value);  FD_PROFILE_APPINFO(text);
+//   FD_PROFILE_ALLOC(ptr, n);  FD_PROFILE_FREE(ptr);
 
-//-------------------------------------------------------------------//
-// Tracy
-//-------------------------------------------------------------------//
 #if defined(TRACY_ENABLE)
-
-#define FD_PROFILE_HAS_TRACY 1
-
-#include <cstring>
-#include <tracy/Tracy.hpp>
-
-#define FD_PROFILE_TRACY_FN() ZoneScoped
-#define FD_PROFILE_TRACY_SCOPE(name) ZoneScopedN(name)
-// Tracy copies the text into its queue, so the label needs no lifetime care.
-#define FD_PROFILE_TRACY_NAME(label) ZoneName((label).data(), (label).size())
-#define FD_PROFILE_TRACY_MARK(msg) TracyMessage(msg, ::std::strlen(msg))
-#define FD_PROFILE_FRAME() FrameMark
-
-#else
-
-#define FD_PROFILE_TRACY_FN() ((void)0)
-#define FD_PROFILE_TRACY_SCOPE(name) ((void)0)
-#define FD_PROFILE_TRACY_NAME(label) ((void)0)
-#define FD_PROFILE_TRACY_MARK(msg) ((void)0)
-#define FD_PROFILE_FRAME() ((void)0)
-
-#endif
-
-//-------------------------------------------------------------------//
-// NVTX
-//-------------------------------------------------------------------//
-#if !defined(FD_NVTX_DISABLE)
-
-#define FD_PROFILE_HAS_NVTX 1
-
-#include <nvtx3/nvtx3.hpp>
-
-namespace fast_deconv::profiler {
-
-/// All ranges/marks emitted here land in the "fast_deconv" NVTX domain, so they
-/// show up as a dedicated track in Nsight Systems.
-struct domain {
-  static constexpr char const* name{"fast_deconv"};
-};
-
-using scoped_range = ::nvtx3::scoped_range_in<domain>;
-
-inline void mark(const char* msg) { ::nvtx3::mark_in<domain>(msg); }
-
-}  // namespace fast_deconv::profiler
-
-#define FD_PROFILE_NVTX_RANGE(name) \
-  ::fast_deconv::profiler::scoped_range _fd_profile_zone { name }
-#define FD_PROFILE_NVTX_MARK(msg) ::fast_deconv::profiler::mark(msg)
-
-#else
-
-#define FD_PROFILE_NVTX_RANGE(name) ((void)0)
-#define FD_PROFILE_NVTX_MARK(msg) ((void)0)
-
-#endif
-
-//-------------------------------------------------------------------//
-// Common API
-//-------------------------------------------------------------------//
-#if defined(FD_PROFILE_HAS_TRACY) || defined(FD_PROFILE_HAS_NVTX)
 
 #include <fmt/format.h>
 
 #include <string>
+#include <tracy/Tracy.hpp>
 
-#define FD_PROFILE_FN()  \
-  FD_PROFILE_TRACY_FN(); \
-  FD_PROFILE_NVTX_RANGE(__func__)
-
-#define FD_PROFILE_SCOPE(name)  \
-  FD_PROFILE_TRACY_SCOPE(name); \
-  FD_PROFILE_NVTX_RANGE(name)
-
-// The label outlives both probes: it is declared before them, so it is
-// destroyed after them.
+#define FD_PROFILE_FN() ZoneScoped
+#define FD_PROFILE_SCOPE(name) ZoneScopedN(name)
 #define FD_PROFILE_SCOPE_FMT(...)                                    \
-  FD_PROFILE_TRACY_FN();                                             \
+  ZoneScoped;                                                        \
   const ::std::string _fd_profile_label{::fmt::format(__VA_ARGS__)}; \
-  FD_PROFILE_TRACY_NAME(_fd_profile_label);                          \
-  FD_PROFILE_NVTX_RANGE(_fd_profile_label.c_str())
-
-#define FD_PROFILE_MARK(msg)    \
-  do {                          \
-    FD_PROFILE_TRACY_MARK(msg); \
-    FD_PROFILE_NVTX_MARK(msg);  \
+  ZoneName(_fd_profile_label.data(), _fd_profile_label.size())
+#define FD_PROFILE_MARK(msg) TracyMessageL(msg)
+#define FD_PROFILE_FRAME() FrameMark
+// Overloaded on int64_t/float/double, so callers cast ints.
+#define FD_PROFILE_PLOT(name, value) TracyPlot(name, value)
+// Bound once: TracyAppInfo reads its argument twice.
+#define FD_PROFILE_APPINFO(text)                                    \
+  do {                                                              \
+    const ::std::string _fd_profile_info{text};                     \
+    TracyAppInfo(_fd_profile_info.data(), _fd_profile_info.size()); \
   } while (0)
+#define FD_PROFILE_ALLOC(ptr, num_bytes) TracyAlloc(ptr, num_bytes)
+#define FD_PROFILE_FREE(ptr) TracyFree(ptr)
+
+#elif defined(FD_NVTX_ENABLE)
+
+#include <fmt/format.h>
+
+#include <nvtx3/nvtx3.hpp>
+#include <string>
+
+namespace fast_deconv::profiler {
+
+/// Dedicated "fast_deconv" track in Nsight Systems.
+struct domain {
+  static constexpr char const* name{"fast_deconv"};
+};
+
+}  // namespace fast_deconv::profiler
+
+#define FD_PROFILE_NVTX_RANGE(name) \
+  ::nvtx3::scoped_range_in<::fast_deconv::profiler::domain> _fd_profile_zone { name }
+#define FD_PROFILE_FN() FD_PROFILE_NVTX_RANGE(__func__)
+#define FD_PROFILE_SCOPE(name) FD_PROFILE_NVTX_RANGE(name)
+// Label declared first so it outlives the range.
+#define FD_PROFILE_SCOPE_FMT(...)                                    \
+  const ::std::string _fd_profile_label{::fmt::format(__VA_ARGS__)}; \
+  FD_PROFILE_NVTX_RANGE(_fd_profile_label.c_str())
+#define FD_PROFILE_MARK(msg) ::nvtx3::mark_in<::fast_deconv::profiler::domain>(msg)
 
 #else
 
@@ -118,4 +68,12 @@ inline void mark(const char* msg) { ::nvtx3::mark_in<domain>(msg); }
 #define FD_PROFILE_SCOPE_FMT(...) ((void)0)
 #define FD_PROFILE_MARK(msg) ((void)0)
 
+#endif
+
+#if !defined(TRACY_ENABLE)
+#define FD_PROFILE_FRAME() ((void)0)
+#define FD_PROFILE_PLOT(name, value) ((void)0)
+#define FD_PROFILE_APPINFO(text) ((void)0)
+#define FD_PROFILE_ALLOC(ptr, num_bytes) ((void)0)
+#define FD_PROFILE_FREE(ptr) ((void)0)
 #endif

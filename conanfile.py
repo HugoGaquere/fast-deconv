@@ -38,8 +38,6 @@ class Recipe(ConanFile):
             # cache_size keeps the twiddle plans alive across calls; the
             # default of 0 re-plans on every transform.
             self.requires("pocketfft/0.0.0.cci.20240801", options={"cache_size": 8})
-            # NVTX3 headers on their own; the cuda build takes them from the toolkit.
-            self.requires("nvtx/3.3.0")
 
     @property
     def build_tests(self):

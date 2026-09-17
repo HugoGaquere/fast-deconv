@@ -1,5 +1,6 @@
 #include <cmath>
 #include <fast_deconv/common/multi_frequency.hpp>
+#include <fast_deconv/core/profiler.hpp>
 #include <stdexcept>
 
 #include "../detail/gauss_jordan.hpp"
@@ -20,6 +21,7 @@ void fit_coefficients(const core::exec_ctx& ctx, const core::span3d<float> resid
                       const core::span2d<float> xdes, const common::index2d peak_coords,
                       core::span1d<float> compact_coeffs_out, core::span1d<float> coeffs_per_chan_out)
 {
+  FD_PROFILE_FN();
   const int n_freq = xdes.extent(0);
   const int n_order = xdes.extent(1);
   const auto [peak_row, peak_col] = peak_coords;

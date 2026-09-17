@@ -1,3 +1,4 @@
+#include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/linalg/pseudo_inverse.hpp>
 #include <vector>
 
@@ -10,6 +11,7 @@ namespace fast_deconv::linalg {
 // the Gram matrix is the same badly-conditioned one the spectral fit solves.
 void compute_pseudo_inverse(const core::exec_ctx& ctx, const float* d_A, float* d_Apinv, int n_rows, int n_cols)
 {
+  FD_PROFILE_FN();
   const auto A = [&](int r, int c) { return static_cast<double>(d_A[r * n_cols + c]); };
 
   const bool underdetermined = n_cols > n_rows;

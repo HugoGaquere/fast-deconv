@@ -6,6 +6,7 @@
 #include <emu/submdspan.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/common/mask.hpp>
+#include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
 #include <fast_deconv/morphology/dilation.hpp>
@@ -16,6 +17,7 @@ namespace fast_deconv::common {
 void mask_and_abs_async(const core::exec_ctx& ctx, core::span2d<float> data, core::span2d<bool> mask, float fill_value,
                         bool abs)
 {
+  FD_PROFILE_FN();
   assert(data.is_exhaustive() && mask.is_exhaustive());
   assert(data.extents() == mask.extents());
 
@@ -29,6 +31,7 @@ void mask_and_abs_async(const core::exec_ctx& ctx, core::span2d<float> data, cor
 void mask_and_abs_async(const core::exec_ctx& ctx, core::span3d<float> data, core::span2d<bool> mask, float fill_value,
                         bool abs)
 {
+  FD_PROFILE_FN();
   assert(data.extent(1) == mask.extent(0) && data.extent(2) == mask.extent(1));
 
   for (int f = 0; f < data.extent(0); f++) {
@@ -39,6 +42,7 @@ void mask_and_abs_async(const core::exec_ctx& ctx, core::span3d<float> data, cor
 void mask_and_abs_async(const core::exec_ctx& ctx, core::span3d<float> data, core::span3d<bool> mask, float fill_value,
                         bool abs)
 {
+  FD_PROFILE_FN();
   assert(data.extents() == mask.extents());
 
   for (int f = 0; f < data.extent(0); f++) {
@@ -48,6 +52,7 @@ void mask_and_abs_async(const core::exec_ctx& ctx, core::span3d<float> data, cor
 
 void mask_less_than_threshold(const core::exec_ctx& ctx, core::span2d<float> data, float threshold, float fill_value)
 {
+  FD_PROFILE_FN();
   assert(data.is_exhaustive());
 
   float* d = data.data_handle();
@@ -60,6 +65,7 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
                      core::span1d<float> scale_sigmas, float fft_padding, core::span2d<bool> external_mask,
                      core::span3d<bool> mask_per_scale)
 {
+  FD_PROFILE_FN();
   assert(mask_per_scale.is_exhaustive());
   assert(external_mask.is_exhaustive());
   assert(central_facet_psfs.is_exhaustive());
