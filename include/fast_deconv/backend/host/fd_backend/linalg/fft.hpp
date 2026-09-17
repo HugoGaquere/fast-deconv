@@ -27,6 +27,8 @@ class convolve_ctx {
   convolve_ctx& operator=(convolve_ctx&&) = delete;
 
   void forward_async(float* input, complex_type* output) const;
+  /// Unnormalized inverse; consumes input as scratch. Refill it before reuse.
+  /// The full batch is transformed without a separate batch-sized intermediate.
   void backward_async(complex_type* input, float* output, int plan_idx = 0) const;
 
   void bind_work_area(void* /*work_area*/) {}
