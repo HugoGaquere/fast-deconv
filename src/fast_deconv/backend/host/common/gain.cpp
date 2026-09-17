@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <emu/submdspan.hpp>
 #include <fast_deconv/common/gain.hpp>
+#include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
 #include <limits>
 
@@ -9,6 +10,7 @@ namespace fast_deconv::common {
 std::vector<float> compute_gain_batched(const core::exec_ctx& ctx, const core::span4d<float>& psfs,
                                         const core::span1d<const float>& weights_freq, float gamma)
 {
+  FD_PROFILE_FN();
   const int n_batch = psfs.extent(0);
   const int psf_npix = psfs.extent(2) * psfs.extent(3);
   auto pmean = ctx.alloc_mdcontainer_async<float>(psfs.extent(2), psfs.extent(3));
@@ -30,6 +32,7 @@ std::vector<float> compute_gain_batched(const core::exec_ctx& ctx, const core::s
 std::vector<float> compute_all_gains_batched(const core::exec_ctx& ctx, const core::span5d<float>& psfs,
                                              const core::span1d<const float>& weights_freq, float gamma)
 {
+  FD_PROFILE_FN();
   const int n_scales = psfs.extent(0);
   const int n_facets = psfs.extent(1);
   std::vector<float> all_gains;

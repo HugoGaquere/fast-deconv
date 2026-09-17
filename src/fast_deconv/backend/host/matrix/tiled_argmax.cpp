@@ -24,6 +24,7 @@ constexpr std::size_t kMinParallelCombine = 8192;
 tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> extents, int tile_size)
     : ctx_(ctx), extents_(extents), tile_size_(tile_size)
 {
+  FD_PROFILE_FN();
   if (extents_.extent(0) <= 0 || extents_.extent(1) <= 0 || tile_size_ <= 0)
     throw std::invalid_argument("tiled_argmax: image extents and tile_size must be > 0");
 
@@ -34,6 +35,7 @@ tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> exte
 
 void tiled_argmax_ctx::reduce_tile(core::span2d<float> data, int tile_x, int tile_y)
 {
+  FD_PROFILE_FN();
   const int image_nrow = extents_.extent(0);
   const int image_ncol = extents_.extent(1);
   const int row0 = tile_y * tile_size_;
@@ -56,6 +58,7 @@ void tiled_argmax_ctx::reduce_tile(core::span2d<float> data, int tile_x, int til
 
 peak tiled_argmax_ctx::final_combine() const
 {
+  FD_PROFILE_FN();
   peak result = detail::kPeakIdentity;
   const std::size_t n_tiles = tiles_.size();
 #pragma omp parallel for reduction(peak_max : result) if (n_tiles > kMinParallelCombine)

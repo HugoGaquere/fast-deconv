@@ -31,6 +31,7 @@ void argmax_ctx::run_async(core::span2d<float> data)
 
 peak argmax_ctx::run(core::span2d<float> data)
 {
+  FD_PROFILE_FN();
   run_async(data);
   return last_;
 }

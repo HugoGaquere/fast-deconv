@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
 
 namespace fast_deconv::linalg {
@@ -8,6 +9,7 @@ namespace fast_deconv::linalg {
 void weighted_sum_async(const core::exec_ctx& ctx, const float* __restrict A, const float* __restrict weights,
                         float* __restrict out, int w, int n)
 {
+  FD_PROFILE_FN();
   // Pixel-major: each thread owns a slice of `out`, and the accumulator stays in a register.
 #pragma omp parallel for
   for (int i = 0; i < n; i++) {
@@ -23,6 +25,7 @@ void weighted_sum_async(const core::exec_ctx& ctx, const float* __restrict A, co
 void weighted_sum_async(const core::exec_ctx& ctx, const core::span3d<const float> A,
                         const core::span1d<const float> weights, core::span2d<float> out)
 {
+  FD_PROFILE_FN();
   weighted_sum_async(ctx, A.data_handle(), weights.data_handle(), out.data_handle(), static_cast<int>(weights.size()),
                      static_cast<int>(static_cast<std::int64_t>(A.extent(1)) * A.extent(2)));
 }

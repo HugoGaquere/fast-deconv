@@ -1,3 +1,4 @@
+#include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/morphology/dilation.hpp>
 
 namespace fast_deconv::morphology {
@@ -5,6 +6,7 @@ namespace fast_deconv::morphology {
 void binary_dilation(const core::exec_ctx& ctx, core::span2d<bool> data, core::span2d<bool> structure,
                      common::roi structure_roi, core::span2d<bool> out)
 {
+  FD_PROFILE_FN();
   const int nrow = data.extent(0);
   const int ncol = data.extent(1);
   const int nrow_se = structure_roi.rmax - structure_roi.rmin;

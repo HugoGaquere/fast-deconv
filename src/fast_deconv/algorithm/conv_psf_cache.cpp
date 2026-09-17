@@ -93,6 +93,7 @@ void conv_psf_cache::evict_until_fits(std::size_t incoming)
 
 conv_psf_cache::entry conv_psf_cache::get(int scale, int facet)
 {
+  FD_PROFILE_SCOPE("conv_psf_cache/get");
   if (weights_host_.empty()) throw std::logic_error("conv_psf_cache::get called before configure()");
   if (scale < 0 || scale >= n_scales_ || facet < 0 || facet >= n_facets_)
     throw std::out_of_range("conv_psf_cache::get: (scale, facet) out of range");

@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <emu/submdspan.hpp>
 #include <fast_deconv/algorithm/ddmsc_cycles.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
@@ -85,6 +86,9 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
 
   FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_dims.input_nrow,
                                       psf_dims.input_ncol));
+  // Same banner in the trace description, so a .tracy file says what it ran on.
+  FD_PROFILE_APPINFO(format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_dims.input_nrow,
+                                       psf_dims.input_ncol));
 
   // The spectral fit needs about two bands per coefficient to be a fit rather than an
   // interpolation; at or below one, it stops being identifiable and only the minimum-norm
@@ -95,20 +99,18 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
         "Coefficients are extrapolated to the degrid frequencies, where the unconstrained directions dominate.",
         n_freq, n_order);
 
-  FD_PROFILE_MARK("init/queue_residual_and_kernels");
+  FD_PROFILE_MARK("init/mean_residual");
   // Initial mean residual: owning buffer plus a mutable view that gets
   // re-seated onto scale slices during the loop.
   auto mean_residual_buf = stream_a.alloc_mdcontainer_async<float>(dirty_nrows, dirty_ncols);
   core::span2d<float> mean_residual(mean_residual_buf.data_handle(), dirty_nrows, dirty_ncols);
   linalg::weighted_sum_async(stream_a, dirty, weights_freq, mean_residual);
 
-  FD_PROFILE_MARK("init/initial_stats begin");
   // Fused max + rms reduction: one CUB sweep, one D2H, one sync per call.
   matrix::stats_ctx stats_ws{stream_a, mean_residual_n_items, p.clean_negative};
 
   // Compute and track initial flux and RMS
   auto [track_flux, track_rms] = stats_ws.run(mean_residual, device.mask_d);
-  FD_PROFILE_MARK("init/initial_stats end");
 
   // Overflowed in a previous cycle
   if (!std::isfinite(track_flux) || !std::isfinite(track_rms))
@@ -154,7 +156,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   // of rescanning all of mean_residual. Re-seeded with a full pass each outer iter.
   matrix::tiled_argmax_ctx tiled_ws{stream_a, mean_residual.extents(), 64};
 
-  FD_PROFILE_MARK("init/psf_cache_guard begin");
+  FD_PROFILE_MARK("init/psf_cache");
   // The convolved PSFs are a pure function of raw_psfs and scale_sigmas (session
   // constants) plus weights_freq and gamma, so only those two can drop the cache.
   auto& psf_cache = device.psf_cache;
@@ -164,7 +166,6 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   psf_cache.set_budget_bytes(p.psf_cache_budget_bytes);
   psf_cache.configure(weights_freq, std::move(weights_host), p.gamma);
   if (p.psf_cache_policy == psf_cache_mode::eager_all) psf_cache.prefetch_all();
-  FD_PROFILE_MARK("init/psf_cache_guard end");
 
   // Loop-only buffers
   auto scale_kernels = stream_a.alloc_mdcontainer_async<float>(n_scales, scale_dims.freq_nrow, scale_dims.freq_ncol);
@@ -192,6 +193,8 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
     FD_PROFILE_SCOPE("outer_iter");
     FD_LOG_DEBUG("run_ddmsc: outer iter start total_iterations={} track_flux={:.8f} track_rms={:.8f}", total_iterations,
                  track_flux, track_rms);
+    FD_PROFILE_PLOT("peak_flux", track_flux);
+    FD_PROFILE_PLOT("rms", track_rms);
 
     float auto_mask_threshold =
         p.auto_mask_peak_threshold.value_or(p.auto_mask_rms_threshold.value_or(0.f) * track_rms);
@@ -246,6 +249,9 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
 
     const float threshold = peak_value * p.peak_factor;
 
+    FD_PROFILE_PLOT("scale", static_cast<std::int64_t>(selected_scale_idx));
+    FD_PROFILE_PLOT("scale_peak", peak_value);
+
     common::mask_less_than_threshold(stream_a, mean_residual, threshold, -std::numeric_limits<float>::infinity());
 
     // Seed the tile cache against the masked buffer for this scale. The peak is
@@ -256,7 +262,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
     FD_LOG_DEBUG("run_ddmsc: clean loop start scale={} peak={:.8f} threshold={:.8f} max_clean_iter={}",
                  selected_scale_idx, peak_value, threshold, p.max_clean_iteration);
 
-    FD_PROFILE_MARK("clean_loop begin");
+    FD_PROFILE_MARK("clean_loop");
     // Clean loop over mean residual
     int n_clean_iter = 0;
     while (peak_value > threshold && n_clean_iter < p.max_clean_iteration) {
@@ -296,7 +302,8 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
     // stream_b must finish its per-channel subtracts on `dirty` before
     // stream_a reads it in the weighted_sum below.
     stream_b.wait();
-    FD_PROFILE_MARK("clean_loop end");
+    FD_PROFILE_MARK("clean_loop synced");
+    FD_PROFILE_PLOT("clean_iters", static_cast<std::int64_t>(n_clean_iter));
 
     // FD_LOG_INFO("run_ddmsc: scale {} produced {} clean iterations", selected_scale_idx, n_clean_iter);
 
@@ -309,7 +316,6 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
 
     total_iterations += n_clean_iter;
 
-    FD_PROFILE_MARK("post_iter_stats begin");
     // Reset mean_residual view to the original owning buffer to store the new mean
     mean_residual = core::span2d<float>(mean_residual_buf.data_handle(), dirty_nrows, dirty_ncols);
     linalg::weighted_sum_async(stream_a, dirty, weights_freq, mean_residual);
@@ -320,7 +326,6 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
     // peak_flux pinned at 0.03776400 for ~1700 iterations while rms kept falling). Consider
     // computing the stats against the same mask the peak search is allowed to clean.
     auto [this_flux, this_rms] = stats_ws.run(mean_residual, device.mask_d);
-    FD_PROFILE_MARK("post_iter_stats end");
 
     if (last_selected_scale != selected_scale_idx) {
       const float flux_to_go = this_flux - stop_flux;
@@ -344,7 +349,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   // Closes the last iteration's frame; the loop body only opens a new one.
   FD_PROFILE_FRAME();
 
-  FD_PROFILE_MARK("finalize begin");
+  FD_PROFILE_MARK("finalize");
   stream_a.wait();
   stream_b.wait();
 

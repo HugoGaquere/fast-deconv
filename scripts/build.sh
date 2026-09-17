@@ -13,7 +13,8 @@
 #   ./scripts/build.sh all             # both backends, Release
 #   ./scripts/build.sh cuda Debug      # cuda, Debug
 #   ./scripts/build.sh --flamegraph    # cuda, Release, with perf-friendly stacks
-#   ./scripts/build.sh host --tracy    # host, Release, Tracy client linked in
+#   ./scripts/build.sh --profile       # cuda, Release, NVTX ranges compiled in
+#   ./scripts/build.sh host --profile  # host, Release, Tracy client linked in
 #   ./scripts/build.sh all -t          # both backends, Release, then ctest
 #   ./scripts/build.sh -t=Mask         # cuda, Release, then ctest -R Mask
 #   ./scripts/build.sh --python        # cuda wheel into dist/cuda
@@ -22,10 +23,11 @@
 # --python builds the wheel instead of the C++ tree. -t and --flamegraph do not
 # apply to it: the test suite is C++/GTest only.
 #
-# --tracy reuses the same tree as a plain build, so toggling it rebuilds. It
-# implies the --flamegraph flags: Tracy's sampler needs frame pointers and
-# symbols. The client is fetched at configure time and must match the server
-# version: v0.14.1, which is what `dnf install tracy` provides.
+# --profile reuses the same tree as a plain build, so toggling it rebuilds. It
+# implies the --flamegraph flags: Tracy's sampler needs frame pointers, debug
+# info and an exported symbol table (-rdynamic). The client is fetched at
+# configure time and must match the server version: v0.14.1, which is what
+# `dnf install tracy` provides.
 
 set -euo pipefail
 
@@ -38,7 +40,7 @@ RUN_TESTS=0
 CTEST_FILTER=
 BUILD_PYTHON=0
 BUILD_FLAMEGRAPH=0
-BUILD_TRACY=0
+BUILD_PROFILE=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -49,9 +51,9 @@ for arg in "$@"; do
     -t=*|--test=*) RUN_TESTS=1; CTEST_FILTER="${arg#*=}" ;;
     -p|--python)   BUILD_PYTHON=1 ;;
     -f|--flamegraph) BUILD_FLAMEGRAPH=1 ;;
-    --tracy)       BUILD_TRACY=1 ;;
-    -h|--help)     sed -n '3,29p' "${BASH_SOURCE[0]}"; exit 0 ;;
-    *) echo "usage: $0 [cuda|host|all] [Release|Debug] [-t[=REGEX]] [--flamegraph] [--tracy] [--python]" >&2; exit 2 ;;
+    --profile)     BUILD_PROFILE=1 ;;
+    -h|--help)     sed -n '3,30p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "usage: $0 [cuda|host|all] [Release|Debug] [-t[=REGEX]] [--flamegraph] [--profile] [--python]" >&2; exit 2 ;;
   esac
 done
 
@@ -68,8 +70,8 @@ if [ "$BUILD_PYTHON" -eq 1 ] && [ "$BUILD_FLAMEGRAPH" -eq 1 ]; then
   exit 2
 fi
 
-if [ "$BUILD_PYTHON" -eq 1 ] && [ "$BUILD_TRACY" -eq 1 ]; then
-  echo "--tracy cannot be combined with --python" >&2
+if [ "$BUILD_PYTHON" -eq 1 ] && [ "$BUILD_PROFILE" -eq 1 ]; then
+  echo "--profile cannot be combined with --python" >&2
   exit 2
 fi
 
@@ -77,14 +79,17 @@ fi
 # configure do not remain cached after --flamegraph is removed.
 CMAKE_CXX_PROFILE_FLAGS=
 CMAKE_CUDA_PROFILE_FLAGS=
-if [ "$BUILD_FLAMEGRAPH" -eq 1 ] || [ "$BUILD_TRACY" -eq 1 ]; then
+CMAKE_EXE_PROFILE_LINK_FLAGS=
+if [ "$BUILD_FLAMEGRAPH" -eq 1 ] || [ "$BUILD_PROFILE" -eq 1 ]; then
   CMAKE_CXX_PROFILE_FLAGS="-g -fno-omit-frame-pointer"
   CMAKE_CUDA_PROFILE_FLAGS="-g -Xcompiler=-fno-omit-frame-pointer"
+  # -rdynamic: without it Tracy's sampler and callstacks resolve to addresses.
+  CMAKE_EXE_PROFILE_LINK_FLAGS="-rdynamic"
 fi
 
-CMAKE_WITH_TRACY=OFF
-if [ "$BUILD_TRACY" -eq 1 ]; then
-  CMAKE_WITH_TRACY=ON
+CMAKE_WITH_PROFILER=OFF
+if [ "$BUILD_PROFILE" -eq 1 ]; then
+  CMAKE_WITH_PROFILER=ON
 fi
 
 CONAN_WITH_TESTS=False
@@ -126,11 +131,11 @@ for BACKEND in "${BACKENDS[@]}"; do
         -DFAST_DECONV_BACKEND="$BACKEND" \
         -DBUILD_TESTING="$RUN_TESTS" \
         -DFAST_DECONV_BUILD_TOOLS=ON \
-        -DFAST_DECONV_BUILD_BENCHMARKS=ON \
-        -DFAST_DECONV_WITH_TRACY="$CMAKE_WITH_TRACY" \
+        -DFAST_DECONV_WITH_PROFILER="$CMAKE_WITH_PROFILER" \
         -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
         -DCMAKE_CXX_FLAGS="$CMAKE_CXX_PROFILE_FLAGS" \
-        -DCMAKE_CUDA_FLAGS="$CMAKE_CUDA_PROFILE_FLAGS"
+        -DCMAKE_CUDA_FLAGS="$CMAKE_CUDA_PROFILE_FLAGS" \
+        -DCMAKE_EXE_LINKER_FLAGS="$CMAKE_EXE_PROFILE_LINK_FLAGS"
 
   banner "cmake build (${BACKEND})"
   cmake --build "$BUILD_DIR" -j

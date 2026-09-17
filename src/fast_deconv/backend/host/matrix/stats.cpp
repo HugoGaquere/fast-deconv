@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/matrix/stats.hpp>
 #include <limits>
 
@@ -15,12 +16,14 @@ constexpr float kNoMax = -std::numeric_limits<float>::infinity();
 stats_ctx::stats_ctx(const core::exec_ctx& ctx, std::size_t n_elements, bool use_abs)
     : ctx_(ctx), n_elements_(n_elements), use_abs_(use_abs)
 {
+  FD_PROFILE_FN();
   // No reduction scratch to size, but device_state() must stay reachable.
   d_state_ = ctx_.alloc_ptr_async<stats_acc>(1);
 }
 
 void stats_ctx::run_async(core::span2d<float> data, core::span2d<bool> mask)
 {
+  FD_PROFILE_FN();
   assert(data.is_exhaustive() && mask.is_exhaustive());
   assert(data.extents() == mask.extents());
   assert(data.size() == n_elements_);
@@ -46,6 +49,7 @@ void stats_ctx::run_async(core::span2d<float> data, core::span2d<bool> mask)
 
 stats_result stats_ctx::run(core::span2d<float> data, core::span2d<bool> mask)
 {
+  FD_PROFILE_FN();
   run_async(data, mask);
   h_state_ = d_state_[0];
 

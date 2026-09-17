@@ -1,11 +1,13 @@
 #include <algorithm>
 #include <climits>
+#include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/morphology/roi.hpp>
 
 namespace fast_deconv::morphology {
 
 common::roi compute_mask_roi(const core::exec_ctx& ctx, core::span2d<bool> data)
 {
+  FD_PROFILE_FN();
   common::roi result{INT_MAX, 0, INT_MAX, 0};
 
   for (int r = 0; r < data.extent(0); r++) {

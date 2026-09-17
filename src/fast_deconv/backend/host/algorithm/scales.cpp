@@ -19,6 +19,7 @@ constexpr float kPiSquared = 9.869604403f;
 void make_gaussian_kernels_async(const core::exec_ctx& ctx, core::span1d<float> sigmas, int scale_ncol_full,
                                  core::span3d<float> scales)
 {
+  FD_PROFILE_FN();
   const int n_scales = scales.extent(0);
   const int scale_nrow = scales.extent(1);
   const int scale_ncol_half = scales.extent(2);
