@@ -46,7 +46,7 @@ TEST_F(TiledArgmax, UniquePeakIndexAcrossTiles)
 
   const auto sr = res().make_ctx();
 
-  auto [val, idx] = run_once(sr, img, w, h, 32);
+  auto [idx, val, signed_val] = run_once(sr, img, w, h, 32);
   EXPECT_FLOAT_EQ(val, 9.0f);
   EXPECT_EQ(idx, flat(pr, pc, w));
 }
@@ -66,7 +66,7 @@ TEST_F(TiledArgmax, AllNegativeInitialisesToNegInf)
 
   const auto sr = res().make_ctx();
 
-  auto [val, idx] = run_once(sr, img, w, h, 32);
+  auto [idx, val, signed_val] = run_once(sr, img, w, h, 32);
   EXPECT_FLOAT_EQ(val, -0.5f);
   EXPECT_EQ(idx, flat(pr, pc, w));
 }
@@ -88,7 +88,7 @@ TEST_F(TiledArgmax, WorkspaceReuseAcrossCalls)
   const int ar = 10, ac = 12;
   img.at(flat(ar, ac, w)) = 5.0f;
   d.from_host(img);
-  auto [v1, i1] = ws.run(view);
+  auto [i1, v1, signed_v1] = ws.run(view);
   sr.wait();
   EXPECT_FLOAT_EQ(v1, 5.0f);
   EXPECT_EQ(i1, flat(ar, ac, w));
@@ -98,7 +98,7 @@ TEST_F(TiledArgmax, WorkspaceReuseAcrossCalls)
   const int br = 55, bc = 60;
   img.at(flat(br, bc, w)) = 7.0f;
   d.from_host(img);
-  auto [v2, i2] = ws.run(view);
+  auto [i2, v2, signed_v2] = ws.run(view);
   sr.wait();
   EXPECT_FLOAT_EQ(v2, 7.0f);
   EXPECT_EQ(i2, flat(br, bc, w));
@@ -126,7 +126,7 @@ TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
   const core::span2d<float> view(d.get(), h, w);
 
   // Full pass seeds all tiles; global max is A.
-  auto [v0, i0] = ws.run(view);
+  auto [i0, v0, signed_v0] = ws.run(view);
   sr.wait();
   EXPECT_FLOAT_EQ(v0, 5.0f);
   EXPECT_EQ(i0, flat(ar, ac, w));
@@ -138,7 +138,7 @@ TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
   img.at(flat(br, bc, w)) = 7.0f;
   sr.copy_from_host_bytes(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), sizeof(float));
 
-  auto [v1, i1] = ws.run_incremental(view, pr, pc, foot, foot);
+  auto [i1, v1, signed_v1] = ws.run_incremental(view, pr, pc, foot, foot);
   sr.wait();
   EXPECT_FLOAT_EQ(v1, 7.0f);
   EXPECT_EQ(i1, flat(br, bc, w));
@@ -147,7 +147,7 @@ TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
   // B back below A and refresh the same footprint; A must re-emerge as the winner.
   img.at(flat(br, bc, w)) = 0.0f;
   sr.copy_from_host_bytes(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), sizeof(float));
-  auto [v2, i2] = ws.run_incremental(view, pr, pc, foot, foot);
+  auto [i2, v2, signed_v2] = ws.run_incremental(view, pr, pc, foot, foot);
   sr.wait();
   EXPECT_FLOAT_EQ(v2, 5.0f);
   EXPECT_EQ(i2, flat(ar, ac, w));

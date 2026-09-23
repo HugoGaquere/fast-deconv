@@ -15,7 +15,7 @@ inline matrix::peak max_by_value(const matrix::peak& a, const matrix::peak& b)
 }
 
 // True identity: -inf ties with a masked pixel, and the largest index loses that tie.
-inline constexpr matrix::peak kPeakIdentity{-std::numeric_limits<float>::infinity(), INT64_MAX};
+inline constexpr matrix::peak kPeakIdentity{.index = INT64_MAX, .value = -std::numeric_limits<float>::infinity()};
 
 }  // namespace fast_deconv::detail
 

@@ -2,7 +2,8 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <fast_deconv/algorithm/conv_psf_cache.hpp>
+#include <fast_deconv/algorithm/psf_convolution.hpp>
+#include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/common/region.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
@@ -49,51 +50,27 @@ struct params {
   std::optional<float> auto_mask_rms_threshold;   // engage when residual peak <= this * running RMS
 
   // conv-PSF cache params
-  psf_cache_mode psf_cache_policy;     // when the convolved PSFs get built
-  std::size_t psf_cache_budget_bytes;  // resident cap on the cached PSFs; 0 = unbounded
+  psf_cache_mode psf_cache_policy;  // when the convolved PSFs get built
 };
 
 struct device_state {
   core::exec_resources resources;
-  core::exec_ctx compute_stream;  // drives the convolution path; the FFT plans bind to it
+  core::exec_ctx compute_stream;  // scale search, PSF builds and the mean-residual clean loop
   core::exec_ctx aux_stream;      // clean-loop fit/subtract, overlapping compute_stream
   core::cont4d<float> raw_psfs_d;
   core::cont2d<float> xdes_d;
   core::cont2d<bool> mask_d;
-  core::cont1d<float> scale_sigmas_d;
-  core::owned_ptr<std::byte> fft_work_area;  // shared by both plan sets, run sequentially
-  // One R2C of the mean dirty, then batched C2R over the (n_scales - 1) non-trivial scales.
-  linalg::convolve_ctx scale_convolve;
-  // Batched over n_freq channels, with two C2R plans: one for conv, one for conv^2.
-  linalg::convolve_ctx psf_convolve;
-
-  // Convolved PSFs and their gains, built per (scale, facet) on demand and held
-  // under a byte budget; run_ddmsc_cycles configures it at the start of each run.
-  conv_psf_cache psf_cache;
 
   device_state(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
-               const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas, int dirty_nrow,
-               int dirty_ncol, int n_freq, float fft_padding)
+               const core::host_span2d<bool>& mask)
       : resources(exec_device),
         compute_stream(resources.make_ctx()),
         aux_stream(resources.make_ctx()),
         raw_psfs_d(compute_stream.upload(raw_psfs)),
         xdes_d(compute_stream.upload(xdes)),
-        mask_d(compute_stream.upload(mask)),
-        scale_sigmas_d(compute_stream.upload(scale_sigmas)),
-        scale_convolve(compute_stream, dirty_nrow, dirty_ncol, /*forward_batch=*/1,
-                       /*backward_batch=*/std::max(1, static_cast<int>(scale_sigmas.size()) - 1),
-                       /*n_backward_plans=*/1, fft_padding),
-        psf_convolve(compute_stream, raw_psfs_d.extent(2), raw_psfs_d.extent(3), /*forward_batch=*/n_freq,
-                     /*backward_batch=*/n_freq, /*n_backward_plans=*/2, fft_padding),
-        // aux_stream is the reader lane: it subtracts conv_psf off the dirty image.
-        psf_cache(psf_convolve, aux_stream, raw_psfs_d, scale_sigmas_d, /*budget_bytes=*/0)
+        mask_d(compute_stream.upload(mask))
   {
-    const size_t shared_work_size = std::max(scale_convolve.required_work_size(), psf_convolve.required_work_size());
-    if (shared_work_size > 0) fft_work_area = compute_stream.alloc_ptr_async<std::byte>(shared_work_size);
-    compute_stream.wait();  // staging copies and the work-area alloc, before the host sources go
-    scale_convolve.bind_work_area(fft_work_area.get());
-    psf_convolve.bind_work_area(fft_work_area.get());
+    compute_stream.wait();  // staging copies, before the host sources go
   }
 
   device_state(const device_state&) = delete;
@@ -107,7 +84,7 @@ struct context {
   core::host_span4d<float> raw_psfs;
   core::host_span2d<float> xdes;
   core::host_span2d<bool> mask;
-  core::host_span1d<float> scale_sigmas;
+  std::vector<float> scale_sigmas;
   core::host_span1d<float> scale_bias;
   core::host_span2d<int> map_pixel_facet;
   int dirty_nrow;
@@ -118,7 +95,7 @@ struct context {
   std::vector<common::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
   std::vector<int> historical_scales;                   // scale of each historical component
 
-  /// Validates the dimensions and stores the inputs; allocates nothing.
+  /// Validates the dimensions, stores the input views and copies the scale sigmas.
   context(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
           const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
           const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
@@ -127,7 +104,6 @@ struct context {
         raw_psfs(raw_psfs),
         xdes(xdes),
         mask(mask),
-        scale_sigmas(scale_sigmas),
         scale_bias(scale_bias),
         map_pixel_facet(map_pixel_facet),
         dirty_nrow(dirty_nrow),
@@ -137,6 +113,7 @@ struct context {
   {
     core::check_plane_fits_int32(dirty_nrow, dirty_ncol, "dirty");
     core::check_plane_fits_int32(raw_psfs.extent(2), raw_psfs.extent(3), "psf");
+    this->scale_sigmas.assign(scale_sigmas.data_handle(), scale_sigmas.data_handle() + scale_sigmas.size());
   }
 
   context(const context&) = delete;
@@ -147,8 +124,7 @@ struct context {
   device_state& state()
   {
     if (state_ == nullptr)
-      state_ = std::make_unique<device_state>(exec_device, raw_psfs, xdes, mask, scale_sigmas, dirty_nrow, dirty_ncol,
-                                              n_freq, fft_padding);
+      state_ = std::make_unique<device_state>(exec_device, raw_psfs, xdes, mask);
     return *state_;
   }
 

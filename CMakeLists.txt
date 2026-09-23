@@ -36,7 +36,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(FAST_DECONV_BUILD_TOOLS "Build the replay executable" OFF)
-option(FAST_DECONV_BUILD_BENCHMARKS "Build CUDA benchmarks" OFF)
 option(FAST_DECONV_WITH_PROFILER "Enable core/profiler.hpp: NVTX on cuda, Tracy on host" OFF)
 if(SKBUILD)
   # Disable C++ tests for Python builds, even if the cache previously enabled them.
@@ -94,8 +93,7 @@ if(FAST_DECONV_SANITIZE)
     "$<$<COMPILE_LANGUAGE:CXX>:${_fd_san_flags}>"
     "$<$<COMPILE_LANGUAGE:CUDA>:${_fd_san_flags_cuda}>"
   )
-  # Sanitized executables and the Python module link with the CXX driver;
-  # CUDA benchmarks explicitly select that driver below.
+  # Sanitized executables and the Python module link with the CXX driver.
   add_link_options(-fsanitize=address -fsanitize=undefined)
 endif()
 
@@ -145,8 +143,9 @@ file(GLOB_RECURSE FAST_DECONV_BACKEND_SOURCES CONFIGURE_DEPENDS
 add_library(fast_deconv STATIC
         src/fast_deconv/algorithm/ddmsc_cycles.cpp
         src/fast_deconv/algorithm/ddmsc.cpp
-        src/fast_deconv/algorithm/conv_psf_cache.cpp
+        src/fast_deconv/algorithm/psf_convolution.cpp
         src/fast_deconv/algorithm/scales.cpp
+        src/fast_deconv/linalg/convolution.cpp
         src/fast_deconv/common/convergence.cpp
         ${FAST_DECONV_BACKEND_SOURCES}
 )
@@ -252,26 +251,6 @@ endif()
 if(FAST_DECONV_BUILD_TOOLS AND NOT SKBUILD)
   add_executable(replay_ddmsc src/replay_ddmsc.cpp)
   target_link_libraries(replay_ddmsc PRIVATE fast_deconv)
-endif()
-
-# The benchmarks are .cu, so they only build for the cuda backend.
-if(FAST_DECONV_BUILD_BENCHMARKS AND NOT SKBUILD AND FAST_DECONV_WITH_CUDA)
-  add_executable(bench_ddmsc src/bench_ddmsc.cu)
-  target_link_libraries(bench_ddmsc PRIVATE fast_deconv)
-  fast_deconv_cuda_options(bench_ddmsc)
-
-  add_executable(bench_tiled_argmax src/bench_tiled_argmax.cu)
-  target_link_libraries(bench_tiled_argmax PRIVATE fast_deconv)
-  fast_deconv_cuda_options(bench_tiled_argmax)
-
-  if(FAST_DECONV_SANITIZE)
-    # Use the CXX driver's sanitizer runtime, like the test binaries.
-    # It may differ from nvcc's host compiler and its available runtimes.
-    set_target_properties(
-      bench_ddmsc bench_tiled_argmax
-      PROPERTIES LINKER_LANGUAGE CXX
-    )
-  endif()
 endif()
 
 #-------------------------------------------------------------------#

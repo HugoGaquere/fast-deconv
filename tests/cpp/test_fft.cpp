@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <fast_deconv/linalg/convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <utility>
 #include <vector>
@@ -8,6 +9,7 @@
 #include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
 
+namespace core = fast_deconv::core;
 namespace linalg = fast_deconv::linalg;
 namespace fdtest = fast_deconv::test;
 
@@ -100,30 +102,32 @@ std::vector<float> iota_image(int n, float offset = 0.0f)
 
 class FftLayout : public fdtest::BackendTest {};
 
-TEST_F(FftLayout, BatchedTransformRoundTripPreservesShapeAndNormalization)
+// Gaussian(0) is 1 everywhere, so a zero-sigma convolution through the padded grid
+// must give the input back: pad, R2C, the 1/padded_total normalization, C2R and
+// crop all have to agree. Running it twice from the same spectrum checks that
+// convolve_spectrum leaves the spectrum intact, as the per-scale search relies on.
+TEST_F(FftLayout, ZeroSigmaConvolutionIsIdentityAndKeepsTheSpectrum)
 {
   const auto sr = res().make_ctx();
   for (const auto& [rows, cols] : {std::pair{8, 10}, std::pair{9, 15}, std::pair{10, 9}}) {
     for (int batch : {1, 3, 9}) {
       SCOPED_TRACE(::testing::Message() << rows << 'x' << cols << " batch=" << batch);
-      linalg::convolve_ctx conv(sr, rows, cols, batch, batch, 1, 1.0f);
-      fdtest::scoped_work_area work(sr, conv);
-      const auto& dims = conv.dims();
-      const auto count = static_cast<std::size_t>(batch) * dims.padded_total();
-      fdtest::device_buffer<float> real(sr, count), output(sr, count);
-      fdtest::device_buffer<linalg::complex_type> spectrum(sr, static_cast<std::size_t>(batch) * dims.freq_total());
+      const linalg::convolution_ctx conv(sr, rows, cols, /*padding=*/1.5f, batch);
+      const auto count = static_cast<std::size_t>(batch) * rows * cols;
+      const auto freq_count = static_cast<std::size_t>(batch) * conv.dims().freq_total();
+
       std::vector<float> input(count);
-      // The inverse consumes its spectrum. Exercise reuse with fresh input on
-      // the same context/buffers, as successive scale convolutions do.
+      for (std::size_t i = 0; i < count; ++i) input[i] = static_cast<float>((i * 17) % 101) / 101.0f - 0.5f;
+      fdtest::device_buffer<float> d_input(sr, input), d_output(sr, count);
+      fdtest::device_buffer<linalg::complex_type> d_spectrum(sr, freq_count);
+
+      const core::span1d<linalg::complex_type> spectrum(d_spectrum.get(), freq_count);
+      conv.forward(core::span3d<const float>(d_input.get(), batch, rows, cols), spectrum);
       for (int rep = 0; rep < 2; ++rep) {
+        conv.convolve_spectrum(spectrum, 0.0f, core::span3d<float>(d_output.get(), batch, rows, cols));
+        const auto actual = d_output.to_host();
         for (std::size_t i = 0; i < count; ++i)
-          input[i] = static_cast<float>((i * 17 + rep * 11) % 101) / 101.0f - 0.5f;
-        real.from_host(input);
-        conv.forward_async(real.get(), spectrum.get());
-        conv.backward_async(spectrum.get(), output.get());
-        const auto actual = output.to_host();
-        for (std::size_t i = 0; i < count; ++i)
-          ASSERT_NEAR(actual[i] / dims.padded_total(), input[i], 2e-5f) << "rep=" << rep << " index=" << i;
+          ASSERT_NEAR(actual[i], input[i], 2e-5f) << "rep=" << rep << " index=" << i;
       }
     }
   }

@@ -1,60 +1,55 @@
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
+
 #include <algorithm>
 #include <cassert>
+#include <cmath>
+#include <cstdint>
 #include <cub/device/device_reduce.cuh>
 #include <fast_deconv/matrix/argmax.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
 
 namespace fast_deconv::matrix {
 
-argmax_ctx::argmax_ctx(const core::exec_ctx& ctx, std::size_t n_elements) : ctx_(ctx), n_elements_(n_elements)
-{
-#if CUB_VERSION >= 300000
-  d_peak_value_ = ctx_.alloc_ptr_async<float>(1);
-  d_peak_index_ = ctx_.alloc_ptr_async<std::int64_t>(1);
+namespace {
 
-  CHECK_CUDA(cub::DeviceReduce::ArgMax(nullptr, temp_bytes_, static_cast<const float*>(nullptr), d_peak_value_.get(),
-                                       d_peak_index_.get(), n_elements_, ctx_.cuda_stream));
-#else
-  d_peak_ = ctx_.alloc_ptr_async<cub::KeyValuePair<int, float> >(1);
+struct criterion_peak {
+  const float* data;
+  peak_criterion criterion;
 
-  CHECK_CUDA(cub::DeviceReduce::ArgMax(nullptr, temp_bytes_, static_cast<const float*>(nullptr), d_peak_.get(),
-                                       n_elements_, ctx_.cuda_stream));
-#endif
+  __host__ __device__ __forceinline__ peak operator()(std::int64_t i) const
+  {
+    const float x = data[i];
+    return {.index = i, .value = criterion(x, i), .signed_value = x};
+  }
+};
 
-  d_temp_ = ctx_.alloc_ptr_async<std::byte>(std::max<std::size_t>(temp_bytes_, 1));
-}
+// -inf ties with a masked pixel, and the largest index loses that tie.
+constexpr peak kReduceIdentity{.index = INT64_MAX, .value = -INFINITY};
 
-void argmax_ctx::run_async(core::span2d<float> data)
+}  // namespace
+
+peak find_peak(const core::exec_ctx& ctx, core::span2d<const float> data, peak_criterion criterion)
 {
   assert(data.is_exhaustive());
-  assert(data.size() == n_elements_);
 
-#if CUB_VERSION >= 300000
-  CHECK_CUDA(cub::DeviceReduce::ArgMax(d_temp_.get(), temp_bytes_, data.data_handle(), d_peak_value_.get(),
-                                       d_peak_index_.get(), n_elements_, ctx_.cuda_stream));
-#else
-  CHECK_CUDA(cub::DeviceReduce::ArgMax(d_temp_.get(), temp_bytes_, data.data_handle(), d_peak_.get(), n_elements_,
-                                       ctx_.cuda_stream));
-#endif
-}
+  // A reduce rather than ArgMax, so the signed pixel travels with the winning criterion.
+  const auto it = thrust::make_transform_iterator(thrust::counting_iterator<std::int64_t>{0},
+                                                  criterion_peak{data.data_handle(), criterion});
+  const int n = static_cast<int>(data.size());
+  auto d_result = ctx.alloc_ptr_async<peak>(1);
 
-peak argmax_ctx::run(core::span2d<float> data)
-{
-  run_async(data);
+  std::size_t temp_bytes = 0;
+  CHECK_CUDA(cub::DeviceReduce::Reduce(nullptr, temp_bytes, it, d_result.get(), n, peak_max{}, kReduceIdentity,
+                                       ctx.cuda_stream));
+  auto d_temp = ctx.alloc_ptr_async<std::byte>(std::max<std::size_t>(temp_bytes, 1));
+  CHECK_CUDA(cub::DeviceReduce::Reduce(d_temp.get(), temp_bytes, it, d_result.get(), n, peak_max{}, kReduceIdentity,
+                                       ctx.cuda_stream));
 
-#if CUB_VERSION >= 300000
-  CHECK_CUDA(
-      cudaMemcpyAsync(&h_peak_value_, d_peak_value_.get(), sizeof(float), cudaMemcpyDeviceToHost, ctx_.cuda_stream));
-  CHECK_CUDA(cudaMemcpyAsync(&h_peak_index_, d_peak_index_.get(), sizeof(std::int64_t), cudaMemcpyDeviceToHost,
-                             ctx_.cuda_stream));
-  ctx_.wait();
-  return {h_peak_value_, h_peak_index_};
-#else
-  CHECK_CUDA(cudaMemcpyAsync(&h_peak_, d_peak_.get(), sizeof(cub::KeyValuePair<int, float>), cudaMemcpyDeviceToHost,
-                             ctx_.cuda_stream));
-  ctx_.wait();
-  return {h_peak_.value, h_peak_.key};
-#endif
+  peak result{};
+  CHECK_CUDA(cudaMemcpyAsync(&result, d_result.get(), sizeof(peak), cudaMemcpyDeviceToHost, ctx.cuda_stream));
+  ctx.wait();
+  return result;
 }
 
 }  // namespace fast_deconv::matrix

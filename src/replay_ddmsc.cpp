@@ -2,14 +2,13 @@
 ///
 /// Usage:  replay_ddmsc <dump_dir> [--device=N] [--cycle=N] [--runs=N]
 ///                      [--psf-cache=lazy_pair|lazy_scale|eager_all]
-///                      [--psf-cache-budget=<bytes, K/M/G suffix ok, 0=unbounded>]
 ///
 /// --runs=N replays the whole dump N times on a fresh session each time and
 /// reports min/median/mean/max of the per-run total; the first cycle of a run
 /// carries the one-off device setup (uploads, cuFFT plans), the same for every run.
 ///
-/// The cache flags override the fast-deconv-side knobs, which the dump does not
-/// carry (DDFacet never sets them); everything else comes from the dump.
+/// The cache flag overrides the fast-deconv-side knob, which the dump does not
+/// carry (DDFacet never sets it); everything else comes from the dump.
 ///
 /// The dump is produced by running DDFacet with FAST_DECONV_DUMP=<dir> (see
 /// fast_deconv/__init__.py): `init/` holds the ctor inputs, `cycle_<N>/` holds
@@ -40,30 +39,6 @@ namespace ddmsc = fast_deconv::algorithm::ddmsc;
 /// Same order as psf_cache_mode.
 static constexpr std::array<const char*, 3> cache_mode_names{"lazy_pair", "lazy_scale", "eager_all"};
 
-/// Byte count with an optional K/M/G (binary) suffix.
-static std::size_t parse_bytes(const std::string& s)
-{
-  char* end = nullptr;
-  double v = std::strtod(s.c_str(), &end);
-  switch (*end) {
-    case 'G':
-    case 'g':
-      v *= 1024;
-      [[fallthrough]];
-    case 'M':
-    case 'm':
-      v *= 1024;
-      [[fallthrough]];
-    case 'K':
-    case 'k':
-      v *= 1024;
-      break;
-    default:
-      break;
-  }
-  return static_cast<std::size_t>(v);
-}
-
 /// A NaN scalar in the dump is an unset optional on the Python side.
 static std::optional<float> opt_finite(float v) { return std::isnan(v) ? std::nullopt : std::optional<float>(v); }
 
@@ -73,7 +48,6 @@ int main(int argc, char** argv)
   int device_id = 0;
   int only_cycle = -1;
   std::optional<algo::psf_cache_mode> cache_policy;
-  std::optional<std::size_t> cache_budget;
   int runs = 1;
   for (int i = 1; i < argc; ++i) {
     const std::string a(argv[i]);
@@ -91,8 +65,6 @@ int main(int argc, char** argv)
         return 1;
       }
       cache_policy = static_cast<algo::psf_cache_mode>(it - cache_mode_names.begin());
-    } else if (a.rfind("--psf-cache-budget=", 0) == 0) {
-      cache_budget = parse_bytes(a.substr(19));
     } else if (!a.empty() && a[0] != '-' && dir.empty()) {
       dir = a;
     } else {
@@ -103,8 +75,7 @@ int main(int argc, char** argv)
   }
   if (dir.empty()) {
     fprintf(stderr,
-            "Usage: %s <dump_dir> [--device=N] [--cycle=N] [--runs=N] [--psf-cache=%s|%s|%s] "
-            "[--psf-cache-budget=SIZE]\n",
+            "Usage: %s <dump_dir> [--device=N] [--cycle=N] [--runs=N] [--psf-cache=%s|%s|%s]\n",
             argv[0], cache_mode_names[0], cache_mode_names[1], cache_mode_names[2]);
     return 1;
   }
@@ -148,10 +119,7 @@ int main(int argc, char** argv)
                         fft_padding, device_id);
 
     if (cache_policy) imager.set_psf_cache_policy(*cache_policy);
-    if (cache_budget) imager.set_psf_cache_budget_bytes(*cache_budget);
-    if (run == 0)
-      printf("  psf cache: %s, budget %zu bytes\n", cache_mode_names.at(static_cast<int>(imager.psf_cache_policy())),
-             imager.psf_cache_budget_bytes());
+    if (run == 0) printf("  psf cache: %s\n", cache_mode_names.at(static_cast<int>(imager.psf_cache_policy())));
 
     double total_ms = 0.0;
     for (int cycle = first_cycle;; ++cycle) {

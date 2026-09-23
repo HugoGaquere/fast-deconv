@@ -104,7 +104,8 @@ TEST(DdmscContextGuard, RejectsPlaneLargerThanInt32)
   core::host_span4d<float> big_psfs(static_cast<float*>(nullptr), 1, 1, kBig, kBig);
   core::host_span2d<float> xdes(static_cast<float*>(nullptr), 1, 2);
   core::host_span2d<bool> mask(static_cast<bool*>(nullptr), kSmall, kSmall);
-  core::host_span1d<float> sigmas(static_cast<float*>(nullptr), 1);
+  float sigma_storage[1] = {0.0f};  // context copies the sigmas, so they need real storage
+  core::host_span1d<float> sigmas(sigma_storage, 1);
   core::host_span1d<float> bias(static_cast<float*>(nullptr), 1);
   core::host_span2d<int> map(static_cast<int*>(nullptr), kSmall, kSmall);
 

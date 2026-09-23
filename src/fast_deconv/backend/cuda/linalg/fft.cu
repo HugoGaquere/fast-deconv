@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <fast_deconv/linalg/convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
 #include <fast_deconv/util/cufft_macros.hpp>
@@ -103,52 +104,39 @@ void fftshift_crop_async(const core::exec_ctx& ctx, const fft_dims& dims, const 
       dims.padding_ncol, n_batch);
 }
 
-convolve_ctx::convolve_ctx(const core::exec_ctx& ctx, int input_nrow, int input_ncol, int forward_batch,
-                           int backward_batch, int n_backward_plans, float padding)
+convolution_ctx::convolution_ctx(const core::exec_ctx& ctx, int nrow, int ncol, float padding, int batch)
     : ctx_(ctx),
-      dims_(input_nrow, input_ncol, padding),
-      forward_batch_(forward_batch),
-      backward_batch_(backward_batch),
-      plans_forward_(1),
-      plans_backward_(n_backward_plans)
+      dims_(nrow, ncol, padding),
+      batch_(batch),
+      padded_(ctx.alloc_ptr_async<float>(static_cast<std::size_t>(batch) * dims_.padded_total())),
+      product_(ctx.alloc_ptr_async<complex_type>(static_cast<std::size_t>(batch) * dims_.freq_total()))
 {
-  // Disable cuFFT auto-allocation so all plans share a single caller-managed workspace.
-  // Plans execute sequentially, so one buffer of max(plan_work_sizes) suffices.
-  // See cuFFT §2.14 Caller Allocated Work Area.
+  // cuFFT allocates each plan's workspace itself.
   std::array<int, 2> fft_size{dims_.padded_nrow, dims_.padded_ncol};
-  auto make_plan = [&](cufftHandle& plan, cufftType type, int batch) {
+  auto make_plan = [&](cufftHandle& plan, cufftType type) {
     CUFFT_CALL(cufftCreate(&plan));
-    CUFFT_CALL(cufftSetAutoAllocation(plan, 0));
-    size_t plan_work = 0;
-    CUFFT_CALL(cufftMakePlanMany(plan, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0, type, batch, &plan_work));
-    work_size_ = std::max(work_size_, plan_work);
+    std::size_t work_size = 0;
+    CUFFT_CALL(cufftMakePlanMany(plan, 2, fft_size.data(), nullptr, 1, 0, nullptr, 1, 0, type, batch, &work_size));
     CUFFT_CALL(cufftSetStream(plan, ctx.cuda_stream));
   };
-
-  make_plan(plans_forward_[0], CUFFT_R2C, forward_batch);
-  for (auto& p : plans_backward_) make_plan(p, CUFFT_C2R, backward_batch);
+  make_plan(r2c_, CUFFT_R2C);
+  make_plan(c2r_, CUFFT_C2R);
 }
 
-convolve_ctx::~convolve_ctx()
+convolution_ctx::~convolution_ctx()
 {
-  for (auto p : plans_forward_) CUFFT_CALL(cufftDestroy(p));
-  for (auto p : plans_backward_) CUFFT_CALL(cufftDestroy(p));
+  CUFFT_CALL(cufftDestroy(r2c_));
+  CUFFT_CALL(cufftDestroy(c2r_));
 }
 
-void convolve_ctx::forward_async(float* input, complex_type* output) const
+void convolution_ctx::forward_(float* input, complex_type* output) const
 {
-  CUFFT_CALL(cufftExecR2C(plans_forward_[0], input, output));
+  CUFFT_CALL(cufftExecR2C(r2c_, input, output));
 }
 
-void convolve_ctx::backward_async(complex_type* input, float* output, int plan_idx) const
+void convolution_ctx::backward_(complex_type* input, float* output) const
 {
-  CUFFT_CALL(cufftExecC2R(plans_backward_.at(plan_idx), input, output));
-}
-
-void convolve_ctx::bind_work_area(void* work_area)
-{
-  for (auto p : plans_forward_) CUFFT_CALL(cufftSetWorkArea(p, work_area));
-  for (auto p : plans_backward_) CUFFT_CALL(cufftSetWorkArea(p, work_area));
+  CUFFT_CALL(cufftExecC2R(c2r_, input, output));
 }
 
 }  // namespace fast_deconv::linalg

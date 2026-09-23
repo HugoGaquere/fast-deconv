@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <fast_deconv/common/clean.hpp>
 #include <fast_deconv/core/profiler.hpp>
 
@@ -8,8 +9,8 @@ namespace {
 constexpr long kMinParallelPixels = 64 * 1024;
 }  // namespace
 
-void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> residual, core::span2d<float> psf,
-                              index2d peak_coords, float gain)
+void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> residual, core::span2d<const float> psf,
+                              index2d peak_coords, float gain, matrix::peak_criterion criterion, float threshold)
 {
   FD_PROFILE_FN();
   auto ovr = compute_overlap_region(peak_coords, residual.extent(0), residual.extent(1), psf.extent(0), psf.extent(1));
@@ -17,13 +18,15 @@ void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> res
 #pragma omp parallel for if (static_cast<long>(ovr.nrow) * ovr.ncol > kMinParallelPixels)
   for (int r = 0; r < ovr.nrow; r++) {
     for (int c = 0; c < ovr.ncol; c++) {
-      residual(ovr.arow0 + r, ovr.acol0 + c) -= gain * psf(ovr.brow0 + r, ovr.bcol0 + c);
+      const std::int64_t i = static_cast<std::int64_t>(ovr.arow0 + r) * ovr.lda + ovr.acol0 + c;
+      float& x = residual(ovr.arow0 + r, ovr.acol0 + c);
+      if (criterion(x, i) >= threshold) x -= gain * psf(ovr.brow0 + r, ovr.bcol0 + c);
     }
   }
 }
 
-void subtract_component_async(const core::exec_ctx& ctx, core::span3d<float> residual, core::span3d<float> psf,
-                              core::span1d<float> spectral_coeffs, index2d peak_coords, float gain)
+void subtract_component_async(const core::exec_ctx& ctx, core::span3d<float> residual, core::span3d<const float> psf,
+                              core::span1d<const float> spectral_coeffs, index2d peak_coords, float gain)
 {
   FD_PROFILE_FN();
   int n_freq = residual.extent(0);

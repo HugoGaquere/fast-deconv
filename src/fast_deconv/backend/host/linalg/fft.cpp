@@ -4,7 +4,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <fast_deconv/core/profiler.hpp>
+#include <fast_deconv/linalg/convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
+
+#include "fast_deconv/linalg/fft_dims.hpp"
 
 namespace pf = pocketfft;
 
@@ -26,6 +29,7 @@ const pf::shape_t kFftAxes{1, 2};
 std::size_t fft_threads() { return static_cast<std::size_t>(omp_get_max_threads()); }
 }  // namespace
 
+// TODO: old signature
 void pad_ifftshift_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output)
 {
   FD_PROFILE_FN();
@@ -83,32 +87,45 @@ void fftshift_crop_async(const core::exec_ctx& ctx, const fft_dims& dims, const 
   }
 }
 
-// fct = 1 keeps cuFFT's unnormalized convention: callers apply 1/padded_total themselves.
-void convolve_ctx::forward_async(float* input, complex_type* output) const
+convolution_ctx::convolution_ctx(const core::exec_ctx& ctx, int nrow, int ncol, float padding, int batch)
+    : ctx_(ctx),
+      dims_(nrow, ncol, padding),
+      batch_(batch),
+      padded_(ctx.alloc_ptr_async<float>(static_cast<std::size_t>(batch) * dims_.padded_total())),
+      product_(ctx.alloc_ptr_async<complex_type>(static_cast<std::size_t>(batch) * dims_.freq_total()))
+{
+}
+
+// fct = 1 keeps cuFFT's unnormalized convention: the Gaussian multiply applies 1/padded_total.
+void convolution_ctx::forward_(float* input, complex_type* output) const
 {
   FD_PROFILE_FN();
-  const pf::shape_t shape{static_cast<std::size_t>(forward_batch_), static_cast<std::size_t>(dims_.padded_nrow),
+  const pf::shape_t shape{static_cast<std::size_t>(batch_), static_cast<std::size_t>(dims_.padded_nrow),
                           static_cast<std::size_t>(dims_.padded_ncol)};
   pf::r2c(shape, byte_strides<float>(dims_.padded_nrow, dims_.padded_ncol),
           byte_strides<complex_type>(dims_.freq_nrow, dims_.freq_ncol), kFftAxes, pf::FORWARD, input, output, 1.0f,
           fft_threads());
 }
 
-// plan_idx selects one of the cuFFT plans; pocketfft caches its own, so it is inert here.
-void convolve_ctx::backward_async(complex_type* input, float* output, int plan_idx) const
+void convolution_ctx::backward_(complex_type* input, float* output) const
 {
   FD_PROFILE_FN();
-  const pf::shape_t shape{static_cast<std::size_t>(backward_batch_), static_cast<std::size_t>(dims_.padded_nrow),
+  const pf::shape_t shape{static_cast<std::size_t>(batch_), static_cast<std::size_t>(dims_.padded_nrow),
                           static_cast<std::size_t>(dims_.padded_ncol)};
-  const pf::shape_t freq_shape{static_cast<std::size_t>(backward_batch_), static_cast<std::size_t>(dims_.freq_nrow),
+  const pf::shape_t freq_shape{static_cast<std::size_t>(batch_), static_cast<std::size_t>(dims_.freq_nrow),
                                static_cast<std::size_t>(dims_.freq_ncol)};
   const auto freq_strides = byte_strides<complex_type>(dims_.freq_nrow, dims_.freq_ncol);
   const auto threads = fft_threads();
-  // Consume the caller's disposable spectrum as the row-transform intermediate.
-  // Avoiding pocketfft to allocate during its processing.
-  pf::c2c(freq_shape, freq_strides, freq_strides, pf::shape_t{1}, pf::BACKWARD, input, input, 1.0f, threads);
-  pf::c2r(shape, freq_strides, byte_strides<float>(dims_.padded_nrow, dims_.padded_ncol), std::size_t{2}, pf::BACKWARD,
-          input, output, 1.0f, threads);
+  // The row transform runs in place on the input, so pocketfft allocates no intermediate.
+  {
+    FD_PROFILE_SCOPE("backward/c2c");
+    pf::c2c(freq_shape, freq_strides, freq_strides, pf::shape_t{1}, pf::BACKWARD, input, input, 1.0f, threads);
+  }
+  {
+    FD_PROFILE_SCOPE("backward/c2r");
+    pf::c2r(shape, freq_strides, byte_strides<float>(dims_.padded_nrow, dims_.padded_ncol), std::size_t{2},
+            pf::BACKWARD, input, output, 1.0f, threads);
+  }
 }
 
 }  // namespace fast_deconv::linalg

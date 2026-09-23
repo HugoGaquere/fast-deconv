@@ -7,6 +7,8 @@
 
 namespace fast_deconv::matrix {
 
+// TODO: use peak_criterion from peak.hpp
+
 namespace {
 // Masked pixels are already -inf in the data, so the max sentinel has to tie with
 // them, not beat them: an all-masked image must report -inf, not a finite floor.

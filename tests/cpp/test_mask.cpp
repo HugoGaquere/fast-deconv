@@ -19,127 +19,6 @@ namespace fdtest = fast_deconv::test;
 using fdtest::flat;
 
 // ============================================================================
-// mask_and_abs_async / mask_less_than_threshold
-// Convention everywhere: mask true = excluded/filled, false = valid.
-// ============================================================================
-
-class MaskAndAbs : public fdtest::BackendTest {};
-
-// abs=true takes |value| on unmasked pixels; abs=false leaves them bit-identical.
-// Masked pixels take the fill value either way.
-TEST_F(MaskAndAbs, Fills2dMaskedPixelsAndAppliesAbsOnlyWhenAsked)
-{
-  const int nrow = 6, ncol = 7, n = nrow * ncol;
-  std::vector<float> data(n);
-  for (int i = 0; i < n; ++i) data.at(i) = (i % 2 == 0 ? -1.0f : 1.0f) * static_cast<float>(i + 1);
-  std::vector<bool> mask(n, false);
-  for (int i = 0; i < n; i += 3) mask.at(i) = true;
-
-  for (const bool use_abs : {true, false}) {
-    const float fill = use_abs ? -std::numeric_limits<float>::infinity() : 42.0f;
-    const auto sr = res().make_ctx();
-
-    fdtest::device_buffer<float> d_data(sr, data);
-    fdtest::device_buffer<bool> d_mask(sr, mask);
-    core::span2d<float> data_view(d_data.get(), nrow, ncol);
-    core::span2d<bool> mask_view(d_mask.get(), nrow, ncol);
-
-    common::mask_and_abs_async(sr, data_view, mask_view, fill, use_abs);
-    sr.wait();
-
-    const auto got = d_data.to_host();
-    for (int i = 0; i < n; ++i) {
-      if (mask.at(i))
-        ASSERT_EQ(got.at(i), fill) << "abs=" << use_abs << " masked pixel " << i;
-      else if (use_abs)
-        ASSERT_FLOAT_EQ(got.at(i), std::fabs(data.at(i))) << "unmasked pixel " << i;
-      else
-        ASSERT_EQ(got.at(i), data.at(i)) << "unmasked pixel " << i;  // bit-identical
-    }
-  }
-}
-
-TEST_F(MaskAndAbs, Broadcasts2dMaskAcrossEvery3dSlice)
-{
-  const int n_batch = 3, nrow = 4, ncol = 5, plane = nrow * ncol;
-  std::vector<float> data(n_batch * plane);
-  for (std::size_t i = 0; i < data.size(); ++i) data.at(i) = -static_cast<float>(i + 1);
-  std::vector<bool> mask(plane, false);
-  mask.at(flat(1, 2, ncol)) = true;
-  mask.at(flat(3, 4, ncol)) = true;
-
-  const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_data(sr, data);
-  fdtest::device_buffer<bool> d_mask(sr, mask);
-  core::span3d<float> data_view(d_data.get(), n_batch, nrow, ncol);
-  core::span2d<bool> mask_view(d_mask.get(), nrow, ncol);
-
-  common::mask_and_abs_async(sr, data_view, mask_view, /*fill_value=*/0.0f, /*abs=*/true);
-  sr.wait();
-
-  const auto got = d_data.to_host();
-  for (int b = 0; b < n_batch; ++b) {
-    for (int i = 0; i < plane; ++i) {
-      const int idx = b * plane + i;
-      if (mask.at(i))
-        ASSERT_EQ(got.at(idx), 0.0f) << "batch " << b << " pixel " << i;
-      else
-        ASSERT_FLOAT_EQ(got.at(idx), std::fabs(data.at(idx))) << "batch " << b << " pixel " << i;
-    }
-  }
-}
-
-TEST_F(MaskAndAbs, Applies3dMaskPerSliceIndependently)
-{
-  const int n_batch = 2, nrow = 4, ncol = 5, plane = nrow * ncol;
-  std::vector<float> data(n_batch * plane, -1.0f);
-  std::vector<bool> mask(n_batch * plane, false);
-  // Slice 0: nothing masked. Slice 1: a diagonal-ish pattern.
-  for (int i = 0; i < plane; i += 4) mask.at(plane + i) = true;
-
-  const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_data(sr, data);
-  fdtest::device_buffer<bool> d_mask(sr, mask);
-  core::span3d<float> data_view(d_data.get(), n_batch, nrow, ncol);
-  core::span3d<bool> mask_view(d_mask.get(), n_batch, nrow, ncol);
-
-  common::mask_and_abs_async(sr, data_view, mask_view, /*fill_value=*/7.0f, /*abs=*/false);
-  sr.wait();
-
-  const auto got = d_data.to_host();
-  for (int i = 0; i < plane; ++i) ASSERT_EQ(got.at(i), -1.0f) << "slice 0 pixel " << i;  // untouched
-  for (int i = 0; i < plane; ++i)
-    ASSERT_EQ(got.at(plane + i), mask.at(plane + i) ? 7.0f : -1.0f) << "slice 1 pixel " << i;
-}
-
-// The comparison is strict `<`: a pixel exactly equal to the threshold survives.
-// This is the sub-clean threshold semantics used by the inner CLEAN loop.
-TEST_F(MaskAndAbs, MaskLessThanThresholdIsStrict)
-{
-  const int nrow = 3, ncol = 5, n = nrow * ncol;
-  const float threshold = 0.5f;
-  std::vector<float> data = {0.1f,  0.5f, 0.9f, -0.2f, 0.49999f, 0.51f, 0.0f, 2.0f,
-                             -5.0f, 0.5f, 0.3f, 0.7f,  0.5f,     1.0f,  -0.5f};
-  ASSERT_EQ(data.size(), static_cast<std::size_t>(n));
-
-  const float fill = -1000.0f;
-  const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_data(sr, data);
-  core::span2d<float> data_view(d_data.get(), nrow, ncol);
-
-  common::mask_less_than_threshold(sr, data_view, threshold, fill);
-  sr.wait();
-
-  const auto got = d_data.to_host();
-  for (int i = 0; i < n; ++i) {
-    if (data.at(i) < threshold)
-      ASSERT_EQ(got.at(i), fill) << "pixel " << i;
-    else
-      ASSERT_EQ(got.at(i), data.at(i)) << "pixel " << i;  // == threshold survives
-  }
-}
-
-// ============================================================================
 // build_auto_mask
 // ============================================================================
 
@@ -161,16 +40,14 @@ class BuildAutoMask : public fdtest::BackendTest {
 
     fdtest::device_buffer<float> d_psf(sr, psf);
     fdtest::device_buffer<float> d_weights(sr, std::vector<float>{1.0f});  // single channel
-    fdtest::device_buffer<float> d_sigmas(sr, sigmas);
     fdtest::device_buffer<bool> d_external(sr, external);
 
     core::span3d<bool> mask_view(d_mask.get(), n_scales, nrow, ncol);
     core::span3d<float> psf_view(d_psf.get(), 1, psf_h, psf_w);
     core::span1d<float> weights_view(d_weights.get(), 1);
-    core::span1d<float> sigma_view(d_sigmas.get(), n_scales);
     core::span2d<bool> external_view(d_external.get(), nrow, ncol);
 
-    common::build_auto_mask(sr, coords, scales, psf_view, weights_view, sigma_view, /*fft_padding=*/1.5f, external_view,
+    common::build_auto_mask(sr, coords, scales, psf_view, weights_view, sigmas, /*fft_padding=*/1.5f, external_view,
                             mask_view);
     sr.wait();
     return d_mask.to_host();

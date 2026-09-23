@@ -20,15 +20,6 @@ namespace fast_deconv::kernel {
 
 using fast_deconv::matrix::peak;
 
-struct MaxByValue {
-  __device__ __forceinline__ peak operator()(const peak& a, const peak& b) const
-  {
-    if (a.value > b.value) return a;
-    if (b.value > a.value) return b;
-    return (a.index <= b.index) ? a : b;  // tie on value -> smaller index
-  }
-};
-
 // ===========================================================================
 // KERNEL 1 — per-tile argmax.   One block == one tile.
 // ===========================================================================
@@ -42,8 +33,9 @@ struct MaxByValue {
 //   d_tiles[tile_y * n_tiles_x + tile_x]
 // where (value, index) is the max over its tile and index is the flat index into
 // the FULL image (gy * image_width + gx).
-__global__ void tiled_argmax_reduce(const float* data, peak* d_tiles, int image_width, int image_height, int tile_width,
-                                    int tile_height, int n_tiles_x, int tile_x0, int tile_y0)
+__global__ void tiled_argmax_reduce(const float* data, matrix::peak_criterion criterion, peak* d_tiles, int image_width,
+                                    int image_height, int tile_width, int tile_height, int n_tiles_x, int tile_x0,
+                                    int tile_y0)
 {
   // Identify the tile this block owns
   const int tile_x = tile_x0 + blockIdx.x;
@@ -65,11 +57,12 @@ __global__ void tiled_argmax_reduce(const float* data, peak* d_tiles, int image_
   int row = threadIdx.x / tw;
 
   // Reduce to a best per thread
-  peak best{-INFINITY, 0};
+  peak best{.index = 0, .value = -INFINITY};
   while (row < th) {
     const int g = (oy + row) * image_width + (ox + col);
-    const float v = data[g];
-    if (v > best.value) best = {v, g};
+    const float x = data[g];
+    const float v = criterion(x, g);
+    if (v > best.value) best = {.index = g, .value = v, .signed_value = x};
     row += drow;
     col += dcol;
     if (col >= tw) {
@@ -81,7 +74,7 @@ __global__ void tiled_argmax_reduce(const float* data, peak* d_tiles, int image_
   // Reduce to one winner per block
   using BlockReduce = cub::BlockReduce<peak, kThreadsPerBlock>;
   __shared__ typename BlockReduce::TempStorage temp;
-  peak winner = BlockReduce(temp).Reduce(best, MaxByValue{});
+  peak winner = BlockReduce(temp).Reduce(best, matrix::peak_max{});
 
   if (threadIdx.x == 0) d_tiles[tile_y * n_tiles_x + tile_x] = winner;
 }
@@ -95,7 +88,7 @@ namespace {
 // Identity for the max-by-value reduction: -inf is the masked-pixel fill, so it
 // ties rather than wins, and the largest possible index loses that tie. Any real
 // tile overrides it.
-constexpr peak kReduceIdentity{-INFINITY, INT64_MAX};
+constexpr peak kReduceIdentity{.index = INT64_MAX, .value = -INFINITY};
 
 }  // namespace
 
@@ -115,8 +108,7 @@ tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> exte
   // Size the CUB final-combine scratch once; the query writes final_temp_bytes_
   // without touching d_tiles_/d_result_.
   CHECK_CUDA(cub::DeviceReduce::Reduce(nullptr, final_temp_bytes_, d_tiles_.get(), d_result_.get(),
-                                       static_cast<int>(n_tiles_), kernel::MaxByValue{}, kReduceIdentity,
-                                       ctx_.cuda_stream));
+                                       static_cast<int>(n_tiles_), peak_max{}, kReduceIdentity, ctx_.cuda_stream));
   d_final_temp_ = ctx_.alloc_ptr_async<std::byte>(std::max<std::size_t>(final_temp_bytes_, 1));
 }
 
@@ -132,8 +124,7 @@ tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> exte
 peak tiled_argmax_ctx::final_combine()
 {
   CHECK_CUDA(cub::DeviceReduce::Reduce(d_final_temp_.get(), final_temp_bytes_, d_tiles_.get(), d_result_.get(),
-                                       static_cast<int>(n_tiles_), kernel::MaxByValue{}, kReduceIdentity,
-                                       ctx_.cuda_stream));
+                                       static_cast<int>(n_tiles_), peak_max{}, kReduceIdentity, ctx_.cuda_stream));
 
   peak h_result{};
   CHECK_CUDA(cudaMemcpyAsync(&h_result, d_result_.get(), sizeof(peak), cudaMemcpyDeviceToHost, ctx_.cuda_stream));
@@ -143,14 +134,15 @@ peak tiled_argmax_ctx::final_combine()
 }
 
 // Per-tile reduce over the whole grid, then the CUB device-wide final combine.
-peak tiled_argmax_ctx::run(core::span2d<float> data)
+peak tiled_argmax_ctx::run(core::span2d<const float> data, peak_criterion criterion)
 {
   assert(data.is_exhaustive());
   assert(data.extent(0) == extents_.extent(0) && data.extent(1) == extents_.extent(1));
 
   const dim3 block(kThreadsPerBlock);
   const dim3 grid(static_cast<unsigned>(n_tiles_x_), static_cast<unsigned>(n_tiles_y_));
-  kernel::tiled_argmax_reduce<<<grid, block, 0, ctx_.cuda_stream>>>(data.data_handle(), d_tiles_.get(),
+  criterion_ = criterion;
+  kernel::tiled_argmax_reduce<<<grid, block, 0, ctx_.cuda_stream>>>(data.data_handle(), criterion_, d_tiles_.get(),
                                                                     extents_.extent(1), extents_.extent(0), tile_size_,
                                                                     tile_size_, n_tiles_x_, /*tile_x0=*/0,
                                                                     /*tile_y0=*/0);
@@ -164,7 +156,7 @@ peak tiled_argmax_ctx::run(core::span2d<float> data)
 // the untouched cached tiles. The per-tile kernel already supports a partial grid
 // via (tile_x0, tile_y0); here we just translate the dirtied pixel footprint into
 // that tile sub-grid.
-peak tiled_argmax_ctx::run_incremental(core::span2d<float> data, int peak_row, int peak_col, int foot_height,
+peak tiled_argmax_ctx::run_incremental(core::span2d<const float> data, int peak_row, int peak_col, int foot_height,
                                        int foot_width)
 {
   assert(data.is_exhaustive());
@@ -195,8 +187,8 @@ peak tiled_argmax_ctx::run_incremental(core::span2d<float> data, int peak_row, i
   //      (tile_x0, tile_y0) so each block still writes its absolute d_tiles slot. ----
   const dim3 block(kThreadsPerBlock);
   const dim3 grid(static_cast<unsigned>(tx1 - tx0 + 1), static_cast<unsigned>(ty1 - ty0 + 1));
-  kernel::tiled_argmax_reduce<<<grid, block, 0, ctx_.cuda_stream>>>(data.data_handle(), d_tiles_.get(), iw, ih,
-                                                                    tile_size_, tile_size_, n_tiles_x_,
+  kernel::tiled_argmax_reduce<<<grid, block, 0, ctx_.cuda_stream>>>(data.data_handle(), criterion_, d_tiles_.get(), iw,
+                                                                    ih, tile_size_, tile_size_, n_tiles_x_,
                                                                     /*tile_x0=*/tx0, /*tile_y0=*/ty0);
   CHECK_CUDA(cudaGetLastError());
 

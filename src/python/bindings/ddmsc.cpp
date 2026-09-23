@@ -78,8 +78,6 @@ void bind_ddmsc(py::module_& m)
                     &ddmsc::Ddmsc::set_auto_mask_peak_threshold)
       .def_property("auto_mask_rms_threshold", &ddmsc::Ddmsc::auto_mask_rms_threshold,
                     &ddmsc::Ddmsc::set_auto_mask_rms_threshold)
-      .def_property("psf_cache_policy", &ddmsc::Ddmsc::psf_cache_policy, &ddmsc::Ddmsc::set_psf_cache_policy)
-      .def_property("psf_cache_budget_bytes", &ddmsc::Ddmsc::psf_cache_budget_bytes,
-                    &ddmsc::Ddmsc::set_psf_cache_budget_bytes);
+      .def_property("psf_cache_policy", &ddmsc::Ddmsc::psf_cache_policy, &ddmsc::Ddmsc::set_psf_cache_policy);
 }
 }  // namespace fast_deconv::python
