@@ -24,7 +24,8 @@ __global__ void subtract_component_kernel(float* residual, const float* psf, con
   residual[r_offset] -= per_chan[f] * gain * psf[p_offset];
 }
 
-__global__ void subtract_component_kernel(float* residual, const float* psf, common::overlap_region ovr, float gain)
+__global__ void subtract_component_kernel(float* residual, const float* psf, common::overlap_region ovr, float gain,
+                                          matrix::peak_criterion criterion, float threshold)
 {
   const int tix = blockIdx.x * blockDim.x + threadIdx.x;
   const int tiy = blockIdx.y * blockDim.y + threadIdx.y;
@@ -32,15 +33,16 @@ __global__ void subtract_component_kernel(float* residual, const float* psf, com
 
   const int r_offset = (ovr.arow0 + tiy) * ovr.lda + (ovr.acol0 + tix);
   const int p_offset = (ovr.brow0 + tiy) * ovr.ldb + (ovr.bcol0 + tix);
-  residual[r_offset] -= gain * psf[p_offset];
+  const float x = residual[r_offset];
+  if (criterion(x, r_offset) >= threshold) residual[r_offset] = x - gain * psf[p_offset];
 }
 
 }  // namespace fast_deconv::kernel
 
 namespace fast_deconv::common {
 
-void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> residual, core::span2d<float> psf,
-                              index2d peak_coords, float gain)
+void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> residual, core::span2d<const float> psf,
+                              index2d peak_coords, float gain, matrix::peak_criterion criterion, float threshold)
 {
   const int residual_nrows = residual.extent(0), residual_ncols = residual.extent(1);
   const auto ovr = compute_overlap_region(peak_coords, residual_nrows, residual_ncols, psf.extent(0), psf.extent(1));
@@ -48,11 +50,11 @@ void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> res
   dim3 block(32, 8);
   dim3 grid(CEIL_DIV(ovr.ncol, block.x), CEIL_DIV(ovr.nrow, block.y));
   kernel::subtract_component_kernel<<<grid, block, 0, ctx.cuda_stream>>>(residual.data_handle(), psf.data_handle(), ovr,
-                                                                         gain);
+                                                                         gain, criterion, threshold);
 }
 
-void subtract_component_async(const core::exec_ctx& ctx, core::span3d<float> residual, core::span3d<float> psf,
-                              core::span1d<float> spectral_coeffs, index2d peak_coords, float gain)
+void subtract_component_async(const core::exec_ctx& ctx, core::span3d<float> residual, core::span3d<const float> psf,
+                              core::span1d<const float> spectral_coeffs, index2d peak_coords, float gain)
 {
   const int n_freq = residual.extent(0);
   const int residual_nrows = residual.extent(1);

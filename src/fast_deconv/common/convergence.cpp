@@ -76,12 +76,11 @@ void convergence::update_status_(bool no_components)
 
 void scale_stall_tracker::update(int scale, float rms)
 {
-  // Match DDFacet: cumulative stall count per scale, never reset on non-trigger.
-  // TODO(guards): last_rms_ is shared across scales, so a scale gets a stall strike based on the
-  // rms left by whichever scale ran before it — a plateau on one scale can retire others (observed:
-  // scales 4-9 all retired within seconds). Consider tracking last_rms_ per scale so a strike only
-  // reflects that scale's own progress.
-  if (std::abs(last_rms_ - rms) < stall_threshold_) scales_stall_count_.at(scale)++;
+  // Consecutive strikes, unlike DDFacet's cumulative count
+  if (std::abs(last_rms_ - rms) < stall_threshold_)
+    scales_stall_count_.at(scale)++;
+  else
+    scales_stall_count_.at(scale) = 0;
   last_rms_ = rms;
 }
 

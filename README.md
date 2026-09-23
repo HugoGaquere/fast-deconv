@@ -58,10 +58,10 @@ ctest --test-dir build/release-backend_cuda
 The `host` backend runs the same public API on the CPU, using PocketFFT and OpenMP.
 
 Conan is a dependency provider; this recipe does not package the C++ library.
-For direct CMake builds, `FAST_DECONV_BUILD_TOOLS` and
-`FAST_DECONV_BUILD_BENCHMARKS` default to `OFF`. Enable them to build
-`replay_ddmsc` and the CUDA benchmarks, respectively. `scripts/build.sh` enables
-both and only builds/resolves tests when `-t` is supplied.
+For direct CMake builds, `FAST_DECONV_BUILD_TOOLS` defaults to `OFF`; enable it
+to build `replay_ddmsc`. Benchmarks live in the separate `fast-deconv-bench`
+project. `scripts/build.sh` enables the tools and only builds/resolves tests
+when `-t` is supplied.
 
 CMake uses `BUILD_TESTING` (replacing `BUILD_TESTS`). For manual Conan installs,
 `-o "fast-deconv/*:with_tests=False"` or `-c tools.build:skip_test=True` omits test

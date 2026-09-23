@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <emu/submdspan.hpp>
 #include <fast_deconv/algorithm/ddmsc_cycles.hpp>
+#include <fast_deconv/algorithm/psf_convolution.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/common/clean.hpp>
 #include <fast_deconv/common/convergence.hpp>
@@ -13,7 +14,6 @@
 #include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
-#include <fast_deconv/matrix/argmax.hpp>
 #include <fast_deconv/matrix/stats.hpp>
 #include <fast_deconv/matrix/tiled_argmax.hpp>
 #include <fast_deconv/util/utils.hpp>
@@ -60,15 +60,13 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   FD_PROFILE_FN();
   // log::set_level(spdlog::level::debug);  // disabled for benchmarking
 
-  // First call builds the device state: pool, streams, staged inputs, FFT plans.
+  // First call builds the device state: pool, streams and staged inputs.
   auto& device = ctx.state();
-  auto& scale_ctx = device.scale_convolve;
-  auto& psf_ctx = device.psf_convolve;
-  const linalg::fft_dims& scale_dims = scale_ctx.dims();
-  const linalg::fft_dims& psf_dims = psf_ctx.dims();
+  const int psf_nrow = device.raw_psfs_d.extent(2);
+  const int psf_ncol = device.raw_psfs_d.extent(3);
 
-  // stream_a is the context's compute stream — the FFT plans are bound to it,
-  // so the convolutions and the surrounding kernels share one stream.
+  // stream_a is the context's compute stream: the convolutions and the
+  // surrounding kernels share it.
   // stream_b is the context's aux stream for the clean-loop per-channel
   // fit/subtract path; everything it touches (dirty, the coeff buffers) is
   // allocated and driven on it.
@@ -82,13 +80,11 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   const size_t dirty_npix = dirty_nrows * dirty_ncols;
   const size_t mean_residual_n_items = dirty_npix;
   const int n_order = device.xdes_d.extent(1);
-  const int n_scales = static_cast<int>(device.scale_sigmas_d.size());
+  const int n_scales = static_cast<int>(ctx.scale_sigmas.size());
 
-  FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_dims.input_nrow,
-                                      psf_dims.input_ncol));
+  FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_nrow, psf_ncol));
   // Same banner in the trace description, so a .tracy file says what it ran on.
-  FD_PROFILE_APPINFO(format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_dims.input_nrow,
-                                       psf_dims.input_ncol));
+  FD_PROFILE_APPINFO(format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_nrow, psf_ncol));
 
   // The spectral fit needs about two bands per coefficient to be a fit rather than an
   // interpolation; at or below one, it stops being identifiable and only the minimum-norm
@@ -101,7 +97,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
 
   FD_PROFILE_MARK("init/mean_residual");
   // Initial mean residual: owning buffer plus a mutable view that gets
-  // re-seated onto scale slices during the loop.
+  // re-seated onto the selected scale's residual during each clean loop.
   auto mean_residual_buf = stream_a.alloc_mdcontainer_async<float>(dirty_nrows, dirty_ncols);
   core::span2d<float> mean_residual(mean_residual_buf.data_handle(), dirty_nrows, dirty_ncols);
   linalg::weighted_sum_async(stream_a, dirty, weights_freq, mean_residual);
@@ -135,7 +131,6 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   // Init convergence and scales watchers
   common::convergence deconv_convergence{p.max_iteration, stop_flux, 5, p.divergence_factor,
                                          common::scale_stall_tracker{n_scales, 5, p.scale_stall_threshold}};
-
   deconv_convergence.init(track_flux, track_rms);
 
   // Shared device buffer for all component coefficients across all outer
@@ -148,33 +143,17 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   // only on stream_b, fixed size, so allocated once for the whole call.
   auto coeffs_per_chan = stream_b.alloc_mdcontainer_async<float>(n_freq);
 
-  // Prepared argmax for repeated peak lookups over mean_residual
-  matrix::argmax_ctx peak_ws{stream_a, mean_residual_n_items};
-
   // Tiled argmax for the clean loop: after a clean subtraction only the
   // conv2_psf footprint is dirtied, so we recompute just the touched tiles instead
   // of rescanning all of mean_residual. Re-seeded with a full pass each outer iter.
   matrix::tiled_argmax_ctx tiled_ws{stream_a, mean_residual.extents(), 64};
 
+  // Dirty-grid convolution for the scale search, one sigma at a time.
+  const linalg::convolution_ctx scale_conv_ctx{stream_a, ctx.dirty_nrow, ctx.dirty_ncol, ctx.fft_padding, 1};
+
   FD_PROFILE_MARK("init/psf_cache");
-  // The convolved PSFs are a pure function of raw_psfs and scale_sigmas (session
-  // constants) plus weights_freq and gamma, so only those two can drop the cache.
-  auto& psf_cache = device.psf_cache;
-  std::vector<float> weights_host(n_freq);
-  stream_a.download(weights_freq, weights_host.data());
-  stream_a.wait();
-  psf_cache.set_budget_bytes(p.psf_cache_budget_bytes);
-  psf_cache.configure(weights_freq, std::move(weights_host), p.gamma);
+  psf_convolution psf_cache{stream_a, device.raw_psfs_d, ctx.scale_sigmas, weights_freq, p.gamma, ctx.fft_padding};
   if (p.psf_cache_policy == psf_cache_mode::eager_all) psf_cache.prefetch_all();
-
-  // Loop-only buffers
-  auto scale_kernels = stream_a.alloc_mdcontainer_async<float>(n_scales, scale_dims.freq_nrow, scale_dims.freq_ncol);
-  scale::make_gaussian_kernels_async(stream_a, device.scale_sigmas_d, scale_dims.padded_ncol, scale_kernels);
-
-  FD_LOG_DEBUG("run_ddmsc: built {} scale kernels in freq domain ({}x{}, {} floats total)", n_scales,
-               scale_dims.freq_nrow, scale_dims.freq_ncol, scale_kernels.size());
-
-  auto scales_x_dirty = stream_a.alloc_mdcontainer_async<float>(n_scales, dirty_nrows, dirty_ncols);
 
   // TODO: fix that
   int total_iterations = 0;
@@ -185,6 +164,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   bool is_auto_mask_initialized = false;
 
   int last_selected_scale = -1;
+  int cached_scale = -1;  // scale whose convolved PSFs psf_cache currently holds
 
   stream_a.wait();
   // Loop over scales
@@ -195,6 +175,13 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
                  track_flux, track_rms);
     FD_PROFILE_PLOT("peak_flux", track_flux);
     FD_PROFILE_PLOT("rms", track_rms);
+    FD_PROFILE_PLOT("pool_used_mib", static_cast<double>(device.resources.pool_used_bytes()) / (1 << 20));
+    FD_PROFILE_PLOT("pool_reserved_mib", static_cast<double>(device.resources.pool_reserved_bytes()) / (1 << 20));
+    FD_PROFILE_PLOT("psf_cache_entries", static_cast<std::int64_t>(psf_cache.n_entries()));
+    // TODO: temporary, remove once the pool growth is understood
+    FD_LOG_INFO("run_ddmsc: [iter={}] pool used={:.1f} MiB reserved={:.1f} MiB psf_cache_entries={}", total_iterations,
+                static_cast<double>(device.resources.pool_used_bytes()) / (1 << 20),
+                static_cast<double>(device.resources.pool_reserved_bytes()) / (1 << 20), psf_cache.n_entries());
 
     float auto_mask_threshold =
         p.auto_mask_peak_threshold.value_or(p.auto_mask_rms_threshold.value_or(0.f) * track_rms);
@@ -215,49 +202,46 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
       std::vector<int> all_scales = ctx.historical_scales;
       all_scales.insert(all_scales.end(), result.scales.begin(), result.scales.end());
 
-      const float fft_padding = static_cast<float>(psf_dims.padded_nrow) / psf_dims.input_nrow;
-      common::build_auto_mask(stream_a, all_coords, all_scales, central_facet_psfs, weights_freq, device.scale_sigmas_d,
-                              fft_padding, device.mask_d, mask_per_scale);
+      common::build_auto_mask(stream_a, all_coords, all_scales, central_facet_psfs, weights_freq, ctx.scale_sigmas,
+                              ctx.fft_padding, device.mask_d, mask_per_scale);
 
       is_auto_mask_initialized = true;
     }
 
-    FD_PROFILE_MARK("convolve_with_scales");
-    scale::convolve_with_scales(scale_ctx, mean_residual, scale_kernels, scales_x_dirty);
-
-    FD_PROFILE_MARK("mask_and_abs");
-    if (activate_auto_mask)
-      common::mask_and_abs_async(stream_a, scales_x_dirty, mask_per_scale, -std::numeric_limits<float>::infinity(),
-                                 p.clean_negative);
-    else
-      common::mask_and_abs_async(stream_a, scales_x_dirty, device.mask_d, -std::numeric_limits<float>::infinity(),
-                                 p.clean_negative);
-
-    FD_PROFILE_MARK("scale_selection");
-    int selected_scale_idx =
-        scale::scale_selection(stream_a, scales_x_dirty, ctx.scale_bias, deconv_convergence.get_all_stalled());
+    // Convolve the residual with every scale and keep the winner. The result owns
+    // its plane, and mean_residual points into it, so it must live through the clean loop.
+    const auto retired = deconv_convergence.get_all_stalled();
+    const scale::scale_result selected =
+        activate_auto_mask ? scale::select_best_scale(stream_a, scale_conv_ctx, mean_residual, ctx.scale_sigmas,
+                                                      ctx.scale_bias, retired, mask_per_scale, p.clean_negative)
+                           : scale::select_best_scale(stream_a, scale_conv_ctx, mean_residual, ctx.scale_sigmas,
+                                                      ctx.scale_bias, retired, device.mask_d, p.clean_negative);
+    const int selected_scale_idx = selected.scale;
 
     // FD_LOG_INFO("run_ddmsc: selected scale {}, auto_mask {}", selected_scale_idx, activate_auto_mask);
 
-    mean_residual = emu::submdspan(scales_x_dirty, selected_scale_idx);
+    mean_residual = selected.scaled_residual;
+
+    // Only one scale stays resident. stream_b, which reads the entries, was drained at
+    // the end of the previous iteration, so the old scale can be freed here.
+    if (selected_scale_idx != cached_scale && p.psf_cache_policy != psf_cache_mode::eager_all) {
+      psf_cache.clear();
+      cached_scale = selected_scale_idx;
+    }
 
     // Under lazy_scale the whole scale is built here; the other policies leave
     // the misses to the per-facet get() in the clean loop below.
     if (p.psf_cache_policy == psf_cache_mode::lazy_scale) psf_cache.prefetch_scale(selected_scale_idx);
 
-    auto [peak_value, peak_index] = peak_ws.run(mean_residual);
+    auto [peak_index, peak_value, peak_signed] = selected.peak;
 
     const float threshold = peak_value * p.peak_factor;
 
     FD_PROFILE_PLOT("scale", static_cast<std::int64_t>(selected_scale_idx));
     FD_PROFILE_PLOT("scale_peak", peak_value);
 
-    common::mask_less_than_threshold(stream_a, mean_residual, threshold, -std::numeric_limits<float>::infinity());
-
-    // Seed the tile cache against the masked buffer for this scale. The peak is
-    // unchanged by masking (it only removes sub-threshold values), so we keep the
-    // peak_value/peak_index from the argmax above and use this purely to seed.
-    tiled_ws.run(mean_residual);
+    // Seed only: the scale search already gave this iteration's first peak.
+    tiled_ws.run(mean_residual, selected.criterion);
 
     FD_LOG_DEBUG("run_ddmsc: clean loop start scale={} peak={:.8f} threshold={:.8f} max_clean_iter={}",
                  selected_scale_idx, peak_value, threshold, p.max_clean_iteration);
@@ -269,8 +253,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
       FD_PROFILE_SCOPE("minor_iter");
       const auto peak_coords = util::unravel_index_2D(peak_index, dirty_ncols);
       const int facet_idx = ctx.map_pixel_facet(peak_coords.row, peak_coords.col);
-      // A copy, so the buffers survive a later miss evicting this entry.
-      const conv_psf_cache::entry psf = psf_cache.get(selected_scale_idx, facet_idx);
+      const psf_convolution::entry psf = psf_cache.get(selected_scale_idx, facet_idx);
       const float gain = psf.gain;
 
       result.add_component(peak_coords, selected_scale_idx, gain);
@@ -278,8 +261,8 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
       FD_LOG_DEBUG("run_ddmsc:   [sub={}] peak={:.8f} at ({},{}) facet={} gain={:.6f}", n_clean_iter, peak_value,
                    peak_coords.row, peak_coords.col, facet_idx, gain);
 
-      core::span3d<float> conv_psf = psf.conv;
-      core::span2d<float> conv2_psf = psf.conv2;
+      core::span3d<const float> conv_psf = psf.conv;
+      core::span2d<const float> conv2_psf = psf.conv2;
 
       const std::size_t coeffs_offset = (total_iterations + n_clean_iter) * n_order;
       auto spectral_coeffs = core::span1d<float>(all_coeffs.data_handle() + coeffs_offset, n_order);
@@ -287,13 +270,16 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
                                         spectral_coeffs, coeffs_per_chan);
 
       common::subtract_component_async(stream_b, dirty, conv_psf, coeffs_per_chan, peak_coords, gain);
-      common::subtract_component_async(stream_a, mean_residual, conv2_psf, peak_coords, peak_value * gain);
+      // Pixels below threshold stay frozen, so a sidelobe can't lift them into this loop.
+      common::subtract_component_async(stream_a, mean_residual, conv2_psf, peak_coords, peak_signed * gain,
+                                       selected.criterion, threshold);
       // Only the conv2_psf footprint centered on peak_coords was dirtied; refresh
       // just the touched tiles and re-combine against the cached ones.
       const auto next = tiled_ws.run_incremental(mean_residual, peak_coords.row, peak_coords.col, conv2_psf.extent(0),
                                                  conv2_psf.extent(1));
       peak_value = next.value;
       peak_index = next.index;
+      peak_signed = next.signed_value;
 
       n_clean_iter++;
     }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <unistd.h>
+
 #include <cstdint>
 #include <cstring>
 #include <fast_deconv/core/profiler.hpp>
@@ -91,6 +93,15 @@ class block_pool {
     return used_bytes_;
   }
 
+  /// Bytes the pool holds: live working set plus the blocks waiting in the free lists.
+  std::uint64_t reserved_bytes() const
+  {
+    const std::lock_guard lock(mutex_);
+    std::uint64_t idle = 0;
+    for (const auto& [num_bytes, blocks] : free_lists_) idle += num_bytes * blocks.size();
+    return used_bytes_ + idle;
+  }
+
  private:
   mutable std::mutex mutex_;
   std::unordered_map<std::uint64_t, std::vector<void*>> free_lists_;
@@ -110,6 +121,7 @@ class exec_resources_impl {
   exec_resources_impl& operator=(exec_resources_impl&&) = delete;
 
   std::uint64_t pool_used_bytes() const { return memory_pool.used_bytes(); }
+  std::uint64_t pool_reserved_bytes() const { return memory_pool.reserved_bytes(); }
 
   /// mutable so a lane built from a const resources still allocates through it,
   /// the way the cuda lane copies its pool handle out of one.
@@ -149,7 +161,15 @@ class exec_ctx_impl {
     std::memcpy(dst, src, num_bytes);
   }
 
+  void copy_bytes(void* dst, const void* src, std::uint64_t num_bytes) const { std::memcpy(dst, src, num_bytes); }
+
   void wait() const {}
+
+  /// Free physical pages only; reclaimable cache and the pool's free lists are excluded, so this under-reports.
+  std::uint64_t available_bytes() const
+  {
+    return static_cast<std::uint64_t>(sysconf(_SC_AVPHYS_PAGES)) * static_cast<std::uint64_t>(sysconf(_SC_PAGE_SIZE));
+  }
 
   block_pool& memory_pool;
 };

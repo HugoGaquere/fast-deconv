@@ -19,8 +19,6 @@ add_executable(fast_deconv_unit_tests
   test_clean.cpp
   test_gain.cpp
   test_multi_frequency.cpp
-  test_scales.cpp
-  test_conv_psf_cache.cpp
   test_ddmsc_class.cpp
 )
 

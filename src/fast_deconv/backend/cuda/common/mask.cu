@@ -7,8 +7,8 @@
 #include <cstdint>
 #include <cub/cub.cuh>
 #include <emu/submdspan.hpp>
-#include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/common/mask.hpp>
+#include <fast_deconv/linalg/convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
 #include <fast_deconv/morphology/dilation.hpp>
@@ -16,57 +16,10 @@
 #include <fast_deconv/util/cuda_macros.hpp>
 #include <fast_deconv/util/dump.hpp>
 #include <limits>
+#include <numbers>
 #include <vector>
 
 namespace fast_deconv::kernel {
-
-// Block/thread tiling for the elementwise mask kernels. ITEMS_PER_THREAD=4 makes
-// the VECTORIZE algorithms emit 128-bit (float4 / uchar4) transactions; CUB checks
-// pointer alignment at runtime and falls back to scalar guarded loads otherwise,
-// and the partial-tile API bounds-guards the trailing tile. Delegating the vector
-// width to CUB keeps this correct/tuned as the target architecture changes.
-namespace detail {
-constexpr int kMaskBlock = 256;
-constexpr int kMaskItemsPerThread = 4;
-constexpr int kMaskTile = kMaskBlock * kMaskItemsPerThread;
-using LoadFloat = cub::BlockLoad<float, kMaskBlock, kMaskItemsPerThread, cub::BLOCK_LOAD_VECTORIZE>;
-using StoreFloat = cub::BlockStore<float, kMaskBlock, kMaskItemsPerThread, cub::BLOCK_STORE_VECTORIZE>;
-using LoadMask = cub::BlockLoad<unsigned char, kMaskBlock, kMaskItemsPerThread, cub::BLOCK_LOAD_VECTORIZE>;
-}  // namespace detail
-
-__global__ void mask_and_abs_kernel(float* data, const bool* mask, float fill_value, bool abs, int n_per_batch,
-                                    std::int64_t data_batch_stride, std::int64_t mask_batch_stride)
-{
-  float* d = data + blockIdx.y * data_batch_stride;
-  const unsigned char* m = reinterpret_cast<const unsigned char*>(mask) + blockIdx.y * mask_batch_stride;
-  const int tile = detail::kMaskTile;
-  for (int base = blockIdx.x * tile; base < n_per_batch; base += gridDim.x * tile) {
-    const int valid = min(tile, n_per_batch - base);
-    float dv[detail::kMaskItemsPerThread];
-    unsigned char mv[detail::kMaskItemsPerThread];
-    detail::LoadFloat().Load(d + base, dv, valid);
-    detail::LoadMask().Load(m + base, mv, valid);
-#pragma unroll
-    for (int j = 0; j < detail::kMaskItemsPerThread; ++j) dv[j] = mv[j] ? fill_value : (abs ? fabsf(dv[j]) : dv[j]);
-    detail::StoreFloat().Store(d + base, dv, valid);
-  }
-}
-
-__global__ void mask_less_than_threshold_kernel(float* data, float threshold, float fill_value, int n_per_batch,
-                                                std::int64_t batch_stride)
-{
-  float* d = data + blockIdx.y * batch_stride;
-  const int tile = detail::kMaskTile;
-  for (int base = blockIdx.x * tile; base < n_per_batch; base += gridDim.x * tile) {
-    const int valid = min(tile, n_per_batch - base);
-    float dv[detail::kMaskItemsPerThread];
-    detail::LoadFloat().Load(d + base, dv, valid);
-#pragma unroll
-    for (int j = 0; j < detail::kMaskItemsPerThread; ++j)
-      if (dv[j] < threshold) dv[j] = fill_value;
-    detail::StoreFloat().Store(d + base, dv, valid);
-  }
-}
 
 __global__ void build_mask_per_scale_kernel(const int2* coords, const int* scales, bool* out_mask_per_scale,
                                             int n_coords, int inner_scale_stride, int inter_scales_stride)
@@ -76,23 +29,6 @@ __global__ void build_mask_per_scale_kernel(const int2* coords, const int* scale
   const std::int64_t idx = static_cast<std::int64_t>(scales[tid]) * inter_scales_stride +
                            coords[tid].x * inner_scale_stride + coords[tid].y;  // int2: x is the row, y the column
   out_mask_per_scale[idx] = true;
-}
-
-// Batched G^2-only variant: freq_out[b,i] = freq_psf[b,i] * gaussian[i]^2 * norm.
-__global__ void multiply_psf_gauss_sq_batched_kernel(const linalg::complex_type* freq_psf, const float* gaussian,
-                                                     linalg::complex_type* freq_out, int freq_total, int n_batch,
-                                                     float norm)
-{
-  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  if (tid >= freq_total) return;
-  const float g = gaussian[tid];
-  const float g2_norm = g * g * norm;
-  const linalg::complex_type* in = freq_psf + tid;
-  linalg::complex_type* out = freq_out + tid;
-  for (int b = 0; b < n_batch; b++, in += freq_total, out += freq_total) {
-    const linalg::complex_type val = *in;
-    *out = {val.x * g2_norm, val.y * g2_norm};
-  }
 }
 
 // Threshold a real image into a bool FWHM mask.
@@ -118,54 +54,9 @@ __global__ void finalize_mask_kernel(bool* mask_per_scale, const bool* external_
 
 namespace fast_deconv::common {
 
-void mask_and_abs_async(const core::exec_ctx& ctx, core::span2d<float> data, core::span2d<bool> mask, float fill_value,
-                        bool abs)
-{
-  assert(data.is_exhaustive() && mask.is_exhaustive());
-  assert(data.extent(0) == mask.extent(0) && data.extent(1) == mask.extent(1));
-  const int n = static_cast<int>(data.size());
-  dim3 grid(CEIL_DIV(n, kernel::detail::kMaskTile), 1);
-  kernel::mask_and_abs_kernel<<<grid, kernel::detail::kMaskBlock, 0, ctx.cuda_stream>>>(
-      data.data_handle(), mask.data_handle(), fill_value, abs, n, 0, 0);
-}
-
-void mask_and_abs_async(const core::exec_ctx& ctx, core::span3d<float> data, core::span2d<bool> mask, float fill_value,
-                        bool abs)
-{
-  assert(data.is_exhaustive() && mask.is_exhaustive());
-  assert(data.extent(1) == mask.extent(0) && data.extent(2) == mask.extent(1));
-  const int n_per_batch = static_cast<int>(mask.size());
-  const int nbatch = data.extent(0);
-  const std::int64_t batch_stride = data.stride(0);
-  dim3 grid(CEIL_DIV(n_per_batch, kernel::detail::kMaskTile), nbatch);
-  kernel::mask_and_abs_kernel<<<grid, kernel::detail::kMaskBlock, 0, ctx.cuda_stream>>>(
-      data.data_handle(), mask.data_handle(), fill_value, abs, n_per_batch, batch_stride, 0);
-}
-
-void mask_and_abs_async(const core::exec_ctx& ctx, core::span3d<float> data, core::span3d<bool> mask, float fill_value,
-                        bool abs)
-{
-  assert(data.is_exhaustive() && mask.is_exhaustive());
-  assert(data.extents() == mask.extents());
-  const int n_per_batch = static_cast<int>(data.extent(1) * data.extent(2));
-  const int nbatch = data.extent(0);
-  const std::int64_t batch_stride = data.stride(0);
-  dim3 grid(CEIL_DIV(n_per_batch, kernel::detail::kMaskTile), nbatch);
-  kernel::mask_and_abs_kernel<<<grid, kernel::detail::kMaskBlock, 0, ctx.cuda_stream>>>(
-      data.data_handle(), mask.data_handle(), fill_value, abs, n_per_batch, batch_stride, batch_stride);
-}
-void mask_less_than_threshold(const core::exec_ctx& ctx, core::span2d<float> data, float threshold, float fill_value)
-{
-  assert(data.is_exhaustive());
-  const int n = static_cast<int>(data.size());
-  dim3 grid(CEIL_DIV(n, kernel::detail::kMaskTile), 1);
-  kernel::mask_less_than_threshold_kernel<<<grid, kernel::detail::kMaskBlock, 0, ctx.cuda_stream>>>(
-      data.data_handle(), threshold, fill_value, n, 0);
-}
-
 void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coords, const std::vector<int>& scales,
                      core::span3d<float> central_facet_psfs, core::span1d<const float> weights_freq,
-                     core::span1d<float> scale_sigmas, float fft_padding, core::span2d<bool> external_mask,
+                     const std::vector<float>& scale_sigmas, float fft_padding, core::span2d<bool> external_mask,
                      core::span3d<bool> mask_per_scale)
 {
   assert(mask_per_scale.is_exhaustive());
@@ -206,57 +97,26 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
         d_coords.data_handle(), d_scales.data_handle(), mask_per_scale.data_handle(), n_coords, dirty_ncol, dirty_npix);
   }
 
-  // ---- 2. Build a PSF-sized convolve_ctx with batched plans over n_freq (1 R2C + 1 C2R) ----
-  // The plans run on this lane's stream. Auto-allocation is disabled, so a
-  // caller-owned work area must be bound before any transform.
-  linalg::convolve_ctx conv(ctx, psf_nrow, psf_ncol, /*forward_batch=*/n_freq, /*backward_batch=*/n_freq,
-                            /*n_backward_plans=*/1, fft_padding);
+  // ---- 2. One batched forward transform of every channel's PSF, reused by every scale ----
+  const linalg::convolution_ctx conv(ctx, psf_nrow, psf_ncol, fft_padding, /*batch=*/n_freq);
+  auto spectrum =
+      ctx.alloc_mdcontainer_async<linalg::complex_type>(static_cast<std::size_t>(n_freq) * conv.dims().freq_total());
+  conv.forward(central_facet_psfs, spectrum);
 
-  core::owned_ptr<std::byte> fft_work_area;
-  if (conv.required_work_size() > 0) fft_work_area = ctx.alloc_ptr_async<std::byte>(conv.required_work_size());
-  conv.bind_work_area(fft_work_area.get());
-
-  const linalg::fft_dims& dims = conv.dims();
-  const int padded_total = dims.padded_total();
-  const int freq_total = dims.freq_total();
-
-  // ---- 3. Generate per-scale Gaussian kernels at PSF FFT size ----
-  auto gauss_kernels = ctx.alloc_mdcontainer_async<float>(n_scales, dims.freq_nrow, dims.freq_ncol);
-  scale::make_gaussian_kernels_async(ctx, scale_sigmas, dims.padded_ncol, gauss_kernels);
-
-  // ---- 4. Batched pad+ifftshift and R2C of all frequency PSFs (once, reused across scales) ----
-  auto padded_psf = ctx.alloc_ptr_async<float>(static_cast<std::size_t>(n_freq) * padded_total);
-  auto freq_psf = ctx.alloc_ptr_async<linalg::complex_type>(static_cast<std::size_t>(n_freq) * freq_total);
-
-  linalg::pad_ifftshift_batched_async(ctx, dims, central_facet_psfs.data_handle(), padded_psf.get(), n_freq);
-  conv.forward_async(padded_psf.get(), freq_psf.get());
-
-  // ---- 5. Per-scale: multiply (batched) -> C2R (batched) -> crop (batched) -> weighted mean -> ... ----
-  auto freq_conv2 = ctx.alloc_ptr_async<linalg::complex_type>(static_cast<std::size_t>(n_freq) * freq_total);
-  auto padded_conv2 = ctx.alloc_ptr_async<float>(static_cast<std::size_t>(n_freq) * padded_total);
+  // ---- 3. Per-scale: conv2 -> weighted mean -> FWHM -> dilate ----
   auto conv2_cropped = ctx.alloc_mdcontainer_async<float>(n_freq, psf_nrow, psf_ncol);
   auto conv2_psf = ctx.alloc_mdcontainer_async<float>(psf_nrow, psf_ncol);
   auto fwhm_mask = ctx.alloc_mdcontainer_async<bool>(psf_nrow, psf_ncol);
   auto dilation_out = ctx.alloc_mdcontainer_async<bool>(dirty_nrow, dirty_ncol);
 
-  const float norm = 1.0f / static_cast<float>(padded_total);
-
   for (int i = 0; i < n_scales; i++) {
-    // 5a. Batched multiply by G^2 in freq domain (with norm)
-    kernel::multiply_psf_gauss_sq_batched_kernel<<<CEIL_DIV(freq_total, 256), 256, 0, cuda_stream>>>(
-        freq_psf.get(), gauss_kernels.data_handle() + static_cast<std::int64_t>(i) * freq_total, freq_conv2.get(),
-        freq_total, n_freq, norm);
+    // 3a. psf ** G_s ** G_s, one convolution with G(sigma * sqrt(2)) since G(sigma)^2 = G(sigma * sqrt(2)).
+    conv.convolve_spectrum(spectrum, scale_sigmas.at(i) * std::numbers::sqrt2_v<float>, conv2_cropped);
 
-    // 5b. Batched C2R back to space
-    conv.backward_async(freq_conv2.get(), padded_conv2.get());
-
-    // 5c. Batched fftshift + crop to PSF size
-    linalg::fftshift_crop_async(ctx, dims, padded_conv2.get(), conv2_cropped.data_handle(), n_freq);
-
-    // 5d. Weighted mean across channels -> 2D conv2_psf
+    // 3b. Weighted mean across channels -> 2D conv2_psf
     linalg::weighted_sum_async(ctx, conv2_cropped, weights_freq, conv2_psf);
 
-    // 5e. Max-reduce conv2_psf (synchronizes the stream)
+    // 3c. Max-reduce conv2_psf (synchronizes the stream)
     auto max_iter =
         thrust::max_element(thrust::cuda::par.on(cuda_stream), thrust::device_pointer_cast(conv2_psf.data_handle()),
                             thrust::device_pointer_cast(conv2_psf.data_handle() + psf_npix));
@@ -265,25 +125,25 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
                                cuda_stream));
     ctx.wait();
 
-    // 5f. FWHM threshold: bool out = (conv2_psf > psf_max / 2)
+    // 3d. FWHM threshold: bool out = (conv2_psf > psf_max / 2)
     kernel::threshold_fwhm_kernel<<<CEIL_DIV(psf_npix, 256), 256, 0, cuda_stream>>>(
         conv2_psf.data_handle(), psf_max * 0.5f, fwhm_mask.data_handle(), psf_npix);
 
-    // 5g. Bounding box of FWHM (synchronous host-side reduction)
+    // 3e. Bounding box of FWHM (synchronous host-side reduction)
     const roi structure_roi = morphology::compute_mask_roi(ctx, fwhm_mask);
 
-    // 5h. Dilate mask_per_scale[i] using FWHM as structuring element
+    // 3f. Dilate mask_per_scale[i] using FWHM as structuring element
     // binary_dilation only writes out[tid]=true on matches; zero the buffer first.
     CHECK_CUDA(cudaMemsetAsync(dilation_out.data_handle(), 0, dirty_npix * sizeof(bool), cuda_stream));
     core::span2d<bool> current_mask = emu::submdspan(mask_per_scale, i);
     morphology::binary_dilation(ctx, current_mask, fwhm_mask, structure_roi, dilation_out);
 
-    // 5i. Copy dilation result back into mask_per_scale[i]
+    // 3g. Copy dilation result back into mask_per_scale[i]
     CHECK_CUDA(cudaMemcpyAsync(current_mask.data_handle(), dilation_out.data_handle(), dirty_npix * sizeof(bool),
                                cudaMemcpyDeviceToDevice, cuda_stream));
   }
 
-  // ---- 6. Negate to "true=masked" convention and OR external_mask into every scale slice ----
+  // ---- 4. Negate to "true=masked" convention and OR external_mask into every scale slice ----
   kernel::finalize_mask_kernel<<<CEIL_DIV(dirty_npix, 256), 256, 0, cuda_stream>>>(
       mask_per_scale.data_handle(), external_mask.data_handle(), dirty_npix, n_scales);
 }

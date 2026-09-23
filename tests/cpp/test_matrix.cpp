@@ -133,12 +133,24 @@ TEST_F(MatrixReductions, ComputeStatsAsyncLeavesResultOnDevice)
 }
 
 // ============================================================================
-// matrix::argmax (CUB DeviceReduce::ArgMax wrapper)
+// matrix::find_peak — argmax of a peak_criterion, carrying the signed pixel
 // ============================================================================
 
-class ArgmaxWorkspace : public fdtest::BackendTest {};
+class FindPeak : public fdtest::BackendTest {
+ protected:
+  matrix::peak run(const core::exec_ctx& sr, const std::vector<float>& img, const std::vector<uint8_t>* mask,
+                   bool absolute)
+  {
+    fdtest::device_buffer<float> d_img(sr, img);
+    fdtest::device_buffer<bool> d_mask(sr, mask ? to_bool(*mask) : std::vector<bool>(1));
+    const matrix::peak_criterion criterion{.mask = mask ? d_mask.get() : nullptr, .absolute = absolute};
+    return matrix::find_peak(sr, core::span2d<const float>(d_img.get(), kNrow, kNcol), criterion);
+  }
+};
 
-TEST_F(ArgmaxWorkspace, ReusableAcrossCallsAndAllNegativeSafe)
+// An empty criterion is a plain argmax. All-negative data catches a running max
+// initialised to 0 instead of -inf, which would report 0 at a bogus index.
+TEST_F(FindPeak, EmptyCriterionIsPlainArgmaxOnAllNegativeData)
 {
   std::mt19937 rng(67);
   std::vector<float> img(kNpix);
@@ -147,20 +159,76 @@ TEST_F(ArgmaxWorkspace, ReusableAcrossCallsAndAllNegativeSafe)
   img.at(a) = -0.5f;  // unique max, still negative
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(sr, img);
-  matrix::argmax_ctx ws(sr, kNpix);
+  const auto p = run(sr, img, nullptr, /*absolute=*/false);
+  EXPECT_EQ(p.index, a);
+  EXPECT_FLOAT_EQ(p.value, -0.5f);
+  EXPECT_FLOAT_EQ(p.signed_value, -0.5f);
+}
 
-  const auto [v1, i1] = ws.run(core::span2d<float>(d_img.get(), kNrow, kNcol));
-  EXPECT_FLOAT_EQ(v1, -0.5f);
-  EXPECT_EQ(i1, a);
+// Equal maxima: the smaller flat index wins, on every backend and thread count.
+TEST_F(FindPeak, TieGoesToTheSmallerIndex)
+{
+  std::vector<float> img(kNpix, 0.0f);
+  const int first = flat(3, 5, kNcol), second = flat(20, 1, kNcol);
+  img.at(second) = 1.0f;
+  img.at(first) = 1.0f;
 
-  // Move the peak and reuse the same ctx.
-  img.at(a) = -1.5f;
-  const int b = flat(28, 3, kNcol);
-  img.at(b) = -0.25f;
-  d_img.from_host(img);
+  const auto sr = res().make_ctx();
+  EXPECT_EQ(run(sr, img, nullptr, /*absolute=*/false).index, first);
+}
 
-  const auto [v2, i2] = ws.run(core::span2d<float>(d_img.get(), kNrow, kNcol));
-  EXPECT_FLOAT_EQ(v2, -0.25f);
-  EXPECT_EQ(i2, b);
+// Masked pixels never win, abs ranks a negative pixel by its magnitude, and the
+// winner's sign survives in signed_value: the clean loop subtracts with it.
+TEST_F(FindPeak, CriterionMasksRanksByAbsAndKeepsTheSign)
+{
+  std::vector<float> img(kNpix, 0.0f);
+  std::vector<uint8_t> mask(kNpix, 0);
+  const int masked = flat(4, 4, kNcol), negative = flat(10, 30, kNcol), positive = flat(25, 7, kNcol);
+  img.at(masked) = 5.0f;
+  mask.at(masked) = 1;
+  img.at(negative) = -3.0f;
+  img.at(positive) = 2.0f;
+
+  const auto sr = res().make_ctx();
+
+  const auto by_abs = run(sr, img, &mask, /*absolute=*/true);
+  EXPECT_EQ(by_abs.index, negative);
+  EXPECT_FLOAT_EQ(by_abs.value, 3.0f);
+  EXPECT_FLOAT_EQ(by_abs.signed_value, -3.0f);
+
+  const auto signed_rank = run(sr, img, &mask, /*absolute=*/false);
+  EXPECT_EQ(signed_rank.index, positive);
+  EXPECT_FLOAT_EQ(signed_rank.value, 2.0f);
+  EXPECT_FLOAT_EQ(signed_rank.signed_value, 2.0f);
+}
+
+// Random image and mask against the host oracle, both abs settings.
+TEST_F(FindPeak, MatchesMaskedMaxOracle)
+{
+  std::mt19937 rng(71);
+  const auto img = make_image(rng);
+  const auto mask = make_mask(rng);
+  const auto sr = res().make_ctx();
+
+  for (const bool absolute : {false, true}) {
+    SCOPED_TRACE(::testing::Message() << "absolute=" << absolute);
+    const auto p = run(sr, img, &mask, absolute);
+    ASSERT_GE(p.index, 0);
+    ASSERT_LT(p.index, kNpix);
+    EXPECT_EQ(mask.at(p.index), 0);
+    EXPECT_FLOAT_EQ(p.value, fdtest::masked_max(img, mask, absolute));
+    EXPECT_FLOAT_EQ(p.signed_value, img.at(p.index));
+  }
+}
+
+// Every pixel masked: nothing qualifies, so the peak value is -inf.
+TEST_F(FindPeak, FullyMaskedPlaneReportsNegativeInfinity)
+{
+  std::mt19937 rng(73);
+  const auto img = make_image(rng);
+  const std::vector<uint8_t> mask(kNpix, 1);
+
+  const auto sr = res().make_ctx();
+  const auto p = run(sr, img, &mask, /*absolute=*/true);
+  EXPECT_TRUE(std::isinf(p.value) && p.value < 0.0f);
 }

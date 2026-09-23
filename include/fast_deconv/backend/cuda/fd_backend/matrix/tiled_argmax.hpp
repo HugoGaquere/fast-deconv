@@ -22,16 +22,16 @@ class tiled_argmax_ctx {
   tiled_argmax_ctx(const tiled_argmax_ctx&) = delete;
   tiled_argmax_ctx& operator=(const tiled_argmax_ctx&) = delete;
 
-  /// Full pass: recompute every tile, then combine. Seeds the cache.
-  peak run(core::span2d<float> data);
+  /// Full pass: recompute every tile under @p criterion, then combine. Seeds the cache and the criterion.
+  peak run(core::span2d<const float> data, peak_criterion criterion = {});
 
-  /// Incremental pass: recompute only the tiles overlapping the
+  /// Incremental pass, under the criterion of the last run(): recompute only the tiles overlapping the
   /// @p foot_height x @p foot_width rectangle centered on (@p peak_row,
   /// @p peak_col), then re-combine against the still-valid cached tiles.
   ///
   /// PRECONDITION: a prior run() seeded every tile, and nothing outside the
   /// footprint changed in @p data since that call.
-  peak run_incremental(core::span2d<float> data, int peak_row, int peak_col, int foot_height, int foot_width);
+  peak run_incremental(core::span2d<const float> data, int peak_row, int peak_col, int foot_height, int foot_width);
 
   core::dims<2> extents() const { return extents_; }
   int tile_size() const { return tile_size_; }
@@ -50,6 +50,7 @@ class tiled_argmax_ctx {
   core::owned_ptr<peak> d_tiles_;
   core::owned_ptr<peak> d_result_;
   core::owned_ptr<std::byte> d_final_temp_;
+  peak_criterion criterion_{};
   bool seeded_ = false;
 };
 

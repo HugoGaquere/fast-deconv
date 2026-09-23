@@ -26,7 +26,7 @@ TEST(LargeIndex, ScaleCubeOffsetsExceedInt32)
   EXPECT_EQ(cube.mapping().required_span_size(), 10 * plane);
 }
 
-// Same for the (n_facets, n_freq, psf, psf) stack conv_psf_cache slices per facet.
+// Same for the (n_facets, n_freq, psf, psf) stack psf_convolution slices per facet.
 TEST(LargeIndex, PsfStackOffsetsExceedInt32)
 {
   const std::int64_t per_facet = std::int64_t{8} * 1721 * 1721;

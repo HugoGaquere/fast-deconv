@@ -4,10 +4,9 @@
 #include <limits>
 #include <vector>
 
-// Pure host tests — no GPU involved. These pin the CURRENT behavior of the
-// convergence watchers, including the known quirk flagged by the TODO(guards)
-// comment in convergence.cpp (last_rms_ shared across scales). When that is
-// fixed, the corresponding tests below are the reviewable behavior change.
+// Pure host tests — no GPU involved. These pin the behavior of the convergence
+// watchers: the flux/iteration/divergence paths, and the scale stall tracker's
+// consecutive-strike counting.
 
 namespace common = fast_deconv::common;
 using common::convergence;
@@ -241,16 +240,19 @@ TEST(ScaleStallTracker, StallsAfterRepeatedSmallRmsChanges)
   EXPECT_FALSE(t.is_stall(2));
 }
 
-// Strikes are cumulative and never reset (DDFacet behavior): real progress
-// between plateaus does not clear previously earned strikes.
-TEST(ScaleStallTracker, StrikesAccumulateAcrossRealProgress)
+// Strikes are consecutive: real progress clears the count, so a scale that stalled in
+// an earlier flux regime is not retired for it once it starts moving the rms again.
+TEST(ScaleStallTracker, ProgressClearsEarlierStrikes)
 {
   scale_stall_tracker t(/*n_scales=*/1, /*max_stall_count=*/1, /*stall_threshold=*/0.01f);
   t.init_rms(1.0f);
 
   t.update(0, 0.5f);  // big drop: no strike
   t.update(0, 0.5f);  // plateau: strike 1
-  t.update(0, 0.9f);  // big change: no strike, and strike 1 is NOT reset
+  t.update(0, 0.9f);  // big change: no strike, and strike 1 IS reset
+  EXPECT_FALSE(t.is_stall(0));
+
+  t.update(0, 0.9f);  // plateau: strike 1 again, not 2
   EXPECT_FALSE(t.is_stall(0));
 
   t.update(0, 0.9f);  // plateau: strike 2 > 1
@@ -274,11 +276,10 @@ TEST(ScaleStallTracker, AllStalledTracksEveryScale)
   EXPECT_EQ(t.get_all_stalled(), (std::vector<int>{0, 1}));
 }
 
-// Pin the known quirk flagged at convergence.cpp TODO(guards) (update):
-// last_rms_ is shared across scales, so a scale is judged against the rms left
-// by whichever scale updated before it — scale 0's plateau below hands scale 1
-// a strike even though scale 1 was never updated before.
-TEST(ScaleStallTracker, SharedLastRmsLetsOneScaleStrikeAnother)
+// last_rms_ is shared, but updates are strictly one per outer iteration, so the delta
+// a scale is judged on is exactly the progress its own clean loop made. Back-to-back
+// plateaus therefore strike each scale in turn, which is the intended reading.
+TEST(ScaleStallTracker, SharedLastRmsMeasuresEachScalesOwnProgress)
 {
   scale_stall_tracker t(/*n_scales=*/2, /*max_stall_count=*/0, /*stall_threshold=*/0.01f);
   t.init_rms(1.0f);

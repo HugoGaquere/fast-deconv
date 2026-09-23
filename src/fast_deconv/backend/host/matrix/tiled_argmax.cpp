@@ -33,7 +33,7 @@ tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> exte
   tiles_.assign(static_cast<std::size_t>(n_tiles_x_) * n_tiles_y_, detail::kPeakIdentity);
 }
 
-void tiled_argmax_ctx::reduce_tile(core::span2d<float> data, int tile_x, int tile_y)
+void tiled_argmax_ctx::reduce_tile(core::span2d<const float> data, int tile_x, int tile_y)
 {
   FD_PROFILE_FN();
   const int image_nrow = extents_.extent(0);
@@ -46,11 +46,12 @@ void tiled_argmax_ctx::reduce_tile(core::span2d<float> data, int tile_x, int til
   const float* base = data.data_handle();
   peak best = detail::kPeakIdentity;
   for (int r = row0; r < row1; r++) {
-    // Rows are contiguous, so scan each one and keep the first maximum.
-    const float* row = base + static_cast<std::int64_t>(r) * image_ncol;
-    const float* found = std::max_element(row + col0, row + col1);
-    const peak row_best{*found, static_cast<std::int64_t>(found - base)};
-    best = max_by_value(best, row_best);
+    const std::int64_t row_offset = static_cast<std::int64_t>(r) * image_ncol;
+    for (int c = col0; c < col1; c++) {
+      const std::int64_t i = row_offset + c;
+      const float v = criterion_(base[i], i);
+      if (v > best.value) best = {.index = i, .value = v, .signed_value = base[i]};  // strict >: first maximum kept
+    }
   }
 
   tiles_.at(static_cast<std::size_t>(tile_y) * n_tiles_x_ + tile_x) = best;
@@ -67,12 +68,13 @@ peak tiled_argmax_ctx::final_combine() const
   return result;
 }
 
-peak tiled_argmax_ctx::run(core::span2d<float> data)
+peak tiled_argmax_ctx::run(core::span2d<const float> data, peak_criterion criterion)
 {
   FD_PROFILE_FN();
   assert(data.is_exhaustive());
   assert(data.extent(0) == extents_.extent(0) && data.extent(1) == extents_.extent(1));
 
+  criterion_ = criterion;
 #pragma omp parallel for collapse(2) if (n_tiles_y_ * n_tiles_x_ > kMinParallelTiles)
   for (int ty = 0; ty < n_tiles_y_; ty++)
     for (int tx = 0; tx < n_tiles_x_; tx++) reduce_tile(data, tx, ty);
@@ -81,7 +83,7 @@ peak tiled_argmax_ctx::run(core::span2d<float> data)
   return final_combine();
 }
 
-peak tiled_argmax_ctx::run_incremental(core::span2d<float> data, int peak_row, int peak_col, int foot_height,
+peak tiled_argmax_ctx::run_incremental(core::span2d<const float> data, int peak_row, int peak_col, int foot_height,
                                        int foot_width)
 {
   FD_PROFILE_FN();

@@ -79,30 +79,4 @@ class device_buffer {
   T* ptr_;
 };
 
-// Allocates required_work_size() bytes, binds them to @p conv, and frees them on
-// scope exit. Every convolve_ctx in a test goes through this, so a plan can
-// never execute with an unbound work area (a recurring bug in tests: see
-// commits b0bfdca and 65addc8).
-class scoped_work_area {
- public:
-  scoped_work_area(const core::exec_ctx& sr, linalg::convolve_ctx& conv) : sr_(sr)
-  {
-    if (conv.required_work_size() > 0) ptr_ = sr.alloc_async(conv.required_work_size());
-    conv.bind_work_area(ptr_);
-  }
-
-  ~scoped_work_area()
-  {
-    sr_.free_async(ptr_);
-    sr_.wait();
-  }
-
-  scoped_work_area(const scoped_work_area&) = delete;
-  scoped_work_area& operator=(const scoped_work_area&) = delete;
-
- private:
-  const core::exec_ctx& sr_;
-  void* ptr_ = nullptr;
-};
-
 }  // namespace fast_deconv::test

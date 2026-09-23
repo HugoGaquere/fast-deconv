@@ -31,6 +31,14 @@ class exec_resources_impl {
     return static_cast<std::uint64_t>(v);
   }
 
+  /// Bytes the pool holds from the driver: live working set plus idle, reusable blocks.
+  std::uint64_t pool_reserved_bytes() const
+  {
+    cuuint64_t v = 0;
+    CHECK_CUDA(cudaMemPoolGetAttribute(memory_pool, cudaMemPoolAttrReservedMemCurrent, &v));
+    return static_cast<std::uint64_t>(v);
+  }
+
   std::uint8_t device{};
   cudaMemPool_t memory_pool{};
 
@@ -102,7 +110,25 @@ class exec_ctx_impl {
     CHECK_CUDA(cudaMemcpyAsync(dst, src, num_bytes, cudaMemcpyDeviceToHost, cuda_stream));
   }
 
+  void copy_bytes(void* dst, const void* src, std::uint64_t num_bytes) const
+  {
+    CHECK_CUDA(cudaMemcpyAsync(dst, src, num_bytes, cudaMemcpyDeviceToDevice, cuda_stream));
+  }
+
   void wait() const { CHECK_CUDA(cudaStreamSynchronize(cuda_stream)); }
+
+  /// Bytes a new allocation can draw on: the pool holds its idle bytes back from the driver, so add them.
+  std::uint64_t available_bytes() const
+  {
+    std::size_t free_bytes = 0;
+    std::size_t total_bytes = 0;
+    CHECK_CUDA(cudaMemGetInfo(&free_bytes, &total_bytes));
+    cuuint64_t reserved = 0;
+    cuuint64_t used = 0;
+    CHECK_CUDA(cudaMemPoolGetAttribute(memory_pool, cudaMemPoolAttrReservedMemCurrent, &reserved));
+    CHECK_CUDA(cudaMemPoolGetAttribute(memory_pool, cudaMemPoolAttrUsedMemCurrent, &used));
+    return free_bytes + (reserved - used);
+  }
 
   cudaStream_t cuda_stream{};
   cublasHandle_t cublas_handle{};
