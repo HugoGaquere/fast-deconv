@@ -9,7 +9,6 @@
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
-#include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -53,37 +52,13 @@ struct params {
   psf_cache_mode psf_cache_policy;  // when the convolved PSFs get built
 };
 
-struct device_state {
+struct context {
   core::exec_resources resources;
   core::exec_ctx compute_stream;  // scale search, PSF builds and the mean-residual clean loop
   core::exec_ctx aux_stream;      // clean-loop fit/subtract, overlapping compute_stream
   core::cont4d<float> raw_psfs_d;
   core::cont2d<float> xdes_d;
   core::cont2d<bool> mask_d;
-
-  device_state(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
-               const core::host_span2d<bool>& mask)
-      : resources(exec_device),
-        compute_stream(resources.make_ctx()),
-        aux_stream(resources.make_ctx()),
-        raw_psfs_d(compute_stream.upload(raw_psfs)),
-        xdes_d(compute_stream.upload(xdes)),
-        mask_d(compute_stream.upload(mask))
-  {
-    compute_stream.wait();  // staging copies, before the host sources go
-  }
-
-  device_state(const device_state&) = delete;
-  device_state& operator=(const device_state&) = delete;
-  device_state(device_state&&) = delete;
-  device_state& operator=(device_state&&) = delete;
-};
-
-struct context {
-  int exec_device;
-  core::host_span4d<float> raw_psfs;
-  core::host_span2d<float> xdes;
-  core::host_span2d<bool> mask;
   std::vector<float> scale_sigmas;
   core::host_span1d<float> scale_bias;
   core::host_span2d<int> map_pixel_facet;
@@ -95,15 +70,18 @@ struct context {
   std::vector<common::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
   std::vector<int> historical_scales;                   // scale of each historical component
 
-  /// Validates the dimensions, stores the input views and copies the scale sigmas.
+  /// Validates the dimensions, uploads the run-constant inputs and copies the scale sigmas.
   context(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
           const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
           const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
           int dirty_ncol, int n_freq, float fft_padding)
-      : exec_device(exec_device),
-        raw_psfs(raw_psfs),
-        xdes(xdes),
-        mask(mask),
+      : resources(checked_device(exec_device, raw_psfs, dirty_nrow, dirty_ncol)),
+        compute_stream(resources.make_ctx()),
+        aux_stream(resources.make_ctx()),
+        raw_psfs_d(compute_stream.upload(raw_psfs)),
+        xdes_d(compute_stream.upload(xdes)),
+        mask_d(compute_stream.upload(mask)),
+        scale_sigmas(scale_sigmas.data_handle(), scale_sigmas.data_handle() + scale_sigmas.size()),
         scale_bias(scale_bias),
         map_pixel_facet(map_pixel_facet),
         dirty_nrow(dirty_nrow),
@@ -111,9 +89,7 @@ struct context {
         n_freq(n_freq),
         fft_padding(fft_padding)
   {
-    core::check_plane_fits_int32(dirty_nrow, dirty_ncol, "dirty");
-    core::check_plane_fits_int32(raw_psfs.extent(2), raw_psfs.extent(3), "psf");
-    this->scale_sigmas.assign(scale_sigmas.data_handle(), scale_sigmas.data_handle() + scale_sigmas.size());
+    compute_stream.wait();  // staging copies, before the host sources go
   }
 
   context(const context&) = delete;
@@ -121,15 +97,14 @@ struct context {
   context(context&&) = delete;
   context& operator=(context&&) = delete;
 
-  device_state& state()
-  {
-    if (state_ == nullptr)
-      state_ = std::make_unique<device_state>(exec_device, raw_psfs, xdes, mask);
-    return *state_;
-  }
-
  private:
-  std::unique_ptr<device_state> state_;
+  // Runs before resources: an oversized plane throws before any device allocation.
+  static int checked_device(int exec_device, const core::host_span4d<float>& raw_psfs, int dirty_nrow, int dirty_ncol)
+  {
+    core::check_plane_fits_int32(dirty_nrow, dirty_ncol, "dirty");
+    core::check_plane_fits_int32(raw_psfs.extent(2), raw_psfs.extent(3), "psf");
+    return exec_device;
+  }
 };
 
 struct ddmsc_result {

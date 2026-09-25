@@ -92,9 +92,9 @@ TEST_F(DdmscClass, AddCoeffsFromDeviceSlicesRows)
   }
 }
 
-// Plane guard: the context validates its dimensions and allocates nothing, so
-// this runs without a GPU. 46341^2 = 2,147,488,281 is the first square past
-// INT32_MAX; the spans are never dereferenced before the first run.
+// Plane guard: the context validates its dimensions before any device allocation,
+// so this runs without a GPU. 46341^2 = 2,147,488,281 is the first square past
+// INT32_MAX; the throwing spans are never dereferenced.
 TEST(DdmscContextGuard, RejectsPlaneLargerThanInt32)
 {
   constexpr int kBig = 46341;
@@ -112,5 +112,4 @@ TEST(DdmscContextGuard, RejectsPlaneLargerThanInt32)
   EXPECT_THROW(ddmsc::context(0, psfs, xdes, mask, sigmas, bias, map, kBig, kBig, 1, 1.5f), std::invalid_argument);
   EXPECT_THROW(ddmsc::context(0, big_psfs, xdes, mask, sigmas, bias, map, kSmall, kSmall, 1, 1.5f),
                std::invalid_argument);
-  EXPECT_NO_THROW(ddmsc::context(0, psfs, xdes, mask, sigmas, bias, map, kSmall, kSmall, 1, 1.5f));
 }
