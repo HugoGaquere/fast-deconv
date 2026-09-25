@@ -1,4 +1,5 @@
 #include <pybind11/native_enum.h>
+#include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -38,7 +39,11 @@ void bind_ddmsc(py::module_& m)
       .def_readonly("peak_coords", &ddmsc::ddmsc_result::peak_coords)
       .def_readonly("scales", &ddmsc::ddmsc_result::scales)
       .def_readonly("gains", &ddmsc::ddmsc_result::gains)
-      .def_readonly("coeffs", &ddmsc::ddmsc_result::coeffs)
+      .def_property_readonly("coeffs",
+                             [](const ddmsc::ddmsc_result& r) {
+                               const auto n = static_cast<py::ssize_t>(r.peak_coords.size());
+                               return py::array_t<float>({n, static_cast<py::ssize_t>(r.n_order)}, r.coeffs.data());
+                             })
       .def_readonly("final_flux", &ddmsc::ddmsc_result::final_flux)
       .def_readonly("stop_flux", &ddmsc::ddmsc_result::stop_flux)
       .def_readonly("total_iterations", &ddmsc::ddmsc_result::total_iterations)
@@ -51,7 +56,7 @@ void bind_ddmsc(py::module_& m)
            py::arg("raw_psfs"), py::arg("xdes"), py::arg("scale_mask"), py::arg("scale_sigmas"), py::arg("scale_bias"),
            py::arg("map_pixel_facet"), py::arg("dirty_nrow"), py::arg("dirty_ncol"), py::arg("n_freq"),
            py::arg("fft_padding"), py::arg("exec_device") = 0,
-           // Every array input stays a host view until the first run() stages it, so all six must outlive the object.
+           // Borrowed: scale_bias, map_pixel_facet, plus raw_psfs/xdes/scale_mask on the host backend.
            py::keep_alive<1, 2>(),  // raw_psfs
            py::keep_alive<1, 3>(),  // xdes
            py::keep_alive<1, 4>(),  // scale_mask

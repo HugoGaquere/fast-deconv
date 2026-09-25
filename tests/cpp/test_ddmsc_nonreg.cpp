@@ -161,7 +161,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
     h_xdes.at(f * kOrder + 1) = static_cast<float>(std::log(kNu.at(f) / kNu.at(0)));
   }
 
-  // ---- Upload the per-run inputs; the context copies its static inputs itself.
+  // ---- Upload the per-run inputs; the context stages its static inputs itself.
   const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_dirty(sr, h_dirty);
   fdtest::device_buffer<float> d_jones(sr, std::vector<float>(static_cast<std::size_t>(kFreq) * kNpix, 1.0f));
@@ -227,7 +227,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
 
   const int n_components = static_cast<int>(result.peak_coords.size());
   ASSERT_EQ(result.gains.size(), result.peak_coords.size());
-  ASSERT_EQ(result.coeffs.size(), result.peak_coords.size());
+  ASSERT_EQ(result.coeffs.size(), result.peak_coords.size() * result.n_order);
 
   // Peak-flux removed from the dirty image per component: the subtraction is
   // coeff * gain * conv_psf where conv_psf is sum-normalized with peak p_s and
@@ -237,7 +237,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   double cleaned_flux_total = 0.0;
   std::array<int, kScales> components_per_scale{};
   for (int i = 0; i < n_components; ++i) {
-    cleaned_flux_total += static_cast<double>(p.gamma) * result.coeffs.at(i).at(0);
+    cleaned_flux_total += static_cast<double>(p.gamma) * result.coeffs.at(i * result.n_order);
     components_per_scale.at(result.scales.at(i))++;
   }
 
@@ -252,7 +252,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
       const double dc = result.peak_coords.at(i).second - kSources.at(s).col;
       const double dist = std::sqrt(dr * dr + dc * dc);
       nearest = std::min(nearest, dist);
-      if (dist <= 15.0) recovered_flux.at(s) += static_cast<double>(p.gamma) * result.coeffs.at(i).at(0);
+      if (dist <= 15.0) recovered_flux.at(s) += static_cast<double>(p.gamma) * result.coeffs.at(i * result.n_order);
     }
     nearest_component_px.at(s) = nearest;
   }
