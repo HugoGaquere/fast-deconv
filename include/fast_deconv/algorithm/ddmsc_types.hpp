@@ -10,6 +10,7 @@
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -56,9 +57,9 @@ struct context {
   core::exec_resources resources;
   core::exec_ctx compute_stream;  // scale search, PSF builds and the mean-residual clean loop
   core::exec_ctx aux_stream;      // clean-loop fit/subtract, overlapping compute_stream
-  core::cont4d<float> raw_psfs_d;
-  core::cont2d<float> xdes_d;
-  core::cont2d<bool> mask_d;
+  core::cont4d<float> raw_psfs;
+  core::cont2d<float> xdes;
+  core::cont2d<bool> mask;
   std::vector<float> scale_sigmas;
   core::host_span1d<float> scale_bias;
   core::host_span2d<int> map_pixel_facet;
@@ -78,9 +79,9 @@ struct context {
       : resources(checked_device(exec_device, raw_psfs, dirty_nrow, dirty_ncol)),
         compute_stream(resources.make_ctx()),
         aux_stream(resources.make_ctx()),
-        raw_psfs_d(compute_stream.upload(raw_psfs)),
-        xdes_d(compute_stream.upload(xdes)),
-        mask_d(compute_stream.upload(mask)),
+        raw_psfs(compute_stream.upload(raw_psfs)),
+        xdes(compute_stream.upload(xdes)),
+        mask(compute_stream.upload(mask)),
         scale_sigmas(scale_sigmas.data_handle(), scale_sigmas.data_handle() + scale_sigmas.size()),
         scale_bias(scale_bias),
         map_pixel_facet(map_pixel_facet),
@@ -117,37 +118,39 @@ struct ddmsc_result {
   int total_iterations = 0;  // total minor iterations consumed across all outer cycles
   common::convergence_status status = common::convergence_status::running;  // why the outer loop ended
 
-  ddmsc_result(int max_iter, int coeff_order)
+  /// @p capacity is the most components one call can produce.
+  explicit ddmsc_result(std::size_t capacity)
   {
-    peak_coords.reserve(max_iter);
-    scales.reserve(max_iter);
-    gains.reserve(max_iter);
-    coeffs.reserve(max_iter);
-  };
+    peak_coords.reserve(capacity);
+    scales.reserve(capacity);
+    gains.reserve(capacity);
+    coeffs.reserve(capacity);
+  }
 
   void add_component(common::index2d coords, int scale, float gain)
   {
     peak_coords.emplace_back(coords.row, coords.col);
     scales.push_back(scale);
     gains.push_back(gain);
-  };
+  }
 
-  /// @p ctx must be the lane @p d_coeffs was written on — the download is
-  /// stream-ordered against it.
-  void add_coeffs_from_device(const core::exec_ctx& ctx, core::span2d<float> d_coeffs)
+  /// One row per component added since the last call. @p ctx must be the lane
+  /// @p rows was written on — the download is stream-ordered against it.
+  void add_coeffs_from_device(const core::exec_ctx& ctx, core::span2d<const float> rows)
   {
-    const std::size_t n_components = d_coeffs.extent(0);
-    const std::size_t n_order = d_coeffs.extent(1);
-    const std::size_t n_total = n_components * n_order;
+    const std::size_t n_components = rows.extent(0);
+    const std::size_t n_order = rows.extent(1);
+    if (n_components != peak_coords.size() - coeffs.size())
+      throw std::logic_error("ddmsc_result: coefficient rows do not match the components added");
 
-    std::vector<float> h_buffer(n_total);
-    ctx.download(d_coeffs, h_buffer.data());
+    std::vector<float> staged(n_components * n_order);
+    ctx.download(rows, staged.data());
     ctx.wait();
 
     for (std::size_t i = 0; i < n_components; ++i) {
-      coeffs.emplace_back(h_buffer.begin() + i * n_order, h_buffer.begin() + (i + 1) * n_order);
+      coeffs.emplace_back(staged.begin() + i * n_order, staged.begin() + (i + 1) * n_order);
     }
-  };
+  }
 };
 
 }  // namespace fast_deconv::algorithm::ddmsc
