@@ -52,7 +52,7 @@ class DdmscClass : public fdtest::BackendTest {
   }
 
  private:
-  // Static inputs live on the host; the first run() stages them to device.
+  // Static inputs live on the host; the context stages them at construction.
   std::vector<float> psfs_;
   std::vector<float> xdes_;
   std::unique_ptr<bool[]> mask_;
@@ -61,18 +61,17 @@ class DdmscClass : public fdtest::BackendTest {
   std::vector<int> map_pixel_facet_;
 };
 
-// Construction is allocation-free now; the pool, both streams, the shared cuFFT
-// work area and all plans are built by the first run(). Surviving construction
-// and destruction on a tiny scene is still the smoke test.
+// Construction builds the pool and both streams and stages the static inputs;
+// surviving construction and destruction on a tiny scene is the smoke test.
 TEST_F(DdmscClass, ConstructsAndDestroysCleanly)
 {
   auto w = make_ddmsc();
   (void)w;
 }
 
-// ddmsc_result::add_coeffs_from_device slices a (n_components, n_order) device
-// buffer into one host vector per component.
-TEST_F(DdmscClass, AddCoeffsFromDeviceSlicesRows)
+// ddmsc_result::set_coeffs copies a (n_components, n_order) device
+// buffer into the flat row-major host coeffs.
+TEST_F(DdmscClass, SetCoeffsCopiesRows)
 {
   const int n_components = 3, n_order = 2;
   const std::vector<float> coeffs = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
@@ -83,15 +82,12 @@ TEST_F(DdmscClass, AddCoeffsFromDeviceSlicesRows)
 
   ddmsc::ddmsc_result result(/*capacity=*/10);
   for (int i = 0; i < n_components; ++i) result.add_component({i, i}, 0, 1.0f);
-  result.add_coeffs_from_device(sr, view);
-  EXPECT_THROW(result.add_coeffs_from_device(sr, view), std::logic_error);  // no components left to match
+  const core::span2d<float> short_view(d_coeffs.get(), n_components - 1, n_order);
+  EXPECT_THROW(result.set_coeffs(sr, short_view), std::logic_error);  // one row per component
+  result.set_coeffs(sr, view);
 
-  ASSERT_EQ(result.coeffs.size(), static_cast<std::size_t>(n_components));
-  for (int i = 0; i < n_components; ++i) {
-    ASSERT_EQ(result.coeffs.at(i).size(), static_cast<std::size_t>(n_order));
-    EXPECT_FLOAT_EQ(result.coeffs.at(i).at(0), coeffs.at(i * n_order + 0));
-    EXPECT_FLOAT_EQ(result.coeffs.at(i).at(1), coeffs.at(i * n_order + 1));
-  }
+  EXPECT_EQ(result.n_order, n_order);
+  EXPECT_EQ(result.coeffs, coeffs);
 }
 
 // Plane guard: the context validates its dimensions before any device allocation,

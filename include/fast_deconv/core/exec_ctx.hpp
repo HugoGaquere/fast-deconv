@@ -84,20 +84,9 @@ class exec_ctx : public exec_ctx_impl {
     this->copy_bytes(dst, src, n * sizeof(T));
   }
 
-  /// New backend container holding a copy of @p src. A real copy on every
-  /// backend, so ownership works out the same whichever one is built.
-  template <typename Span>
-  auto copy_of(const Span& src) const
-  {
-    auto dst = alloc_mdcontainer_async<std::remove_const_t<typename Span::element_type>>(src.extents());
-    copy(dst, src);
-    return dst;
-  }
-
-  /// Backend-resident view of caller-owned host memory: a copy_of() on a device
+  /// Backend-resident view of caller-owned host memory: a copy on a device
   /// backend, a borrow when backend memory already is host memory. @p src must
-  /// outlive the returned view, so this is for per-call inputs, not for buffers
-  /// a long-lived context keeps.
+  /// outlive the returned view.
   template <typename HostSpan>
   auto stage(const HostSpan& src) const
   {

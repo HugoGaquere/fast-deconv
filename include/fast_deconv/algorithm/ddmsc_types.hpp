@@ -71,7 +71,8 @@ struct context {
   std::vector<common::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
   std::vector<int> historical_scales;                   // scale of each historical component
 
-  /// Validates the dimensions, uploads the run-constant inputs and copies the scale sigmas.
+  /// Validates the dimensions, stages the run-constant inputs and copies the scale sigmas.
+  /// The host spans must outlive the context: the host backend borrows them.
   context(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
           const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
           const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
@@ -79,9 +80,9 @@ struct context {
       : resources(checked_device(exec_device, raw_psfs, dirty_nrow, dirty_ncol)),
         compute_stream(resources.make_ctx()),
         aux_stream(resources.make_ctx()),
-        raw_psfs(compute_stream.copy_of(raw_psfs)),
-        xdes(compute_stream.copy_of(xdes)),
-        mask(compute_stream.copy_of(mask)),
+        raw_psfs(compute_stream.stage(raw_psfs)),
+        xdes(compute_stream.stage(xdes)),
+        mask(compute_stream.stage(mask)),
         scale_sigmas(scale_sigmas.data_handle(), scale_sigmas.data_handle() + scale_sigmas.size()),
         scale_bias(scale_bias),
         map_pixel_facet(map_pixel_facet),
@@ -90,7 +91,7 @@ struct context {
         n_freq(n_freq),
         fft_padding(fft_padding)
   {
-    compute_stream.wait();  // staging copies, before the host sources go
+    compute_stream.wait();  // staging copies complete before construction returns
   }
 
   context(const context&) = delete;
@@ -112,7 +113,8 @@ struct ddmsc_result {
   std::vector<std::pair<int, int>> peak_coords;  // pair, not index2d: bound read-only to Python as list[tuple]
   std::vector<int> scales;
   std::vector<float> gains;
-  std::vector<std::vector<float>> coeffs;
+  std::vector<float> coeffs;  // row-major [component][n_order]
+  int n_order = 0;
   float final_flux = 0.0f;   // peak flux of the mean residual after the last outer iteration
   float stop_flux = 0.0f;    // composed stop-flux threshold used for this call (max of the four limits)
   int total_iterations = 0;  // total minor iterations consumed across all outer cycles
@@ -124,7 +126,6 @@ struct ddmsc_result {
     peak_coords.reserve(capacity);
     scales.reserve(capacity);
     gains.reserve(capacity);
-    coeffs.reserve(capacity);
   }
 
   void add_component(common::index2d coords, int scale, float gain)
@@ -134,20 +135,17 @@ struct ddmsc_result {
     gains.push_back(gain);
   }
 
-  void add_coeffs_from_device(const core::exec_ctx& ctx, core::span2d<const float> rows)
+  /// One row per component; @p ctx must be the stream @p rows was written on.
+  void set_coeffs(const core::exec_ctx& ctx, core::span2d<const float> rows)
   {
-    const std::size_t n_components = rows.extent(0);
-    const std::size_t n_order = rows.extent(1);
-    if (n_components != peak_coords.size() - coeffs.size())
+    if (static_cast<std::size_t>(rows.extent(0)) != peak_coords.size())
       throw std::logic_error("ddmsc_result: coefficient rows do not match the components added");
 
-    std::vector<float> staged(n_components * n_order);
-    ctx.copy(staged.data(), rows.data_handle(), staged.size());
+    n_order = static_cast<int>(rows.extent(1));
+    coeffs.resize(rows.size());
+    if (coeffs.empty()) return;
+    ctx.copy(coeffs.data(), rows.data_handle(), coeffs.size());
     ctx.wait();
-
-    for (std::size_t i = 0; i < n_components; ++i) {
-      coeffs.emplace_back(staged.begin() + i * n_order, staged.begin() + (i + 1) * n_order);
-    }
   }
 };
 
