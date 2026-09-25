@@ -33,7 +33,7 @@ Ddmsc::Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<f
 ddmsc_result Ddmsc::run(core::host_span3d<float>& dirty, const core::host_span3d<const float>& jones_norm,
                         const core::host_span1d<const float>& weights_freq)
 {
-  const core::exec_ctx& ctx = ctx_.state().compute_stream;
+  const core::exec_ctx& ctx = ctx_.compute_stream;
 
   // Stage the per-call inputs into backend memory; a host backend borrows them.
   auto d_dirty = ctx.stage(dirty);
