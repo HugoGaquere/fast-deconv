@@ -121,7 +121,7 @@ TEST_F(MatrixReductions, ComputeStatsAsyncLeavesResultOnDevice)
   ws.run_async(img_view, mask_view);
 
   matrix::stats_acc acc{};
-  sr.copy_to_host_bytes(&acc, ws.device_state(), sizeof(acc));
+  sr.copy(&acc, ws.device_state(), 1);
   sr.wait();
 
   ASSERT_EQ(acc.count, kNpix);

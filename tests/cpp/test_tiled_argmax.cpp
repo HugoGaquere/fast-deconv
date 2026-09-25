@@ -136,7 +136,7 @@ TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
   const int pr = 120, pc = 110, foot = 64;  // footprint [88,152) x [78,142)
   const int br = 125, bc = 118;             // inside the footprint
   img.at(flat(br, bc, w)) = 7.0f;
-  sr.copy_from_host_bytes(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), sizeof(float));
+  sr.copy(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), 1);
 
   auto [i1, v1, signed_v1] = ws.run_incremental(view, pr, pc, foot, foot);
   sr.wait();
@@ -146,7 +146,7 @@ TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
   // A sat in an untouched tile: its cached maximum must still be combined in. Drop
   // B back below A and refresh the same footprint; A must re-emerge as the winner.
   img.at(flat(br, bc, w)) = 0.0f;
-  sr.copy_from_host_bytes(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), sizeof(float));
+  sr.copy(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), 1);
   auto [i2, v2, signed_v2] = ws.run_incremental(view, pr, pc, foot, foot);
   sr.wait();
   EXPECT_FLOAT_EQ(v2, 5.0f);

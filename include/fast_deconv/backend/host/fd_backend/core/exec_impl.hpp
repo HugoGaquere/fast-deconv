@@ -151,16 +151,6 @@ class exec_ctx_impl {
     if (ptr != nullptr) memory_pool.recycle(ptr);
   }
 
-  void copy_from_host_bytes(void* dst, const void* src, std::uint64_t num_bytes) const
-  {
-    std::memcpy(dst, src, num_bytes);
-  }
-
-  void copy_to_host_bytes(void* dst, const void* src, std::uint64_t num_bytes) const
-  {
-    std::memcpy(dst, src, num_bytes);
-  }
-
   void copy_bytes(void* dst, const void* src, std::uint64_t num_bytes) const { std::memcpy(dst, src, num_bytes); }
 
   void wait() const {}

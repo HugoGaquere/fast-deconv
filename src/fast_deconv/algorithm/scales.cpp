@@ -62,7 +62,7 @@ scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::con
 
   if (best_scale < 0) throw std::invalid_argument("select_best_scale: every scale is retired");
 
-  if (best_scale == 0) exec_ctx.copy_bytes(best.data_handle(), dirty.data_handle(), dirty.size() * sizeof(float));
+  if (best_scale == 0) exec_ctx.copy(best, dirty);
 
   return {.scale = best_scale,
           .scaled_residual = std::move(best),

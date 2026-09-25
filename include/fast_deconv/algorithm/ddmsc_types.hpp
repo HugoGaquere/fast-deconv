@@ -79,9 +79,9 @@ struct context {
       : resources(checked_device(exec_device, raw_psfs, dirty_nrow, dirty_ncol)),
         compute_stream(resources.make_ctx()),
         aux_stream(resources.make_ctx()),
-        raw_psfs(compute_stream.upload(raw_psfs)),
-        xdes(compute_stream.upload(xdes)),
-        mask(compute_stream.upload(mask)),
+        raw_psfs(compute_stream.copy_of(raw_psfs)),
+        xdes(compute_stream.copy_of(xdes)),
+        mask(compute_stream.copy_of(mask)),
         scale_sigmas(scale_sigmas.data_handle(), scale_sigmas.data_handle() + scale_sigmas.size()),
         scale_bias(scale_bias),
         map_pixel_facet(map_pixel_facet),
@@ -134,8 +134,6 @@ struct ddmsc_result {
     gains.push_back(gain);
   }
 
-  /// One row per component added since the last call. @p ctx must be the lane
-  /// @p rows was written on — the download is stream-ordered against it.
   void add_coeffs_from_device(const core::exec_ctx& ctx, core::span2d<const float> rows)
   {
     const std::size_t n_components = rows.extent(0);
@@ -144,7 +142,7 @@ struct ddmsc_result {
       throw std::logic_error("ddmsc_result: coefficient rows do not match the components added");
 
     std::vector<float> staged(n_components * n_order);
-    ctx.download(rows, staged.data());
+    ctx.copy(staged.data(), rows.data_handle(), staged.size());
     ctx.wait();
 
     for (std::size_t i = 0; i < n_components; ++i) {

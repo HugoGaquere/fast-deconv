@@ -24,9 +24,9 @@ class device_buffer {
     if constexpr (std::is_same_v<T, bool>) {
       std::vector<uint8_t> bytes(host.size());
       for (std::size_t i = 0; i < host.size(); ++i) bytes.at(i) = host.at(i) ? 1 : 0;
-      sr_.copy_from_host_bytes(ptr_, bytes.data(), n_ * sizeof(bool));
+      sr_.copy_bytes(ptr_, bytes.data(), n_ * sizeof(bool));
     } else {
-      sr_.copy_from_host_bytes(ptr_, host.data(), n_ * sizeof(T));
+      sr_.copy(ptr_, host.data(), n_);
     }
     sr_.wait();
   }
@@ -51,7 +51,7 @@ class device_buffer {
   {
     using element = std::conditional_t<std::is_same_v<T, bool>, uint8_t, T>;
     std::vector<element> host(n_);
-    sr_.copy_to_host_bytes(host.data(), ptr_, n_ * sizeof(T));
+    sr_.copy_bytes(host.data(), ptr_, n_ * sizeof(T));
     sr_.wait();
     return host;
   }
@@ -60,7 +60,7 @@ class device_buffer {
   void from_host(const std::vector<T>& host)
   {
     static_assert(!std::is_same_v<T, bool>, "use the upload constructor for bool buffers");
-    sr_.copy_from_host_bytes(ptr_, host.data(), host.size() * sizeof(T));
+    sr_.copy(ptr_, host.data(), host.size());
     sr_.wait();
   }
 
@@ -69,7 +69,7 @@ class device_buffer {
   void fill_bytes(int value)
   {
     const std::vector<uint8_t> bytes(n_ * sizeof(T), static_cast<uint8_t>(value));
-    sr_.copy_from_host_bytes(ptr_, bytes.data(), bytes.size());
+    sr_.copy_bytes(ptr_, bytes.data(), bytes.size());
     sr_.wait();
   }
 
