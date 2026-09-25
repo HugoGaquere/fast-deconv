@@ -81,8 +81,10 @@ TEST_F(DdmscClass, AddCoeffsFromDeviceSlicesRows)
   fdtest::device_buffer<float> d_coeffs(sr, coeffs);
   core::span2d<float> view(d_coeffs.get(), n_components, n_order);
 
-  ddmsc::ddmsc_result result(/*max_iter=*/10, n_order);
+  ddmsc::ddmsc_result result(/*capacity=*/10);
+  for (int i = 0; i < n_components; ++i) result.add_component({i, i}, 0, 1.0f);
   result.add_coeffs_from_device(sr, view);
+  EXPECT_THROW(result.add_coeffs_from_device(sr, view), std::logic_error);  // no components left to match
 
   ASSERT_EQ(result.coeffs.size(), static_cast<std::size_t>(n_components));
   for (int i = 0; i < n_components; ++i) {
