@@ -100,19 +100,10 @@ class exec_ctx_impl {
     if (ptr != nullptr) CHECK_CUDA(cudaFreeAsync(ptr, cuda_stream));
   }
 
-  void copy_from_host_bytes(void* dst, const void* src, std::uint64_t num_bytes) const
-  {
-    CHECK_CUDA(cudaMemcpyAsync(dst, src, num_bytes, cudaMemcpyHostToDevice, cuda_stream));
-  }
-
-  void copy_to_host_bytes(void* dst, const void* src, std::uint64_t num_bytes) const
-  {
-    CHECK_CUDA(cudaMemcpyAsync(dst, src, num_bytes, cudaMemcpyDeviceToHost, cuda_stream));
-  }
-
+  // cudaMemcpyDefault: unified addressing infers the direction from the pointers.
   void copy_bytes(void* dst, const void* src, std::uint64_t num_bytes) const
   {
-    CHECK_CUDA(cudaMemcpyAsync(dst, src, num_bytes, cudaMemcpyDeviceToDevice, cuda_stream));
+    CHECK_CUDA(cudaMemcpyAsync(dst, src, num_bytes, cudaMemcpyDefault, cuda_stream));
   }
 
   void wait() const { CHECK_CUDA(cudaStreamSynchronize(cuda_stream)); }

@@ -23,7 +23,7 @@ template <typename T>
 using owned_ptr = std::unique_ptr<T[], ctx_deleter>;
 
 /// One execution lane: where work runs and where its memory comes from.
-/// The backend supplies the handles and the five primitives below it; the
+/// The backend supplies the handles and the primitives below it; the
 /// typed layer here is written once and shared by every backend.
 class exec_ctx : public exec_ctx_impl {
  public:
@@ -68,18 +68,33 @@ class exec_ctx : public exec_ctx_impl {
     return {alloc_async<T>(n), ctx_deleter{this}};
   }
 
-  /// Stages caller-owned host memory into backend memory. A real copy on every
-  /// backend, so ownership works out the same whichever one is built.
-  template <typename HostSpan>
-  auto upload(const HostSpan& src) const
+  /// Copies @p src into @p dst; either side may be host or backend memory.
+  /// Async, so wait() before reading @p dst.
+  template <typename Dst, typename Src>
+  void copy(const Dst& dst, const Src& src) const
   {
-    using T = typename HostSpan::element_type;
-    auto dst = alloc_mdcontainer_async<T>(src.extents());
-    this->copy_from_host_bytes(dst.data_handle(), src.data_handle(), src.size() * sizeof(T));
+    if (dst.size() != src.size()) throw std::invalid_argument("copy: dst and src sizes differ");
+    copy(dst.data_handle(), src.data_handle(), src.size());
+  }
+
+  /// Raw-pointer copy() of @p n elements.
+  template <typename T>
+  void copy(T* dst, const T* src, std::uint64_t n) const
+  {
+    this->copy_bytes(dst, src, n * sizeof(T));
+  }
+
+  /// New backend container holding a copy of @p src. A real copy on every
+  /// backend, so ownership works out the same whichever one is built.
+  template <typename Span>
+  auto copy_of(const Span& src) const
+  {
+    auto dst = alloc_mdcontainer_async<std::remove_const_t<typename Span::element_type>>(src.extents());
+    copy(dst, src);
     return dst;
   }
 
-  /// Backend-resident view of caller-owned host memory: an upload() on a device
+  /// Backend-resident view of caller-owned host memory: a copy_of() on a device
   /// backend, a borrow when backend memory already is host memory. @p src must
   /// outlive the returned view, so this is for per-call inputs, not for buffers
   /// a long-lived context keeps.
@@ -95,12 +110,12 @@ class exec_ctx : public exec_ctx_impl {
       // The staging buffer is written, so it is allocated mutable; the view handed
       // back keeps the caller's element type, so a const input stays unwritable.
       auto owner = alloc_mdcontainer_async<std::remove_const_t<T>>(src.extents());
-      this->copy_from_host_bytes(owner.data_handle(), src.data_handle(), src.size() * sizeof(T));
+      copy(owner, src);
       return mdcontainer<T, rank>(owner.data_handle(), std::move(owner).capsule(), src.extents());
     }
   }
 
-  /// Undoes stage() for an in/out buffer: a download() where stage() copied,
+  /// Undoes stage() for an in/out buffer: a copy() where stage() copied,
   /// nothing where it borrowed and the kernels already wrote @p host_dst.
   template <typename Span>
   void unstage(const Span& src, typename Span::element_type* host_dst) const
@@ -108,16 +123,7 @@ class exec_ctx : public exec_ctx_impl {
     if constexpr (impl::host_resident)
       assert(src.data_handle() == host_dst && "unstage() target is not the buffer stage() borrowed");
     else
-      download(src, host_dst);
-  }
-
-  /// Copies backend memory back into caller-owned host memory. Async like
-  /// upload(), so wait() before reading @p host_dst.
-  template <typename Span>
-  void download(const Span& src, std::remove_const_t<typename Span::element_type>* host_dst) const
-  {
-    using T = typename Span::element_type;
-    this->copy_to_host_bytes(host_dst, src.data_handle(), src.size() * sizeof(T));
+      copy(host_dst, src.data_handle(), src.size());
   }
 
   template <typename T>
