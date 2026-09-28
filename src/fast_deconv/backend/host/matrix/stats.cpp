@@ -39,9 +39,11 @@ void stats_ctx::run_async(core::span2d<float> data, core::span2d<bool> mask)
   float max_v = kNoMax;
   double sum = 0.0;
   double sum_sq = 0.0;
+  const bool use_abs = use_abs_;
+#pragma omp parallel for reduction(max : max_v) reduction(+ : sum, sum_sq)
   for (std::size_t i = 0; i < n_elements_; i++) {
     const float v = d[i];
-    max_v = std::max(max_v, m[i] ? kNoMax : (use_abs_ ? std::fabs(v) : v));
+    max_v = std::max(max_v, m[i] ? kNoMax : (use_abs ? std::fabs(v) : v));
     sum += v;
     sum_sq += static_cast<double>(v) * v;
   }
