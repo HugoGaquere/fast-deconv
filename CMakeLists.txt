@@ -125,8 +125,30 @@ if(FAST_DECONV_WITH_PROFILER AND NOT FAST_DECONV_WITH_CUDA)
 endif()
 
 if(NOT FAST_DECONV_WITH_CUDA)
-  find_package(pocketfft CONFIG REQUIRED)
   find_package(OpenMP REQUIRED COMPONENTS CXX)
+  find_package(Threads REQUIRED)
+
+  # Not on conancenter, and its own CMakeLists builds only the Python module:
+  # SOURCE_SUBDIR points at a directory without one, so only the sources are fetched.
+  include(FetchContent)
+  FetchContent_Declare(ducc
+    GIT_REPOSITORY https://gitlab.mpcdf.mpg.de/mtr/ducc.git
+    GIT_TAG ducc0_0_41_1
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR src
+  )
+  FetchContent_MakeAvailable(ducc)
+  # fft_inst1.cc instantiates the float transforms; the infra sources back mav and the thread pool.
+  add_library(ducc0_fft STATIC
+    ${ducc_SOURCE_DIR}/src/ducc0/fft/fft_inst1.cc
+    ${ducc_SOURCE_DIR}/src/ducc0/infra/threading.cc
+    ${ducc_SOURCE_DIR}/src/ducc0/infra/mav.cc
+    ${ducc_SOURCE_DIR}/src/ducc0/infra/string_utils.cc
+  )
+  target_include_directories(ducc0_fft SYSTEM PUBLIC ${ducc_SOURCE_DIR}/src)
+  target_compile_features(ducc0_fft PUBLIC cxx_std_17)
+  set_target_properties(ducc0_fft PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_link_libraries(ducc0_fft PRIVATE Threads::Threads)
 endif()
 
 #-------------------------------------------------------------------#
@@ -165,8 +187,8 @@ if(FAST_DECONV_WITH_CUDA)
 else()
   # Use only the backend-neutral emu component for host builds.
   target_link_libraries(fast_deconv PUBLIC emu::core)
-  # PocketFFT headers are needed only when compiling backend sources.
-  target_link_libraries(fast_deconv PRIVATE pocketfft::pocketfft)
+  # ducc0 headers are needed only when compiling backend sources.
+  target_link_libraries(fast_deconv PRIVATE ducc0_fft)
   # Static-library link dependencies still reach consumers with PRIVATE scope.
   target_link_libraries(fast_deconv PRIVATE OpenMP::OpenMP_CXX)
   if(FAST_DECONV_WITH_PROFILER)
