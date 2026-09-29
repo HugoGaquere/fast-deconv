@@ -8,7 +8,7 @@ namespace fast_deconv::linalg {
 
 /**
  * Gaussian convolution of a batch of same-sized images through a padded FFT.
- * The scratch is allocated once, and pocketfft caches its own plans. No input
+ * The scratch is allocated once, and ducc0 caches its own plans. No input
  * is kept between calls: a caller that convolves one input with several sigmas
  * keeps the spectrum from forward() and passes it to convolve_spectrum() for
  * each sigma. The lane given at construction must outlive this.
