@@ -149,6 +149,7 @@ if(NOT FAST_DECONV_WITH_CUDA)
   target_compile_features(ducc0_fft PUBLIC cxx_std_17)
   set_target_properties(ducc0_fft PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_link_libraries(ducc0_fft PRIVATE Threads::Threads)
+  target_compile_options(ducc0_fft PRIVATE -march=native)
 endif()
 
 #-------------------------------------------------------------------#
@@ -191,6 +192,7 @@ else()
   target_link_libraries(fast_deconv PRIVATE ducc0_fft)
   # Static-library link dependencies still reach consumers with PRIVATE scope.
   target_link_libraries(fast_deconv PRIVATE OpenMP::OpenMP_CXX)
+  target_compile_options(fast_deconv PRIVATE -march=native)
   if(FAST_DECONV_WITH_PROFILER)
     # PUBLIC: core/profiler.hpp is a public header, so consumers need TRACY_ENABLE too.
     target_link_libraries(fast_deconv PUBLIC Tracy::TracyClient)
