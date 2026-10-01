@@ -4,6 +4,7 @@
 #include <fast_deconv/core/logger.hpp>
 #include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
+#include <numbers>
 #include <stdexcept>
 
 namespace fast_deconv::algorithm {
@@ -13,6 +14,7 @@ psf_convolution::psf_convolution(const core::exec_ctx& exec_ctx, core::span4d<co
                                  float padding)
     : exec_ctx_(exec_ctx),
       conv_ctx_(exec_ctx, raw_psfs.extent(2), raw_psfs.extent(3), padding, raw_psfs.extent(1)),
+      mean_conv_ctx_(exec_ctx, raw_psfs.extent(2), raw_psfs.extent(3), padding, 1),
       raw_psfs_(raw_psfs),
       weights_(weights),
       sigmas_(std::move(sigmas)),
@@ -40,10 +42,29 @@ psf_convolution::entry psf_convolution::build(int scale, int facet)
     linalg::weighted_sum_async(exec_ctx_, raw, weights_, conv2_mean);
     e.gain = gamma_;
   } else {
+    // Previous version: every channel convolved once and twice, then the weighted mean of the twice-convolved.
+    // auto conv = exec_ctx_.alloc_mdcontainer_async<float>(n_freq_, psf_nrow_, psf_ncol_);
+    // auto conv2 = exec_ctx_.alloc_mdcontainer_async<float>(n_freq_, psf_nrow_, psf_ncol_);
+    // conv_ctx_.convolve_with_gaussian_once_and_twice(raw, sigmas_.at(scale), conv, conv2);
+    // linalg::weighted_sum_async(exec_ctx_, conv2, weights_, conv2_mean);
+    const float sigma = sigmas_.at(scale);
     auto conv = exec_ctx_.alloc_mdcontainer_async<float>(n_freq_, psf_nrow_, psf_ncol_);
-    auto conv2 = exec_ctx_.alloc_mdcontainer_async<float>(n_freq_, psf_nrow_, psf_ncol_);
-    conv_ctx_.convolve_with_gaussian_once_and_twice(raw, sigmas_.at(scale), conv, conv2);
-    linalg::weighted_sum_async(exec_ctx_, conv2, weights_, conv2_mean);
+    {
+      FD_PROFILE_SCOPE("psf_convolution/conv");
+      auto spectrum = exec_ctx_.alloc_mdcontainer_async<linalg::complex_type>(static_cast<std::size_t>(n_freq_) *
+                                                                              conv_ctx_.dims().freq_total());
+      conv_ctx_.forward(raw, spectrum);
+      conv_ctx_.convolve_spectrum(spectrum, sigma, conv);
+    }
+    // Only the channel-weighted mean of conv2 is kept. G(sigma) twice is G(sigma * sqrt(2)) (the spectra
+    // multiply: H(sigma)^2 = H(sigma * sqrt(2))), and convolution is linear, so
+    // sum_f w_f (G*G * psf_f) = G(sigma * sqrt(2)) * (sum_f w_f psf_f): one plane, one convolution.
+    {
+      FD_PROFILE_SCOPE("psf_convolution/conv2");
+      auto raw_mean = exec_ctx_.alloc_mdcontainer_async<float>(psf_nrow_, psf_ncol_);
+      linalg::weighted_sum_async(exec_ctx_, raw, weights_, raw_mean);
+      mean_conv_ctx_.convolve_with_gaussian(raw_mean, sigma * std::numbers::sqrt2_v<float>, conv2_mean);
+    }
     e.gain = common::compute_gain(exec_ctx_, conv, weights_, gamma_);
     e.conv = conv;
   }

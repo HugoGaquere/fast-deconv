@@ -1,7 +1,10 @@
 #include <algorithm>
 #include <array>
+#include <cassert>
+#include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/linalg/convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
+#include <fast_deconv/linalg/linalg.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
 #include <fast_deconv/util/cufft_macros.hpp>
 
@@ -137,6 +140,31 @@ void convolution_ctx::forward_(float* input, complex_type* output) const
 void convolution_ctx::backward_(complex_type* input, float* output) const
 {
   CUFFT_CALL(cufftExecC2R(c2r_, input, output));
+}
+
+void convolution_ctx::forward(core::span3d<const float> input, core::span1d<complex_type> spectrum) const
+{
+  FD_PROFILE_FN();
+  assert(input.is_exhaustive() && input.extent(0) == batch_);
+  assert(input.extent(1) == dims_.input_nrow && input.extent(2) == dims_.input_ncol);
+  assert(spectrum.size() == static_cast<std::size_t>(batch_) * dims_.freq_total());
+
+  pad_ifftshift_batched_async(ctx_, dims_, input.data_handle(), padded_.get(), batch_);
+  forward_(padded_.get(), spectrum.data_handle());
+}
+
+void convolution_ctx::convolve_spectrum(core::span1d<const complex_type> spectrum, float sigma,
+                                        core::span3d<float> out) const
+{
+  FD_PROFILE_FN();
+  assert(spectrum.size() == static_cast<std::size_t>(batch_) * dims_.freq_total());
+  assert(out.is_exhaustive() && out.extent(0) == batch_);
+  assert(out.extent(1) == dims_.input_nrow && out.extent(2) == dims_.input_ncol);
+
+  // The multiply writes product_, so the caller's spectrum survives for the next sigma.
+  multiply_with_gaussian(ctx_, dims_, batch_, spectrum.data_handle(), product_.get(), sigma);
+  backward_(product_.get(), padded_.get());
+  fftshift_crop_async(ctx_, dims_, padded_.get(), out.data_handle(), batch_);
 }
 
 }  // namespace fast_deconv::linalg
