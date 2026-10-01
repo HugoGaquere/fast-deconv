@@ -35,7 +35,6 @@ tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> exte
 
 void tiled_argmax_ctx::reduce_tile(core::span2d<const float> data, int tile_x, int tile_y)
 {
-  FD_PROFILE_FN();
   const int image_nrow = extents_.extent(0);
   const int image_ncol = extents_.extent(1);
   const int row0 = tile_y * tile_size_;
