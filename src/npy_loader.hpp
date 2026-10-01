@@ -1,13 +1,8 @@
 #pragma once
 
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <unistd.h>
-
 #include <complex>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <stdexcept>
@@ -19,13 +14,12 @@ namespace npy {
 /**
  * Simple .npy file loader for test data.
  * Supports: float32, int32, bool, complex64
- * The data is a private (copy-on-write) mmap of the file: no copy, writes stay in memory.
+ * The data is read fully into memory at load time.
  */
 struct NpyArray {
   std::vector<size_t> shape;
   std::string dtype;
-  std::shared_ptr<void> mapping;
-  std::byte* data = nullptr;
+  std::unique_ptr<std::byte[]> data;
   bool fortran_order = false;
 
   size_t size() const
@@ -47,13 +41,13 @@ struct NpyArray {
   template <typename T>
   T* as()
   {
-    return reinterpret_cast<T*>(data);
+    return reinterpret_cast<T*>(data.get());
   }
 
   template <typename T>
   const T* as() const
   {
-    return reinterpret_cast<const T*>(data);
+    return reinterpret_cast<const T*>(data.get());
   }
 
   float* as_float32() { return as<float>(); }
@@ -172,27 +166,13 @@ inline NpyArray load_npy(const std::string& path)
     throw std::runtime_error("Unsupported dtype: " + arr.dtype);
   }
 
-  // Map data
-  if (!file) {
-    throw std::runtime_error("Truncated .npy header: " + path);
-  }
-  const size_t offset = static_cast<size_t>(file.tellg());
+  // Read data
   const size_t total_bytes = arr.size() * elem_size;
-  const size_t file_bytes = std::filesystem::file_size(path);
-  if (offset + total_bytes > file_bytes) {
+  arr.data = std::make_unique_for_overwrite<std::byte[]>(total_bytes);
+  file.read(reinterpret_cast<char*>(arr.data.get()), static_cast<std::streamsize>(total_bytes));
+  if (!file) {
     throw std::runtime_error("Truncated .npy file: " + path);
   }
-  const int fd = ::open(path.c_str(), O_RDONLY);
-  if (fd < 0) {
-    throw std::runtime_error("Cannot open file: " + path);
-  }
-  void* p = ::mmap(nullptr, file_bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
-  ::close(fd);
-  if (p == MAP_FAILED) {
-    throw std::runtime_error("Cannot mmap file: " + path);
-  }
-  arr.mapping = std::shared_ptr<void>(p, [file_bytes](void* q) { ::munmap(q, file_bytes); });
-  arr.data = static_cast<std::byte*>(p) + offset;
 
   return arr;
 }

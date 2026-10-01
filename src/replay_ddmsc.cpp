@@ -112,6 +112,7 @@ int main(int argc, char** argv)
 
   const int first_cycle = only_cycle < 0 ? 0 : only_cycle;
   std::vector<double> run_ms;
+  std::vector<std::vector<double>> cycle_ms;  // [cycle - first_cycle][run]
   for (int run = 0; run < runs; ++run) {
     // A fresh session per run: the auto-mask history accumulates across cycles, so
     // a second replay on the same Ddmsc would not do the same work.
@@ -162,6 +163,8 @@ int main(int argc, char** argv)
       const ddmsc::ddmsc_result result = imager.run(dirty, jones_norm, weights_freq);
       const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
       total_ms += ms;
+      if (cycle_ms.size() <= static_cast<size_t>(cycle - first_cycle)) cycle_ms.emplace_back();
+      cycle_ms.at(cycle - first_cycle).push_back(ms);
 
       if (run == 0)
         printf("cycle %d: %.3f ms, %zu components, %d iterations, flux %.6g (stop %.6g)\n", cycle, ms,
@@ -174,12 +177,27 @@ int main(int argc, char** argv)
     run_ms.push_back(total_ms);
   }
 
-  if (runs > 1) {
-    std::sort(run_ms.begin(), run_ms.end());
-    const double mean = std::accumulate(run_ms.begin(), run_ms.end(), 0.0) / runs;
-    const double median = runs % 2 ? run_ms.at(runs / 2) : 0.5 * (run_ms.at(runs / 2 - 1) + run_ms.at(runs / 2));
-    printf("Over %d runs: min %.3f ms  median %.3f ms  mean %.3f ms  max %.3f ms\n", runs, run_ms.front(), median, mean,
-           run_ms.back());
+  // {min, median, mean, max}
+  auto stats = [](std::vector<double> v) {
+    std::sort(v.begin(), v.end());
+    const size_t n = v.size();
+    const double median = n % 2 ? v.at(n / 2) : 0.5 * (v.at(n / 2 - 1) + v.at(n / 2));
+    return std::array<double, 4>{v.front(), median, std::accumulate(v.begin(), v.end(), 0.0) / n, v.back()};
+  };
+
+  const auto total = stats(run_ms);
+  printf("Per-cycle summary (ms):\n");
+  if (runs > 1) printf("  cycle         min      median        mean         max   %%total\n");
+  for (size_t k = 0; k < cycle_ms.size(); ++k) {
+    const auto c = stats(cycle_ms.at(k));
+    const int cycle = first_cycle + static_cast<int>(k);
+    if (runs > 1)
+      printf("  %5d %11.3f %11.3f %11.3f %11.3f %7.1f%%\n", cycle, c[0], c[1], c[2], c[3], 100.0 * c[2] / total[2]);
+    else
+      printf("  cycle %3d %12.3f ms %6.1f%%\n", cycle, c[2], 100.0 * c[2] / total[2]);
   }
+  if (runs > 1)
+    printf("Over %d runs: min %.3f ms  median %.3f ms  mean %.3f ms  max %.3f ms\n", runs, total[0], total[1], total[2],
+           total[3]);
   return 0;
 }
