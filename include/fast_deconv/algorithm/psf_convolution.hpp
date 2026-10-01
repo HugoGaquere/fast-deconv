@@ -61,7 +61,8 @@ class psf_convolution {
   entry build(int scale, int facet);
 
   const core::exec_ctx& exec_ctx_;
-  const linalg::convolution_ctx conv_ctx_;
+  const linalg::convolution_ctx conv_ctx_;       // batch n_freq: the per-channel conv
+  const linalg::convolution_ctx mean_conv_ctx_;  // batch 1: conv2 of the channel-weighted mean PSF
   core::span4d<const float> raw_psfs_;
   core::span1d<const float> weights_;
   std::vector<float> sigmas_;

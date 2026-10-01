@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <fast_deconv/algorithm/psf_convolution.hpp>
 #include <fast_deconv/linalg/convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <utility>
@@ -131,6 +133,98 @@ TEST_F(FftLayout, ZeroSigmaConvolutionIsIdentityAndKeepsTheSpectrum)
       }
     }
   }
+}
+
+// convolve_spectrum is the linear convolution (zero outside the image) with the band-limited Gaussian,
+// in every plane of a batch, on odd and even, non-square sizes. The padding factor is large enough that
+// both backends are free of wrap-around here: the FFT path pads by the factor, the host tiles by the
+// kernel's reach.
+TEST_F(FftLayout, ConvolveSpectrumMatchesLinearConvolutionOracle)
+{
+  const auto sr = res().make_ctx();
+  for (const auto& [rows, cols] : {std::pair{24, 40}, std::pair{33, 21}}) {
+    for (int batch : {1, 3}) {
+      const linalg::convolution_ctx conv(sr, rows, cols, /*padding=*/3.0f, batch);
+      const auto count = static_cast<std::size_t>(batch) * rows * cols;
+      const auto freq_count = static_cast<std::size_t>(batch) * conv.dims().freq_total();
+
+      std::vector<float> input(count);
+      for (std::size_t i = 0; i < count; ++i) input[i] = static_cast<float>((i * 37) % 101) / 101.0f - 0.5f;
+      fdtest::device_buffer<float> d_input(sr, input), d_output(sr, count);
+      fdtest::device_buffer<linalg::complex_type> d_spectrum(sr, freq_count);
+      const core::span1d<linalg::complex_type> spectrum(d_spectrum.get(), freq_count);
+      conv.forward(core::span3d<const float>(d_input.get(), batch, rows, cols), spectrum);
+
+      for (float sigma : {1.5f, 2.5f, 4.0f}) {
+        SCOPED_TRACE(::testing::Message() << rows << 'x' << cols << " batch=" << batch << " sigma=" << sigma);
+        conv.convolve_spectrum(spectrum, sigma, core::span3d<float>(d_output.get(), batch, rows, cols));
+        const auto actual = d_output.to_host();
+        const auto taps = fdtest::band_limited_gaussian_taps(sigma, std::max(rows, cols));
+        const auto expected = fdtest::separable_linear_convolve(input, batch, rows, cols, taps);
+        for (std::size_t i = 0; i < count; ++i) ASSERT_NEAR(actual[i], expected[i], 2e-5f) << "index=" << i;
+      }
+    }
+  }
+}
+
+// psf_convolution entry against its definition, computed independently in double: conv is each channel
+// convolved once, conv2 the channel-weighted mean of each channel convolved twice. The build takes the
+// weighted mean first and convolves once with sigma * sqrt(2); this checks that shortcut. The padding
+// factor keeps the FFT route wrap-free too, so the test holds on both backends.
+TEST_F(FftLayout, PsfConvolutionMatchesPerChannelOracle)
+{
+  const auto sr = res().make_ctx();
+  constexpr int n_freq = 3, rows = 24, cols = 30;
+  const float sigma = 2.0f;
+  const std::vector<float> weights{0.5f, 0.3f, 0.2f};
+
+  // One facet of peak-normalized Gaussian PSFs, a different width per channel.
+  std::vector<float> psf;
+  for (int f = 0; f < n_freq; ++f) {
+    auto plane = fdtest::gaussian2d(rows, cols, 11.0, 14.0, 1.5 + 0.5 * f);
+    const float peak = *std::max_element(plane.begin(), plane.end());
+    for (float& v : plane) v /= peak;
+    psf.insert(psf.end(), plane.begin(), plane.end());
+  }
+  fdtest::device_buffer<float> d_psf(sr, psf), d_weights(sr, weights);
+
+  fast_deconv::algorithm::psf_convolution cache(sr, core::span4d<const float>(d_psf.get(), 1, n_freq, rows, cols),
+                                                {0.0f, sigma}, core::span1d<const float>(d_weights.get(), n_freq),
+                                                /*gamma=*/0.1f, /*padding=*/3.0f);
+  const auto e = cache.get(/*scale=*/1, /*facet=*/0);
+
+  std::vector<float> conv(psf.size()), conv2(static_cast<std::size_t>(rows) * cols);
+  sr.copy_bytes(conv.data(), e.conv.data_handle(), conv.size() * sizeof(float));
+  sr.copy_bytes(conv2.data(), e.conv2.data_handle(), conv2.size() * sizeof(float));
+  sr.wait();
+
+  // Convolve twice on a grid extended by the kernel length, then crop once: cropping between the two
+  // convolutions would drop the part of the first result that spreads past the image and flows back.
+  const int m = std::max(rows, cols);
+  const int erows = rows + 2 * m, ecols = cols + 2 * m;
+  const auto taps = fdtest::band_limited_gaussian_taps(sigma, m);
+  std::vector<float> ext(static_cast<std::size_t>(n_freq) * erows * ecols, 0.0f);
+  for (int f = 0; f < n_freq; ++f)
+    for (int r = 0; r < rows; ++r)
+      for (int c = 0; c < cols; ++c)
+        ext.at(static_cast<std::size_t>(f) * erows * ecols + flat(r + m, c + m, ecols)) =
+            psf.at(static_cast<std::size_t>(f) * rows * cols + flat(r, c, cols));
+  const auto once = fdtest::separable_linear_convolve(ext, n_freq, erows, ecols, taps);
+  const auto twice = fdtest::separable_linear_convolve(once, n_freq, erows, ecols, taps);
+  const auto at = [&](const std::vector<float>& v, int f, int r, int c) {
+    return v.at(static_cast<std::size_t>(f) * erows * ecols + flat(r + m, c + m, ecols));
+  };
+  for (int f = 0; f < n_freq; ++f)
+    for (int r = 0; r < rows; ++r)
+      for (int c = 0; c < cols; ++c)
+        ASSERT_NEAR(conv.at(static_cast<std::size_t>(f) * rows * cols + flat(r, c, cols)), at(once, f, r, c), 2e-5f)
+            << "conv f=" << f << " r=" << r << " c=" << c;
+  for (int r = 0; r < rows; ++r)
+    for (int c = 0; c < cols; ++c) {
+      double mean = 0.0;
+      for (int f = 0; f < n_freq; ++f) mean += weights.at(f) * at(twice, f, r, c);
+      ASSERT_NEAR(conv2.at(flat(r, c, cols)), mean, 2e-5) << "conv2 r=" << r << " c=" << c;
+    }
 }
 
 TEST_F(FftLayout, PadIfftshiftMatchesHostOracle)

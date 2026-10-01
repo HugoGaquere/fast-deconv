@@ -23,10 +23,13 @@ class convolution_ctx {
   convolution_ctx(convolution_ctx&&) = delete;
   convolution_ctx& operator=(convolution_ctx&&) = delete;
 
-  /// Pad + ifftshift + R2C of @p input, (batch, nrow, ncol), into @p spectrum, batch * dims().freq_total().
+  /// Copies @p input, (batch, nrow, ncol), into @p spectrum, batch * dims().freq_total(): on this
+  /// backend the buffer holds the input as floats, not a spectrum.
   void forward(core::span3d<const float> input, core::span1d<complex_type> spectrum) const;
 
-  /// Multiply @p spectrum by Gaussian(@p sigma), C2R, fftshift + crop into @p out. @p spectrum is left intact.
+  /// Separable Gaussian(@p sigma) convolution of forward()'s output into @p out: rows then columns, each
+  /// line zero-padded in a per-thread tile and convolved by ducc0::convolve_axis. The padding is per sigma,
+  /// from the kernel's reach, not dims()'s padding factor. @p spectrum is left intact.
   void convolve_spectrum(core::span1d<const complex_type> spectrum, float sigma, core::span3d<float> out) const;
 
   /// forward() then convolve_spectrum(), through a temporary spectrum. Needs batch() == 1.
