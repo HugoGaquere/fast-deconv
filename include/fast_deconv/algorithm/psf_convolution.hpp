@@ -3,8 +3,8 @@
 #include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
-#include <fast_deconv/linalg/convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
+#include <fast_deconv/linalg/gaussian_convolution.hpp>
 #include <unordered_map>
 #include <vector>
 
@@ -61,8 +61,8 @@ class psf_convolution {
   entry build(int scale, int facet);
 
   const core::exec_ctx& exec_ctx_;
-  const linalg::convolution_ctx conv_ctx_;       // batch n_freq: the per-channel conv
-  const linalg::convolution_ctx mean_conv_ctx_;  // batch 1: conv2 of the channel-weighted mean PSF
+  const linalg::gaussian_convolution_ctx conv_ctx_;       // batch n_freq: the per-channel conv
+  const linalg::gaussian_convolution_ctx mean_conv_ctx_;  // batch 1: conv2 of the channel-weighted mean PSF
   core::span4d<const float> raw_psfs_;
   core::span1d<const float> weights_;
   std::vector<float> sigmas_;

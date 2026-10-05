@@ -5,8 +5,8 @@
 #include <emu/submdspan.hpp>
 #include <fast_deconv/common/mask.hpp>
 #include <fast_deconv/core/profiler.hpp>
-#include <fast_deconv/linalg/convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
+#include <fast_deconv/linalg/gaussian_convolution.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
 #include <fast_deconv/morphology/dilation.hpp>
 #include <fast_deconv/morphology/roi.hpp>
@@ -44,9 +44,8 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
   }
 
   // ---- 2. One batched forward transform of every channel's PSF, reused by every scale ----
-  const linalg::convolution_ctx conv(ctx, psf_nrow, psf_ncol, fft_padding, /*batch=*/n_freq);
-  auto spectrum =
-      ctx.alloc_mdcontainer_async<linalg::complex_type>(static_cast<std::size_t>(n_freq) * conv.dims().freq_total());
+  const linalg::gaussian_convolution_ctx conv(ctx, /*batch=*/n_freq, psf_nrow, psf_ncol, fft_padding);
+  auto spectrum = conv.make_spectrum();
   conv.forward(central_facet_psfs, spectrum);
 
   // ---- 3. Per-scale: conv2 -> weighted mean -> FWHM -> dilate ----
@@ -57,7 +56,7 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
 
   for (int i = 0; i < n_scales; i++) {
     // 3a. psf ** G_s ** G_s, one convolution with G(sigma * sqrt(2)) since G(sigma)^2 = G(sigma * sqrt(2)).
-    conv.convolve_spectrum(spectrum, scale_sigmas.at(i) * std::numbers::sqrt2_v<float>, conv2_cropped);
+    conv.convolve(spectrum, scale_sigmas.at(i) * std::numbers::sqrt2_v<float>, conv2_cropped);
 
     // 3b. Weighted mean across channels -> 2D conv2_psf
     linalg::weighted_sum_async(ctx, conv2_cropped, weights_freq, conv2_psf);

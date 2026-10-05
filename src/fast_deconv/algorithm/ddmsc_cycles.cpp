@@ -82,7 +82,7 @@ struct run_workspace {
   core::cont2d<float> mean_residual_buf;
   matrix::stats_ctx stats;
   matrix::tiled_argmax_ctx tiled;
-  const linalg::convolution_ctx scale_conv;
+  const linalg::gaussian_convolution_ctx scale_conv;
   psf_convolution psf_cache;
   int cached_scale = -1;  // scale psf_cache holds
   // Coefficient buffers live on aux_stream, which writes them.
@@ -96,7 +96,7 @@ struct run_workspace {
       : mean_residual_buf(ctx.compute_stream.alloc_mdcontainer_async<float>(nrow, ncol)),
         stats(ctx.compute_stream, nrow * ncol, p.clean_negative),
         tiled(ctx.compute_stream, mean_residual_buf.extents(), 64),
-        scale_conv(ctx.compute_stream, ctx.dirty_nrow, ctx.dirty_ncol, ctx.fft_padding, 1),
+        scale_conv(ctx.compute_stream, 1, ctx.dirty_nrow, ctx.dirty_ncol, ctx.fft_padding),
         psf_cache(ctx.compute_stream, ctx.raw_psfs, ctx.scale_sigmas, weights_freq, p.gamma, ctx.fft_padding),
         all_coeffs(ctx.aux_stream.alloc_mdcontainer_async<float>(
             static_cast<std::size_t>(p.max_iteration + p.max_clean_iteration) * ctx.xdes.extent(1))),

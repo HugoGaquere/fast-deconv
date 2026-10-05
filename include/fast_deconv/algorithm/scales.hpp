@@ -1,8 +1,8 @@
 #pragma once
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
-#include <fast_deconv/linalg/convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
+#include <fast_deconv/linalg/gaussian_convolution.hpp>
 #include <fast_deconv/matrix/argmax.hpp>
 #include <limits>
 #include <vector>
@@ -17,12 +17,12 @@ struct scale_result {
   matrix::peak_criterion criterion;     ///< how scaled_residual was ranked; mask points into the caller's mask
 };
 
-scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::convolution_ctx& conv_ctx,
+scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gaussian_convolution_ctx& conv_ctx,
                                core::span2d<const float> dirty, const std::vector<float>& sigmas,
                                core::host_span1d<float> bias, const std::vector<int>& retired, core::span3d<bool> mask,
                                bool absolute);
 
-inline scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::convolution_ctx& conv_ctx,
+inline scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gaussian_convolution_ctx& conv_ctx,
                                       core::span2d<const float> dirty, const std::vector<float>& sigmas,
                                       core::host_span1d<float> bias, const std::vector<int>& retired,
                                       core::span2d<bool> mask, bool absolute)
