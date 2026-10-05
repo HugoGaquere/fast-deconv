@@ -34,10 +34,6 @@ class convolution_ctx {
   /// forward() then convolve_spectrum(), through a temporary spectrum. Needs batch() == 1.
   void convolve_with_gaussian(core::span2d<const float> input, float sigma, core::span2d<float> out) const;
 
-  /// @p input convolved once (@p out_conv) and twice (@p out_conv2) with Gaussian(@p sigma).
-  void convolve_with_gaussian_once_and_twice(core::span3d<const float> input, float sigma, core::span3d<float> out_conv,
-                                             core::span3d<float> out_conv2) const;
-
   const fft_dims& dims() const { return dims_; }
   int batch() const { return batch_; }
 

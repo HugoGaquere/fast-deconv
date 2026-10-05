@@ -41,23 +41,6 @@ __global__ void multiply_with_gaussian_kernel(const linalg::complex_type* input,
   }
 }
 
-__global__ void multiply_with_gaussian_once_and_twice_kernel(const linalg::complex_type* input,
-                                                             linalg::complex_type* out_conv,
-                                                             linalg::complex_type* out_conv2, std::int64_t plane,
-                                                             std::int64_t total, int freq_nrow, int freq_ncol,
-                                                             int padded_ncol, float sigma, float norm)
-{
-  for (std::int64_t i = blockIdx.x * static_cast<std::int64_t>(blockDim.x) + threadIdx.x; i < total;
-       i += static_cast<std::int64_t>(blockDim.x) * gridDim.x) {
-    const float g = gaussian_at(i % plane, freq_nrow, freq_ncol, padded_ncol, sigma);
-    const float g_norm = g * norm;
-    const float g2_norm = g * g_norm;
-    const linalg::complex_type v = input[i];
-    out_conv[i] = {v.x * g_norm, v.y * g_norm};
-    out_conv2[i] = {v.x * g2_norm, v.y * g2_norm};
-  }
-}
-
 }  // namespace fast_deconv::kernel
 
 namespace fast_deconv::linalg {
@@ -97,18 +80,6 @@ void multiply_with_gaussian(const core::exec_ctx& ctx, const fft_dims& dims, int
   const int grid = static_cast<int>(std::min<std::int64_t>(CEIL_DIV(total, 256), 65535));
   kernel::multiply_with_gaussian_kernel<<<grid, 256, 0, ctx.cuda_stream>>>(
       input, out, plane, total, dims.freq_nrow, dims.freq_ncol, dims.padded_ncol, sigma,
-      1.0f / static_cast<float>(dims.padded_total()));
-}
-
-void multiply_with_gaussian_once_and_twice(const core::exec_ctx& ctx, const fft_dims& dims, int n_batch,
-                                           const complex_type* input, complex_type* out_conv, complex_type* out_conv2,
-                                           float sigma)
-{
-  const std::int64_t plane = dims.freq_total();
-  const std::int64_t total = plane * n_batch;
-  const int grid = static_cast<int>(std::min<std::int64_t>(CEIL_DIV(total, 256), 65535));
-  kernel::multiply_with_gaussian_once_and_twice_kernel<<<grid, 256, 0, ctx.cuda_stream>>>(
-      input, out_conv, out_conv2, plane, total, dims.freq_nrow, dims.freq_ncol, dims.padded_ncol, sigma,
       1.0f / static_cast<float>(dims.padded_total()));
 }
 
