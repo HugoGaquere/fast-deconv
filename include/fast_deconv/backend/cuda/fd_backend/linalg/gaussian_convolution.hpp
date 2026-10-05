@@ -39,7 +39,7 @@ class gaussian_convolution_ctx {
   /// Multiply @p in by Gaussian(@p sigma), C2R, crop the top-left into @p out. @p in is left intact.
   void convolve(const spectrum& in, float sigma, core::span3d<float> out) const;
 
-  /// forward() then convolve(), through a temporary spectrum, for single-sigma uses.
+  /// Pad, R2C, multiply in place, C2R, crop: no spectrum kept, for single-sigma uses.
   void convolve(core::span3d<const float> input, float sigma, core::span3d<float> out) const;
 
   int batch() const { return batch_; }
