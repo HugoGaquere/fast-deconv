@@ -56,7 +56,7 @@ namespace fast_deconv::common {
 
 void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coords, const std::vector<int>& scales,
                      core::span3d<float> central_facet_psfs, core::span1d<const float> weights_freq,
-                     const std::vector<float>& scale_sigmas, float fft_padding, core::span2d<bool> external_mask,
+                     const std::vector<float>& scale_sigmas, core::span2d<bool> external_mask,
                      core::span3d<bool> mask_per_scale)
 {
   assert(mask_per_scale.is_exhaustive());
@@ -98,7 +98,9 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
   }
 
   // ---- 2. One batched forward transform of every channel's PSF, reused by every scale ----
-  const linalg::gaussian_convolution_ctx conv(ctx, /*batch=*/n_freq, psf_nrow, psf_ncol, fft_padding);
+  // Wrap-free for every scale's sigma * sqrt(2).
+  const linalg::gaussian_convolution_ctx conv(ctx, /*batch=*/n_freq, psf_nrow, psf_ncol,
+                                              linalg::max_gaussian_reach(scale_sigmas, std::numbers::sqrt2_v<float>));
   auto spectrum = conv.make_spectrum();
   conv.forward(central_facet_psfs, spectrum);
 

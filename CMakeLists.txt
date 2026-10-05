@@ -168,6 +168,7 @@ add_library(fast_deconv STATIC
         src/fast_deconv/algorithm/ddmsc.cpp
         src/fast_deconv/algorithm/psf_convolution.cpp
         src/fast_deconv/algorithm/scales.cpp
+        src/fast_deconv/linalg/gaussian_convolution.cpp
         src/fast_deconv/common/convergence.cpp
         ${FAST_DECONV_BACKEND_SOURCES}
 )

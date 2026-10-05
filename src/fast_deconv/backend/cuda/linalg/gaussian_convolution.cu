@@ -10,64 +10,32 @@
 
 namespace fast_deconv::kernel {
 
-// Pads and ifftshifts a 2D image in one pass.
-// Input:  (nx, ny) real, origin at center
-// Output: (px, py) real, origin at (0,0), zero-padded
-__global__ void pad_ifftshift_kernel(const float* input, float* output, int nx, int ny, int px, int py, int npad_x,
-                                     int npad_y)
+// Copies a batch of (nx, ny) images to the top-left of (px, py) planes; the rest is zeroed beforehand.
+__global__ void pad_kernel(const float* input, float* output, int nx, int ny, int px, int py, int n_batch)
 {
   const int row = blockIdx.y * blockDim.y + threadIdx.y;
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
   if (row >= nx || col >= ny) return;
-
-  // Position in padded array (input centered)
-  const int pad_row = row + npad_x;
-  const int pad_col = col + npad_y;
-
-  // ifftshift: shift by ceil(N/2) = (N+1)/2
-  const int out_row = (pad_row + (px + 1) / 2) % px;
-  const int out_col = (pad_col + (py + 1) / 2) % py;
-
-  output[out_row * py + out_col] = input[row * ny + col];
-}
-
-// Pads and ifftshifts a batched 2D image in one pass.
-__global__ void pad_ifftshift_batched_kernel(const float* input, float* output, int nx, int ny, int px, int py,
-                                             int npad_x, int npad_y, int n_batch)
-{
-  const int row = blockIdx.y * blockDim.y + threadIdx.y;
-  const int col = blockIdx.x * blockDim.x + threadIdx.x;
-  if (row >= nx || col >= ny) return;
-
-  const int pad_row = row + npad_x;
-  const int pad_col = col + npad_y;
-
-  const int out_row = (pad_row + (px + 1) / 2) % px;
-  const int out_col = (pad_col + (py + 1) / 2) % py;
 
   const int in_stride = nx * ny;
   const int out_stride = px * py;
 
   const float* in = input + row * ny + col;
-  float* out = output + out_row * py + out_col;
+  float* out = output + row * py + col;
   for (int b = 0; b < n_batch; b++, in += in_stride, out += out_stride) *out = *in;
 }
 
-// Fftshifts and crops a batched 2D image in one pass.
-__global__ void fftshift_crop_kernel(const float* input, float* output, int nx, int ny, int px, int py, int npad_x,
-                                     int npad_y, int n_batch)
+// Copies the top-left (nx, ny) of a batch of (px, py) planes out.
+__global__ void crop_kernel(const float* input, float* output, int nx, int ny, int px, int py, int n_batch)
 {
   const int row = blockIdx.y * blockDim.y + threadIdx.y;
   const int col = blockIdx.x * blockDim.x + threadIdx.x;
   if (row >= nx || col >= ny) return;
 
-  const int src_row = (row + npad_x + (px + 1) / 2) % px;
-  const int src_col = (col + npad_y + (py + 1) / 2) % py;
-
   const int out_stride = nx * ny;
   const int in_stride = px * py;
 
-  const float* in = input + src_row * py + src_col;
+  const float* in = input + row * py + col;
   float* out = output + row * ny + col;
   for (int b = 0; b < n_batch; b++, in += in_stride, out += out_stride) *out = *in;
 }
@@ -76,41 +44,28 @@ __global__ void fftshift_crop_kernel(const float* input, float* output, int nx, 
 
 namespace fast_deconv::linalg {
 
-void pad_ifftshift_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output)
-{
-  CHECK_CUDA(cudaMemsetAsync(output, 0, sizeof(float) * dims.padded_total(), ctx.cuda_stream));
-  dim3 block_dim(16, 16);
-  dim3 grid_dim(CEIL_DIV(dims.input_ncol, block_dim.x), CEIL_DIV(dims.input_nrow, block_dim.y));
-  kernel::pad_ifftshift_kernel<<<grid_dim, block_dim, 0, ctx.cuda_stream>>>(
-      input, output, dims.input_nrow, dims.input_ncol, dims.padded_nrow, dims.padded_ncol, dims.padding_nrow,
-      dims.padding_ncol);
-}
-
-void pad_ifftshift_batched_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output,
-                                 int n_batch)
+void pad_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output, int n_batch)
 {
   CHECK_CUDA(cudaMemsetAsync(output, 0, sizeof(float) * dims.padded_total() * n_batch, ctx.cuda_stream));
   dim3 block_dim(16, 16);
   dim3 grid_dim(CEIL_DIV(dims.input_ncol, block_dim.x), CEIL_DIV(dims.input_nrow, block_dim.y));
-  kernel::pad_ifftshift_batched_kernel<<<grid_dim, block_dim, 0, ctx.cuda_stream>>>(
-      input, output, dims.input_nrow, dims.input_ncol, dims.padded_nrow, dims.padded_ncol, dims.padding_nrow,
-      dims.padding_ncol, n_batch);
+  kernel::pad_kernel<<<grid_dim, block_dim, 0, ctx.cuda_stream>>>(input, output, dims.input_nrow, dims.input_ncol,
+                                                                  dims.padded_nrow, dims.padded_ncol, n_batch);
+  CHECK_LAST_CUDA_ERROR();
 }
 
-void fftshift_crop_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output,
-                         int n_batch)
+void crop_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output, int n_batch)
 {
   dim3 block_dim(16, 16);
   dim3 grid_dim(CEIL_DIV(dims.input_ncol, block_dim.x), CEIL_DIV(dims.input_nrow, block_dim.y));
-  kernel::fftshift_crop_kernel<<<grid_dim, block_dim, 0, ctx.cuda_stream>>>(
-      input, output, dims.input_nrow, dims.input_ncol, dims.padded_nrow, dims.padded_ncol, dims.padding_nrow,
-      dims.padding_ncol, n_batch);
+  kernel::crop_kernel<<<grid_dim, block_dim, 0, ctx.cuda_stream>>>(input, output, dims.input_nrow, dims.input_ncol,
+                                                                   dims.padded_nrow, dims.padded_ncol, n_batch);
+  CHECK_LAST_CUDA_ERROR();
 }
 
-gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, int batch, int nrow, int ncol,
-                                                   float padding)
+gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, int batch, int nrow, int ncol, int gap)
     : ctx_(ctx),
-      dims_(nrow, ncol, padding),
+      dims_(nrow, ncol, gap),
       batch_(batch),
       padded_(ctx.alloc_ptr_async<float>(static_cast<std::size_t>(batch) * dims_.padded_total())),
       product_(ctx.alloc_ptr_async<complex_type>(static_cast<std::size_t>(batch) * dims_.freq_total()))
@@ -155,7 +110,7 @@ void gaussian_convolution_ctx::forward(core::span3d<const float> input, spectrum
   assert(input.extent(1) == dims_.input_nrow && input.extent(2) == dims_.input_ncol);
   assert(out.size() == static_cast<std::size_t>(batch_) * dims_.freq_total());
 
-  pad_ifftshift_batched_async(ctx_, dims_, input.data_handle(), padded_.get(), batch_);
+  pad_async(ctx_, dims_, input.data_handle(), padded_.get(), batch_);
   forward_(padded_.get(), out.data_handle());
 }
 
@@ -169,7 +124,7 @@ void gaussian_convolution_ctx::convolve(const spectrum& in, float sigma, core::s
   // The multiply writes product_, so the caller's spectrum survives for the next sigma.
   multiply_with_gaussian(ctx_, dims_, batch_, in.data_handle(), product_.get(), sigma);
   backward_(product_.get(), padded_.get());
-  fftshift_crop_async(ctx_, dims_, padded_.get(), out.data_handle(), batch_);
+  crop_async(ctx_, dims_, padded_.get(), out.data_handle(), batch_);
 }
 
 void gaussian_convolution_ctx::convolve(core::span3d<const float> input, float sigma, core::span3d<float> out) const

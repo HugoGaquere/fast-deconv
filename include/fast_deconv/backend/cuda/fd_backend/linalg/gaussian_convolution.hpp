@@ -19,7 +19,9 @@ class gaussian_convolution_ctx {
   /// On this backend, the half-complex spectrum of the padded input: batch * freq_total.
   using spectrum = core::cont1d<complex_type>;
 
-  gaussian_convolution_ctx(const core::exec_ctx& ctx, int batch, int nrow, int ncol, float padding);
+  /// @p gap: zero padding in pixels per axis, P = next_fast_size(n + gap); wrap-free for every sigma with
+  /// gaussian_reach(sigma) <= gap.
+  gaussian_convolution_ctx(const core::exec_ctx& ctx, int batch, int nrow, int ncol, int gap);
   ~gaussian_convolution_ctx();
 
   gaussian_convolution_ctx(const gaussian_convolution_ctx&) = delete;
@@ -30,10 +32,11 @@ class gaussian_convolution_ctx {
   /// A spectrum sized for this context, for forward().
   spectrum make_spectrum() const;
 
-  /// Pad + ifftshift + R2C of @p input, (batch, nrow, ncol), into @p out. @p input can change once this returns.
+  /// Pad (input at the top-left) + R2C of @p input, (batch, nrow, ncol), into @p out. @p input can change once this
+  /// returns.
   void forward(core::span3d<const float> input, spectrum& out) const;
 
-  /// Multiply @p in by Gaussian(@p sigma), C2R, fftshift + crop into @p out. @p in is left intact.
+  /// Multiply @p in by Gaussian(@p sigma), C2R, crop the top-left into @p out. @p in is left intact.
   void convolve(const spectrum& in, float sigma, core::span3d<float> out) const;
 
   /// forward() then convolve(), through a temporary spectrum, for single-sigma uses.

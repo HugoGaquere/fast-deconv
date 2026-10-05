@@ -15,8 +15,9 @@ class gaussian_convolution_ctx {
   /// On this backend, a copy of the input: (batch, nrow, ncol).
   using spectrum = core::cont3d<float>;
 
-  /// @p padding is unused on this backend: each line is padded per sigma, from the kernel's reach.
-  gaussian_convolution_ctx(const core::exec_ctx& ctx, int batch, int nrow, int ncol, float padding);
+  /// @p gap: zero padding in pixels per axis; wrap-free for every sigma with gaussian_reach(sigma) <= gap.
+  /// Each line is padded to min(gap, gaussian_reach(sigma)), so small sigmas keep short lines.
+  gaussian_convolution_ctx(const core::exec_ctx& ctx, int batch, int nrow, int ncol, int gap);
   ~gaussian_convolution_ctx() = default;
 
   gaussian_convolution_ctx(const gaussian_convolution_ctx&) = delete;
@@ -46,6 +47,7 @@ class gaussian_convolution_ctx {
   int batch_;
   int nrow_;
   int ncol_;
+  int gap_;
 };
 
 }  // namespace fast_deconv::linalg

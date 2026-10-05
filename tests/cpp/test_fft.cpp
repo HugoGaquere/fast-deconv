@@ -43,18 +43,9 @@ TEST(NextFastSize, ReturnsSmallest7SmoothAtLeastN)
   }
 }
 
-TEST(ComputePadding, MatchesCeilFormulaPerAxis)
-{
-  // pad = ceil((padding - 1) * npix / 2), computed independently per axis.
-  EXPECT_EQ(linalg::compute_padding(100, 100, 1.5f), (std::pair<int, int>{25, 25}));
-  EXPECT_EQ(linalg::compute_padding(100, 60, 1.5f), (std::pair<int, int>{25, 15}));
-  EXPECT_EQ(linalg::compute_padding(5, 6, 1.5f), (std::pair<int, int>{2, 2}));  // ceil(1.25), ceil(1.5)
-  EXPECT_EQ(linalg::compute_padding(100, 100, 1.0f), (std::pair<int, int>{0, 0}));
-}
-
 // ============================================================================
-// pad_ifftshift / pad_ifftshift_batched / fftshift_crop — pure data movement,
-// compared element-exact against a host replica of the index mapping.
+// pad_async / crop_async: pure data movement, compared element-exact against a
+// host replica of the layout.
 // ============================================================================
 
 // CUDA only: the host backend has no FFT route.
@@ -62,25 +53,20 @@ TEST(ComputePadding, MatchesCeilFormulaPerAxis)
 
 namespace {
 
-// Host oracle for pad_ifftshift: input (nx, ny) centered into (px, py) at
-// offset (npad_x, npad_y), then origin moved to (0,0) by an ifftshift of the
-// padded grid; everything else zero.
-std::vector<float> host_pad_ifftshift(const std::vector<float>& in, int nx, int ny, int px, int py, int npad_x,
-                                      int npad_y)
+// Host oracle for pad_async: each (nx, ny) image at the top-left of a zero (px, py) plane.
+std::vector<float> host_pad(const std::vector<float>& in, int n_batch, int nx, int ny, int px, int py)
 {
-  std::vector<float> out(static_cast<std::size_t>(px) * py, 0.0f);
-  for (int r = 0; r < nx; ++r) {
-    for (int c = 0; c < ny; ++c) {
-      const int out_r = (r + npad_x + (px + 1) / 2) % px;
-      const int out_c = (c + npad_y + (py + 1) / 2) % py;
-      out.at(flat(out_r, out_c, py)) = in.at(flat(r, c, ny));
-    }
-  }
+  std::vector<float> out(static_cast<std::size_t>(n_batch) * px * py, 0.0f);
+  for (int b = 0; b < n_batch; ++b)
+    for (int r = 0; r < nx; ++r)
+      for (int c = 0; c < ny; ++c)
+        out.at(static_cast<std::size_t>(b) * px * py + flat(r, c, py)) =
+            in.at(static_cast<std::size_t>(b) * nx * ny + flat(r, c, ny));
   return out;
 }
 
-// The layout kernels only read the geometry, so set it explicitly — these cases
-// pick padded sizes the padding-factor constructor would not produce.
+// The layout kernels only read the geometry, so set it explicitly: these cases
+// pick padded sizes the gap constructor would not produce.
 linalg::fft_dims explicit_dims(int nx, int ny, int px, int py)
 {
   linalg::fft_dims d;
@@ -88,8 +74,6 @@ linalg::fft_dims explicit_dims(int nx, int ny, int px, int py)
   d.input_ncol = ny;
   d.padded_nrow = px;
   d.padded_ncol = py;
-  d.padding_nrow = (px - nx) / 2;
-  d.padding_ncol = (py - ny) / 2;
   d.freq_nrow = px;
   d.freq_ncol = py / 2 + 1;
   return d;
@@ -102,6 +86,12 @@ std::vector<float> iota_image(int n, float offset = 0.0f)
   for (int i = 0; i < n; ++i) img.at(i) = offset + static_cast<float>(i + 1);
   return img;
 }
+
+// (nx, ny) -> (px, py) cases: odd and even gaps, and no padding at all.
+struct layout_case {
+  int nx, ny, px, py;
+};
+constexpr layout_case kLayoutCases[] = {{5, 6, 8, 9}, {6, 6, 10, 12}, {7, 5, 7, 5}};
 
 }  // namespace
 #endif
@@ -118,7 +108,7 @@ TEST_F(FftLayout, ZeroSigmaConvolutionIsIdentityAndKeepsTheSpectrum)
   for (const auto& [rows, cols] : {std::pair{8, 10}, std::pair{9, 15}, std::pair{10, 9}}) {
     for (int batch : {1, 3, 9}) {
       SCOPED_TRACE(::testing::Message() << rows << 'x' << cols << " batch=" << batch);
-      const linalg::gaussian_convolution_ctx conv(sr, batch, rows, cols, /*padding=*/1.5f);
+      const linalg::gaussian_convolution_ctx conv(sr, batch, rows, cols, /*gap=*/5);
       const auto count = static_cast<std::size_t>(batch) * rows * cols;
 
       std::vector<float> input(count);
@@ -138,15 +128,16 @@ TEST_F(FftLayout, ZeroSigmaConvolutionIsIdentityAndKeepsTheSpectrum)
 }
 
 // convolve, from a spectrum and in one shot, is the linear convolution (zero outside the image) with the
-// band-limited Gaussian, in every plane of a batch, on odd and even, non-square sizes. The padding factor is large
-// enough that both backends are free of wrap-around here: the FFT path pads by the factor, the host tiles by the
-// kernel's reach.
+// band-limited Gaussian, in every plane of a batch, on odd and even, non-square sizes. The gap is the largest
+// reach over the sigmas, so both backends are free of wrap-around: the FFT path pads the plane by it, the host
+// each line by the reach of the sigma at hand.
 TEST_F(FftLayout, ConvolveSpectrumMatchesLinearConvolutionOracle)
 {
   const auto sr = res().make_ctx();
+  const std::vector<float> sigmas{1.5f, 2.5f, 4.0f};
   for (const auto& [rows, cols] : {std::pair{24, 40}, std::pair{33, 21}}) {
     for (int batch : {1, 3}) {
-      const linalg::gaussian_convolution_ctx conv(sr, batch, rows, cols, /*padding=*/3.0f);
+      const linalg::gaussian_convolution_ctx conv(sr, batch, rows, cols, linalg::max_gaussian_reach(sigmas));
       const auto count = static_cast<std::size_t>(batch) * rows * cols;
 
       std::vector<float> input(count);
@@ -156,7 +147,7 @@ TEST_F(FftLayout, ConvolveSpectrumMatchesLinearConvolutionOracle)
       auto spectrum = conv.make_spectrum();
       conv.forward(in, spectrum);
 
-      for (float sigma : {1.5f, 2.5f, 4.0f}) {
+      for (float sigma : sigmas) {
         SCOPED_TRACE(::testing::Message() << rows << 'x' << cols << " batch=" << batch << " sigma=" << sigma);
         const core::span3d<float> out(d_output.get(), batch, rows, cols);
         const auto taps = fdtest::band_limited_gaussian_taps(sigma, std::max(rows, cols));
@@ -176,8 +167,8 @@ TEST_F(FftLayout, ConvolveSpectrumMatchesLinearConvolutionOracle)
 
 // psf_convolution entry against its definition, computed independently in double: conv is each channel
 // convolved once, conv2 the channel-weighted mean of each channel convolved twice. The build takes the
-// weighted mean first and convolves once with sigma * sqrt(2); this checks that shortcut. The padding
-// factor keeps the FFT route wrap-free too, so the test holds on both backends.
+// weighted mean first and convolves once with sigma * sqrt(2); this checks that shortcut. psf_convolution
+// sizes its gaps from the reach of its sigmas, so the test holds on both backends.
 TEST_F(FftLayout, PsfConvolutionMatchesPerChannelOracle)
 {
   const auto sr = res().make_ctx();
@@ -197,7 +188,7 @@ TEST_F(FftLayout, PsfConvolutionMatchesPerChannelOracle)
 
   fast_deconv::algorithm::psf_convolution cache(sr, core::span4d<const float>(d_psf.get(), 1, n_freq, rows, cols),
                                                 {0.0f, sigma}, core::span1d<const float>(d_weights.get(), n_freq),
-                                                /*gamma=*/0.1f, /*padding=*/3.0f);
+                                                /*gamma=*/0.1f);
   const auto e = cache.get(/*scale=*/1, /*facet=*/0);
 
   std::vector<float> conv(psf.size()), conv2(static_cast<std::size_t>(rows) * cols);
@@ -234,88 +225,81 @@ TEST_F(FftLayout, PsfConvolutionMatchesPerChannelOracle)
     }
 }
 
-#ifdef FAST_DECONV_WITH_CUDA
-TEST_F(FftLayout, PadIfftshiftMatchesHostOracle)
+// With a gap below the kernel's reach the convolution wraps. Both backends must wrap like a circular
+// convolution of length next_fast_size(n + gap) per axis: CUDA through its FFT size, the host by capping
+// its line padding at the gap.
+TEST_F(FftLayout, ConvolveWithShortGapWrapsLikeCircularOracle)
 {
-  // Odd pad deltas on both axes (8-5=3, 9-6=3) exercise the convention where
-  // the far side gets the extra zero pixel: npad = (padded - input) / 2.
-  const int nx = 5, ny = 6, px = 8, py = 9;
-  const int npad_x = (px - nx) / 2, npad_y = (py - ny) / 2;
-
-  const auto in = iota_image(nx * ny);
   const auto sr = res().make_ctx();
+  constexpr int rows = 20, cols = 27, batch = 2, gap = 3;
+  const float sigma = 4.0f;  // reach ~23 px, far beyond the gap
+  const auto count = static_cast<std::size_t>(batch) * rows * cols;
 
-  fdtest::device_buffer<float> d_in(sr, in);
-  fdtest::device_buffer<float> d_out(sr, static_cast<std::size_t>(px) * py);
+  std::vector<float> input(count);
+  for (std::size_t i = 0; i < count; ++i) input[i] = static_cast<float>((i * 37) % 101) / 101.0f - 0.5f;
+  fdtest::device_buffer<float> d_input(sr, input), d_output(sr, count);
 
-  linalg::pad_ifftshift_async(sr, explicit_dims(nx, ny, px, py), d_in.get(), d_out.get());
-  sr.wait();
+  const linalg::gaussian_convolution_ctx conv(sr, batch, rows, cols, gap);
+  conv.convolve(core::span3d<const float>(d_input.get(), batch, rows, cols), sigma,
+                core::span3d<float>(d_output.get(), batch, rows, cols));
+  const auto actual = d_output.to_host();
 
-  const auto out = d_out.to_host();
-  const auto expected = host_pad_ifftshift(in, nx, ny, px, py, npad_x, npad_y);
-  for (int i = 0; i < px * py; ++i) ASSERT_FLOAT_EQ(out.at(i), expected.at(i)) << "flat index " << i;
+  const auto hr = fdtest::circular_gaussian_kernel(sigma, linalg::next_fast_size(rows + gap));
+  const auto hc = fdtest::circular_gaussian_kernel(sigma, linalg::next_fast_size(cols + gap));
+  const auto expected = fdtest::separable_circular_convolve(input, batch, rows, cols, hr, hc);
+  for (std::size_t i = 0; i < count; ++i) ASSERT_NEAR(actual[i], expected[i], 2e-5f) << "index=" << i;
+
+  // The wrap must be visible, or the test would not tell the two layouts apart.
+  const auto linear = fdtest::separable_linear_convolve(
+      input, batch, rows, cols, fdtest::band_limited_gaussian_taps(sigma, std::max(rows, cols)));
+  float max_wrap = 0.0f;
+  for (std::size_t i = 0; i < count; ++i) max_wrap = std::max(max_wrap, std::abs(expected[i] - linear[i]));
+  EXPECT_GT(max_wrap, 1e-3f);
 }
 
-TEST_F(FftLayout, PadIfftshiftBatchedMatchesSingleImageOracle)
+#ifdef FAST_DECONV_WITH_CUDA
+TEST_F(FftLayout, PadMatchesHostOracle)
 {
-  const int nx = 5, ny = 6, px = 8, py = 9, n_batch = 3;
-  const int npad_x = (px - nx) / 2, npad_y = (py - ny) / 2;
-  const int in_stride = nx * ny, out_stride = px * py;
-
-  // Three distinct slices so cross-batch mixups are visible.
-  std::vector<float> in(n_batch * in_stride);
-  for (int b = 0; b < n_batch; ++b) {
-    const auto slice = iota_image(in_stride, 100.0f * b);
-    std::copy(slice.begin(), slice.end(), in.begin() + b * in_stride);
-  }
-
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_in(sr, in);
-  fdtest::device_buffer<float> d_out(sr, static_cast<std::size_t>(n_batch) * out_stride);
+  constexpr int n_batch = 3;
+  for (const auto& cs : kLayoutCases) {
+    SCOPED_TRACE(::testing::Message() << cs.nx << "x" << cs.ny << " -> " << cs.px << "x" << cs.py);
+    // Distinct slices so cross-batch mixups are visible.
+    std::vector<float> in;
+    for (int b = 0; b < n_batch; ++b) {
+      const auto slice = iota_image(cs.nx * cs.ny, 100.0f * b);
+      in.insert(in.end(), slice.begin(), slice.end());
+    }
+    fdtest::device_buffer<float> d_in(sr, in);
+    fdtest::device_buffer<float> d_out(sr, static_cast<std::size_t>(n_batch) * cs.px * cs.py);
 
-  linalg::pad_ifftshift_batched_async(sr, explicit_dims(nx, ny, px, py), d_in.get(), d_out.get(), n_batch);
-  sr.wait();
+    linalg::pad_async(sr, explicit_dims(cs.nx, cs.ny, cs.px, cs.py), d_in.get(), d_out.get(), n_batch);
+    sr.wait();
 
-  const auto out = d_out.to_host();
-  for (int b = 0; b < n_batch; ++b) {
-    const std::vector<float> slice(in.begin() + b * in_stride, in.begin() + (b + 1) * in_stride);
-    const auto expected = host_pad_ifftshift(slice, nx, ny, px, py, npad_x, npad_y);
-    for (int i = 0; i < out_stride; ++i)
-      ASSERT_FLOAT_EQ(out.at(b * out_stride + i), expected.at(i)) << "batch " << b << " flat index " << i;
+    const auto out = d_out.to_host();
+    const auto expected = host_pad(in, n_batch, cs.nx, cs.ny, cs.px, cs.py);
+    for (std::size_t i = 0; i < expected.size(); ++i) ASSERT_FLOAT_EQ(out.at(i), expected.at(i)) << "flat index " << i;
   }
 }
 
 TEST_F(FftLayout, PadThenCropRoundTripIsIdentity)
 {
-  // pad_ifftshift → fftshift_crop must reproduce the input bit-exactly for
-  // both odd and even pad deltas (the asymmetric-padding convention is used
-  // symmetrically by both kernels).
-  const struct {
-    int nx, ny, px, py;
-  } cases[] = {
-      {5, 6, 8, 9},    // odd deltas
-      {6, 6, 10, 12},  // even deltas
-      {7, 5, 7, 5},    // no padding at all
-  };
-
   const auto sr = res().make_ctx();
-
-  for (const auto& cs : cases) {
-    const auto in = iota_image(cs.nx * cs.ny);
-
+  constexpr int n_batch = 2;
+  for (const auto& cs : kLayoutCases) {
+    SCOPED_TRACE(::testing::Message() << cs.nx << "x" << cs.ny << " -> " << cs.px << "x" << cs.py);
+    const auto in = iota_image(n_batch * cs.nx * cs.ny);
     fdtest::device_buffer<float> d_in(sr, in);
-    fdtest::device_buffer<float> d_pad(sr, static_cast<std::size_t>(cs.px) * cs.py);
-    fdtest::device_buffer<float> d_back(sr, static_cast<std::size_t>(cs.nx) * cs.ny);
+    fdtest::device_buffer<float> d_pad(sr, static_cast<std::size_t>(n_batch) * cs.px * cs.py);
+    fdtest::device_buffer<float> d_back(sr, in.size());
 
     const auto dims = explicit_dims(cs.nx, cs.ny, cs.px, cs.py);
-    linalg::pad_ifftshift_async(sr, dims, d_in.get(), d_pad.get());
-    linalg::fftshift_crop_async(sr, dims, d_pad.get(), d_back.get(), /*n_batch=*/1);
+    linalg::pad_async(sr, dims, d_in.get(), d_pad.get(), n_batch);
+    linalg::crop_async(sr, dims, d_pad.get(), d_back.get(), n_batch);
     sr.wait();
 
     const auto back = d_back.to_host();
-    for (int i = 0; i < cs.nx * cs.ny; ++i)
-      ASSERT_FLOAT_EQ(back.at(i), in.at(i))
-          << "case (" << cs.nx << "x" << cs.ny << " -> " << cs.px << "x" << cs.py << "), flat index " << i;
+    for (std::size_t i = 0; i < in.size(); ++i) ASSERT_FLOAT_EQ(back.at(i), in.at(i)) << "flat index " << i;
   }
 }
 #endif

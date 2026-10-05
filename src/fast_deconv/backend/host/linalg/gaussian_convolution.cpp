@@ -36,29 +36,10 @@ core::mdcontainer<float, 1> gaussian_kernel(const core::exec_ctx& ctx, int n, fl
 // lines, and a multiple of ducc0's SIMD bunch (4 lines on SSE2, 8 on AVX2).
 constexpr std::size_t kTileLines = 16;
 
-// Last pixel where the image-domain kernel of exp(-2 pi^2 sigma^2 f^2), f in [-1/2, 1/2], is above
-// kReachTol of its peak: float32 precision. Closed form, an upper bound on the measured reach (within
-// 1-3 px for sigma in [0.05, 200], see gaussian_conv/padding_and_kernel_reach.ipynb):
-//   - the Gaussian decay: exp(-x^2 / 2 sigma^2) = tol  =>  x = sigma sqrt(2 ln(1/tol));
-//   - the cut at Nyquist (small sigma): |h(x)| ~ sigma^2 H(1/2) / x^2, against the peak
-//     h(0) = erf(pi sigma / sqrt 2) / (sigma sqrt(2 pi)).
-int gaussian_reach(float sigma)
-{
-  constexpr double kReachTol = 1e-7;
-  if (!(sigma > 0.0f)) return 0;  // Gaussian(0) is the identity
-  const double s = sigma;
-  const double pi = std::numbers::pi;
-  const double gaussian = s * std::sqrt(2.0 * std::log(1.0 / kReachTol));
-  const double peak = std::erf(pi * s / std::sqrt(2.0)) / (s * std::sqrt(2.0 * pi));
-  const double h_nyquist = std::exp(-pi * pi * s * s / 2.0);
-  const double tail = std::sqrt(s * s * h_nyquist / (kReachTol * peak));
-  return static_cast<int>(std::ceil(std::max(gaussian, tail)));
-}
 }  // namespace
 
-gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, int batch, int nrow, int ncol,
-                                                   float /*padding*/)
-    : ctx_(ctx), batch_(batch), nrow_(nrow), ncol_(ncol)
+gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, int batch, int nrow, int ncol, int gap)
+    : ctx_(ctx), batch_(batch), nrow_(nrow), ncol_(ncol), gap_(gap)
 {
 }
 
@@ -104,7 +85,7 @@ void gaussian_convolution_ctx::convolve(core::span3d<const float> input, float s
 // small per-thread buffer, convolved there by ducc0::convolve_axis along the contiguous axis, and its image
 // part written to `out`; the padding never exists as a plane. The column pass gathers kTileLines adjacent
 // columns, one 64 B cache line per row, transposed into the buffer. The padding is per sigma, from the
-// kernel's reach (gaussian_reach).
+// kernel's reach, capped at gap_: beyond it the lines wrap as the CUDA backend's P = next_fast_size(n + gap).
 void gaussian_convolution_ctx::convolve_tiled_(const float* in, float sigma, core::span3d<float> out) const
 {
   assert(out.is_exhaustive() && out.extent(0) == batch_);
@@ -114,9 +95,9 @@ void gaussian_convolution_ctx::convolve_tiled_(const float* in, float sigma, cor
   const auto ncol = static_cast<std::size_t>(ncol_);
   const auto batch = static_cast<std::size_t>(batch_);
   // P - n >= reach: a wrapped tail crosses the zero strip, in either direction, before it can reach the image.
-  const int reach = gaussian_reach(sigma);
-  const auto row_len = static_cast<std::size_t>(next_fast_size(ncol_ + reach));  // padded row length
-  const auto col_len = static_cast<std::size_t>(next_fast_size(nrow_ + reach));  // padded column length
+  const int pad = std::min(gap_, gaussian_reach(sigma));
+  const auto row_len = static_cast<std::size_t>(next_fast_size(ncol_ + pad));  // padded row length
+  const auto col_len = static_cast<std::size_t>(next_fast_size(nrow_ + pad));  // padded column length
 
   const auto kx = gaussian_kernel(ctx_, static_cast<int>(row_len), sigma);
   const auto ky = gaussian_kernel(ctx_, static_cast<int>(col_len), sigma);
