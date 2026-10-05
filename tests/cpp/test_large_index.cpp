@@ -39,6 +39,6 @@ TEST(LargeIndex, PsfStackOffsetsExceedInt32)
 // A single plane must still fit an int: the kernels hold a plane offset in one.
 TEST(LargeIndex, PaddedFftPlaneIsGuarded)
 {
-  EXPECT_NO_THROW(linalg::fft_dims(19845, 19845, 1.1f));                      // padded 21870^2, fits
-  EXPECT_THROW(linalg::fft_dims(19845, 19845, 2.5f), std::invalid_argument);  // 50000^2, does not
+  EXPECT_NO_THROW(linalg::fft_dims(19845, 19845, /*gap=*/2025));                       // padded 21870^2, fits
+  EXPECT_THROW(linalg::fft_dims(19845, 19845, /*gap=*/30155), std::invalid_argument);  // 50000^2, does not
 }

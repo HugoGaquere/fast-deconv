@@ -30,10 +30,9 @@ class psf_convolution {
    * @param sigmas    Scale sigmas, host, (n_scales,). Copied.
    * @param weights   Per-channel weights, device, (n_freq,). Must outlive this.
    * @param gamma     CLEAN loop gain, folded into each entry's gain.
-   * @param padding   FFT padding factor for the PSF-grid convolutions.
    */
   psf_convolution(const core::exec_ctx& exec_ctx, core::span4d<const float> raw_psfs, std::vector<float> sigmas,
-                  core::span1d<const float> weights, float gamma, float padding);
+                  core::span1d<const float> weights, float gamma);
 
   psf_convolution(const psf_convolution&) = delete;
   psf_convolution& operator=(const psf_convolution&) = delete;

@@ -10,11 +10,13 @@
 namespace fast_deconv::algorithm {
 
 psf_convolution::psf_convolution(const core::exec_ctx& exec_ctx, core::span4d<const float> raw_psfs,
-                                 std::vector<float> sigmas, core::span1d<const float> weights, float gamma,
-                                 float padding)
+                                 std::vector<float> sigmas, core::span1d<const float> weights, float gamma)
     : exec_ctx_(exec_ctx),
-      conv_ctx_(exec_ctx, raw_psfs.extent(1), raw_psfs.extent(2), raw_psfs.extent(3), padding),
-      mean_conv_ctx_(exec_ctx, 1, raw_psfs.extent(2), raw_psfs.extent(3), padding),
+      // Wrap-free for every scale: conv uses sigma, conv2 sigma * sqrt(2).
+      conv_ctx_(exec_ctx, raw_psfs.extent(1), raw_psfs.extent(2), raw_psfs.extent(3),
+                linalg::max_gaussian_reach(sigmas)),
+      mean_conv_ctx_(exec_ctx, 1, raw_psfs.extent(2), raw_psfs.extent(3),
+                     linalg::max_gaussian_reach(sigmas, std::numbers::sqrt2_v<float>)),
       raw_psfs_(raw_psfs),
       weights_(weights),
       sigmas_(std::move(sigmas)),

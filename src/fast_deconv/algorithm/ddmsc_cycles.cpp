@@ -96,8 +96,8 @@ struct run_workspace {
       : mean_residual_buf(ctx.compute_stream.alloc_mdcontainer_async<float>(nrow, ncol)),
         stats(ctx.compute_stream, nrow * ncol, p.clean_negative),
         tiled(ctx.compute_stream, mean_residual_buf.extents(), 64),
-        scale_conv(ctx.compute_stream, 1, ctx.dirty_nrow, ctx.dirty_ncol, ctx.fft_padding),
-        psf_cache(ctx.compute_stream, ctx.raw_psfs, ctx.scale_sigmas, weights_freq, p.gamma, ctx.fft_padding),
+        scale_conv(ctx.compute_stream, 1, ctx.dirty_nrow, ctx.dirty_ncol, linalg::max_gaussian_reach(ctx.scale_sigmas)),
+        psf_cache(ctx.compute_stream, ctx.raw_psfs, ctx.scale_sigmas, weights_freq, p.gamma),
         all_coeffs(ctx.aux_stream.alloc_mdcontainer_async<float>(
             static_cast<std::size_t>(p.max_iteration + p.max_clean_iteration) * ctx.xdes.extent(1))),
         coeffs_per_chan(ctx.aux_stream.alloc_mdcontainer_async<float>(n_freq))
@@ -122,7 +122,7 @@ core::cont3d<bool> build_scale_mask(const context& ctx, const ddmsc_result& resu
   all_scales.insert(all_scales.end(), result.scales.begin(), result.scales.end());
 
   common::build_auto_mask(stream_a, all_coords, all_scales, central_facet_psfs, weights_freq, ctx.scale_sigmas,
-                          ctx.fft_padding, ctx.mask, mask_per_scale);
+                          ctx.mask, mask_per_scale);
   return mask_per_scale;
 }
 

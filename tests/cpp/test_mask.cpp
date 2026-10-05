@@ -47,8 +47,7 @@ class BuildAutoMask : public fdtest::BackendTest {
     core::span1d<float> weights_view(d_weights.get(), 1);
     core::span2d<bool> external_view(d_external.get(), nrow, ncol);
 
-    common::build_auto_mask(sr, coords, scales, psf_view, weights_view, sigmas, /*fft_padding=*/1.5f, external_view,
-                            mask_view);
+    common::build_auto_mask(sr, coords, scales, psf_view, weights_view, sigmas, external_view, mask_view);
     sr.wait();
     return d_mask.to_host();
   }

@@ -148,4 +148,51 @@ inline std::vector<float> separable_linear_convolve(const std::vector<float>& im
   return out;
 }
 
+// Periodic kernel h[0..P-1] whose length-P DFT is the band-limited Gaussian H(k/P), k folded to
+// [-P/2, P/2]: what an FFT convolution of length P with the Gaussian multiply applies, wrap included.
+inline std::vector<double> circular_gaussian_kernel(double sigma, int P)
+{
+  constexpr double pi = 3.14159265358979323846;
+  std::vector<double> h(static_cast<std::size_t>(P));
+  for (int x = 0; x < P; ++x) {
+    double acc = 0.0;
+    for (int k = 0; k < P; ++k) {
+      const double f = static_cast<double>(k < (P + 1) / 2 ? k : k - P) / P;
+      acc += std::exp(-2.0 * pi * pi * sigma * sigma * f * f) * std::cos(2.0 * pi * k * x / P);
+    }
+    h.at(x) = acc / P;
+  }
+  return h;
+}
+
+// Each (nrow, ncol) plane of a batch at the top-left of a zero (hr.size(), hc.size()) grid, circularly
+// convolved with hc along rows and hr along columns, then cropped back to (nrow, ncol). In double.
+inline std::vector<float> separable_circular_convolve(const std::vector<float>& img, int batch, int nrow, int ncol,
+                                                      const std::vector<double>& hr, const std::vector<double>& hc)
+{
+  const int pr = static_cast<int>(hr.size());
+  const int pc = static_cast<int>(hc.size());
+  const std::size_t plane = static_cast<std::size_t>(nrow) * ncol;
+  std::vector<double> tmp(plane);
+  std::vector<float> out(img.size());
+  for (int b = 0; b < batch; ++b) {
+    const std::size_t o = b * plane;
+    // Rows: grid columns >= ncol are zero, and only output columns < ncol are kept.
+    for (int r = 0; r < nrow; ++r)
+      for (int c = 0; c < ncol; ++c) {
+        double acc = 0.0;
+        for (int k = 0; k < ncol; ++k) acc += hc.at(((c - k) % pc + pc) % pc) * img.at(o + flat(r, k, ncol));
+        tmp.at(flat(r, c, ncol)) = acc;
+      }
+    // Columns: grid rows >= nrow are zero, and only output rows < nrow are kept.
+    for (int r = 0; r < nrow; ++r)
+      for (int c = 0; c < ncol; ++c) {
+        double acc = 0.0;
+        for (int k = 0; k < nrow; ++k) acc += hr.at(((r - k) % pr + pr) % pr) * tmp.at(flat(k, c, ncol));
+        out.at(o + flat(r, c, ncol)) = static_cast<float>(acc);
+      }
+  }
+  return out;
+}
+
 }  // namespace fast_deconv::test

@@ -33,13 +33,12 @@ namespace fast_deconv::common {
  * @param[in]    central_facet_psfs  Central facet per-frequency PSFs, (n_freq, psf_h, psf_w).
  * @param[in]    weights_freq        Per-channel weights, device, (n_freq,).
  * @param[in]    scale_sigmas        Gaussian sigma per scale, host, (n_scales,).
- * @param[in]    fft_padding         FFT padding factor used to size the conv plans.
  * @param[in]    external_mask       Externally-supplied 2D mask (true=masked) OR'd into every scale slice.
  * @param[out]   mask_per_scale      (n_scales, dirty_h, dirty_w) bool, written entirely.
  */
 void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coords, const std::vector<int>& scales,
                      core::span3d<float> central_facet_psfs, core::span1d<const float> weights_freq,
-                     const std::vector<float>& scale_sigmas, float fft_padding, core::span2d<bool> external_mask,
+                     const std::vector<float>& scale_sigmas, core::span2d<bool> external_mask,
                      core::span3d<bool> mask_per_scale);
 
 }  // namespace fast_deconv::common
