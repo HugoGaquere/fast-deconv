@@ -371,12 +371,10 @@ void convolution_ctx::convolve_spectrum(core::span1d<const complex_type> spectru
   const auto nrow = static_cast<std::size_t>(dims_.input_nrow);
   const auto ncol = static_cast<std::size_t>(dims_.input_ncol);
   const auto batch = static_cast<std::size_t>(batch_);
-  // P - n >= reach: a wrapped tail crosses both zero strips before it can reach the image.
+  // P - n >= reach: a wrapped tail crosses the zero strip, in either direction, before it can reach the image.
   const int reach = gaussian_reach(sigma);
   const auto row_len = static_cast<std::size_t>(next_fast_size(dims_.input_ncol + reach));  // padded row length
   const auto col_len = static_cast<std::size_t>(next_fast_size(dims_.input_nrow + reach));  // padded column length
-  const std::size_t row_off = (row_len - ncol) / 2;
-  const std::size_t col_off = (col_len - nrow) / 2;
 
   const auto kx = gaussian_kernel(ctx_, static_cast<int>(row_len), sigma);
   const auto ky = gaussian_kernel(ctx_, static_cast<int>(col_len), sigma);
@@ -402,14 +400,13 @@ void convolution_ctx::convolve_spectrum(core::span1d<const complex_type> spectru
         const std::size_t rb = std::min(kTileLines, n_rows - r0);
         for (std::size_t r = 0; r < rb; r++) {
           float* line = buf + r * row_len;
-          std::fill(line, line + row_off, 0.0f);
-          std::copy(in + (r0 + r) * ncol, in + (r0 + r + 1) * ncol, line + row_off);
-          std::fill(line + row_off + ncol, line + row_len, 0.0f);
+          std::copy(in + (r0 + r) * ncol, in + (r0 + r + 1) * ncol, line);
+          std::fill(line + ncol, line + row_len, 0.0f);
         }
         const ducc0::vfmav<float> lines(buf, {rb, row_len});
         ducc0::convolve_axis(lines, lines, std::size_t{1}, kernel_x, 1);
         for (std::size_t r = 0; r < rb; r++)
-          std::copy(buf + r * row_len + row_off, buf + r * row_len + row_off + ncol, dst + (r0 + r) * ncol);
+          std::copy(buf + r * row_len, buf + r * row_len + ncol, dst + (r0 + r) * ncol);
       }
     }
   }
@@ -426,19 +423,16 @@ void convolution_ctx::convolve_spectrum(core::span1d<const complex_type> spectru
         float* plane = dst + (static_cast<std::size_t>(blk) / blocks_per_plane) * nrow * ncol;
         const std::size_t c0 = (static_cast<std::size_t>(blk) % blocks_per_plane) * kTileLines;
         const std::size_t cb = std::min(kTileLines, ncol - c0);
-        for (std::size_t c = 0; c < cb; c++) {
-          std::fill(buf + c * col_len, buf + c * col_len + col_off, 0.0f);
-          std::fill(buf + c * col_len + col_off + nrow, buf + (c + 1) * col_len, 0.0f);
-        }
+        for (std::size_t c = 0; c < cb; c++) std::fill(buf + c * col_len + nrow, buf + (c + 1) * col_len, 0.0f);
         for (std::size_t i = 0; i < nrow; i++) {
           const float* src = plane + i * ncol + c0;
-          for (std::size_t c = 0; c < cb; c++) buf[c * col_len + col_off + i] = src[c];
+          for (std::size_t c = 0; c < cb; c++) buf[c * col_len + i] = src[c];
         }
         const ducc0::vfmav<float> lines(buf, {cb, col_len});
         ducc0::convolve_axis(lines, lines, std::size_t{1}, kernel_y, 1);
         for (std::size_t i = 0; i < nrow; i++) {
           float* row = plane + i * ncol + c0;
-          for (std::size_t c = 0; c < cb; c++) row[c] = buf[c * col_len + col_off + i];
+          for (std::size_t c = 0; c < cb; c++) row[c] = buf[c * col_len + i];
         }
       }
     }
