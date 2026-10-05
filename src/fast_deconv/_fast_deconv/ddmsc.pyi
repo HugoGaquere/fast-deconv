@@ -29,7 +29,6 @@ class DDMSC:
         dirty_nrow: int,
         dirty_ncol: int,
         n_freq: int,
-        fft_padding: float,
         exec_device: int = ...,
     ) -> None:
         ...

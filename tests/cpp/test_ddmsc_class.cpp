@@ -48,7 +48,7 @@ class DdmscClass : public fdtest::BackendTest {
     core::host_span2d<int> map_view(map_pixel_facet_.data(), kSize, kSize);
 
     return ddmsc::Ddmsc(psf_view, xdes_view, mask_view, sigma_view, bias_view, map_view,
-                        /*dirty_nrow=*/kSize, /*dirty_ncol=*/kSize, /*n_freq=*/kFreq, /*fft_padding=*/1.5f);
+                        /*dirty_nrow=*/kSize, /*dirty_ncol=*/kSize, /*n_freq=*/kFreq);
   }
 
  private:

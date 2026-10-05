@@ -5,9 +5,9 @@ namespace fast_deconv::algorithm::ddmsc {
 Ddmsc::Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
              const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
              const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
-             int dirty_ncol, int n_freq, float fft_padding, int exec_device)
-    : ctx_(exec_device, raw_psfs, xdes, mask, scale_sigmas, scale_bias, map_pixel_facet, dirty_nrow, dirty_ncol, n_freq,
-           fft_padding),
+             int dirty_ncol, int n_freq, int exec_device)
+    : ctx_(exec_device, raw_psfs, xdes, mask, scale_sigmas, scale_bias, map_pixel_facet, dirty_nrow, dirty_ncol,
+           n_freq),
       params_{
           .max_iteration = 1000,
           .divergence_factor = 2.0f,
