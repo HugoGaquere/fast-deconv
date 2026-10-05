@@ -31,6 +31,10 @@ target_include_directories(fast_deconv_unit_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+if(FAST_DECONV_WITH_CUDA)
+  target_compile_definitions(fast_deconv_unit_tests PRIVATE FAST_DECONV_WITH_CUDA)
+endif()
+
 include(GoogleTest)
 gtest_discover_tests(fast_deconv_unit_tests PROPERTIES LABELS "UNIT")
 

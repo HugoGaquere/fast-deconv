@@ -57,6 +57,9 @@ TEST(ComputePadding, MatchesCeilFormulaPerAxis)
 // compared element-exact against a host replica of the index mapping.
 // ============================================================================
 
+// CUDA only: the host backend has no FFT route.
+#ifdef FAST_DECONV_WITH_CUDA
+
 namespace {
 
 // Host oracle for pad_ifftshift: input (nx, ny) centered into (px, py) at
@@ -101,6 +104,7 @@ std::vector<float> iota_image(int n, float offset = 0.0f)
 }
 
 }  // namespace
+#endif
 
 class FftLayout : public fdtest::BackendTest {};
 
@@ -227,6 +231,7 @@ TEST_F(FftLayout, PsfConvolutionMatchesPerChannelOracle)
     }
 }
 
+#ifdef FAST_DECONV_WITH_CUDA
 TEST_F(FftLayout, PadIfftshiftMatchesHostOracle)
 {
   // Odd pad deltas on both axes (8-5=3, 9-6=3) exercise the convention where
@@ -310,3 +315,4 @@ TEST_F(FftLayout, PadThenCropRoundTripIsIdentity)
           << "case (" << cs.nx << "x" << cs.ny << " -> " << cs.px << "x" << cs.py << "), flat index " << i;
   }
 }
+#endif
