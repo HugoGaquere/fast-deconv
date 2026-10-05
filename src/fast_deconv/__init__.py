@@ -36,7 +36,6 @@ _DUMP_CTOR_ARGS = (
     "scale_sigmas",
     "scale_bias",
     "map_pixel_facet",
-    "fft_padding",
 )
 
 

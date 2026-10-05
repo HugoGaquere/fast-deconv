@@ -74,9 +74,8 @@ int main(int argc, char** argv)
     }
   }
   if (dir.empty()) {
-    fprintf(stderr,
-            "Usage: %s <dump_dir> [--device=N] [--cycle=N] [--runs=N] [--psf-cache=%s|%s|%s]\n",
-            argv[0], cache_mode_names[0], cache_mode_names[1], cache_mode_names[2]);
+    fprintf(stderr, "Usage: %s <dump_dir> [--device=N] [--cycle=N] [--runs=N] [--psf-cache=%s|%s|%s]\n", argv[0],
+            cache_mode_names[0], cache_mode_names[1], cache_mode_names[2]);
     return 1;
   }
 
@@ -90,7 +89,6 @@ int main(int argc, char** argv)
   auto npy_scale_sigmas = load_init("scale_sigmas");
   auto npy_scale_bias = load_init("scale_bias");
   auto npy_map_pixel = load_init("map_pixel_facet");
-  const float fft_padding = load_init("fft_padding").scalar<float>();
 
   const int n_facet = static_cast<int>(npy_raw_psfs.shape[0]);
   const int n_freq = static_cast<int>(npy_raw_psfs.shape[1]);
@@ -116,8 +114,7 @@ int main(int argc, char** argv)
   for (int run = 0; run < runs; ++run) {
     // A fresh session per run: the auto-mask history accumulates across cycles, so
     // a second replay on the same Ddmsc would not do the same work.
-    ddmsc::Ddmsc imager(raw_psfs, xdes, mask, scale_sigmas, scale_bias, map_pixel_facet, nrow, ncol, n_freq,
-                        fft_padding, device_id);
+    ddmsc::Ddmsc imager(raw_psfs, xdes, mask, scale_sigmas, scale_bias, map_pixel_facet, nrow, ncol, n_freq, device_id);
 
     if (cache_policy) imager.set_psf_cache_policy(*cache_policy);
     if (run == 0) printf("  psf cache: %s\n", cache_mode_names.at(static_cast<int>(imager.psf_cache_policy())));

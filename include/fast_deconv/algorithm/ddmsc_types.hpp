@@ -66,7 +66,6 @@ struct context {
   int dirty_nrow;
   int dirty_ncol;
   int n_freq;
-  float fft_padding;
 
   std::vector<common::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
   std::vector<int> historical_scales;                   // scale of each historical component
@@ -76,7 +75,7 @@ struct context {
   context(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
           const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
           const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
-          int dirty_ncol, int n_freq, float fft_padding)
+          int dirty_ncol, int n_freq)
       : resources(checked_device(exec_device, raw_psfs, dirty_nrow, dirty_ncol)),
         compute_stream(resources.make_ctx()),
         aux_stream(resources.make_ctx()),
@@ -88,8 +87,7 @@ struct context {
         map_pixel_facet(map_pixel_facet),
         dirty_nrow(dirty_nrow),
         dirty_ncol(dirty_ncol),
-        n_freq(n_freq),
-        fft_padding(fft_padding)
+        n_freq(n_freq)
   {
     compute_stream.wait();  // staging copies complete before construction returns
   }
