@@ -105,9 +105,9 @@ void gaussian_convolution_ctx::convolve_separable_(const float* in, float sigma,
   const ducc0::cmav<float, 1> kernel_y(ky.data_handle(), {col_len});
 
   float* dst = out.data_handle();
-  const std::size_t scratch_per_thread = kBatchLines * std::max(row_len, col_len);
+  const std::size_t scratch_size_per_thread = kBatchLines * std::max(row_len, col_len);
   const auto scratch =
-      ctx_.alloc_ptr_async<float>(static_cast<std::size_t>(omp_get_max_threads()) * scratch_per_thread);
+      ctx_.alloc_ptr_async<float>(static_cast<std::size_t>(omp_get_max_threads()) * scratch_size_per_thread);
 
   // Rows: all batch planes are one stack of batch * nrow contiguous rows.
   {
@@ -116,7 +116,7 @@ void gaussian_convolution_ctx::convolve_separable_(const float* in, float sigma,
     const auto n_blocks = static_cast<std::ptrdiff_t>((n_rows + kBatchLines - 1) / kBatchLines);
 #pragma omp parallel
     {
-      float* buf = scratch.get() + static_cast<std::size_t>(omp_get_thread_num()) * scratch_per_thread;
+      float* buf = scratch.get() + static_cast<std::size_t>(omp_get_thread_num()) * scratch_size_per_thread;
 #pragma omp for schedule(static)
       for (std::ptrdiff_t blk = 0; blk < n_blocks; blk++) {
         // This block is stack rows r0 .. r0 + rb - 1; the last block may hold fewer than kBatchLines.
@@ -143,7 +143,7 @@ void gaussian_convolution_ctx::convolve_separable_(const float* in, float sigma,
     const auto n_blocks = static_cast<std::ptrdiff_t>(batch * blocks_per_plane);
 #pragma omp parallel
     {
-      float* buf = scratch.get() + static_cast<std::size_t>(omp_get_thread_num()) * scratch_per_thread;
+      float* buf = scratch.get() + static_cast<std::size_t>(omp_get_thread_num()) * scratch_size_per_thread;
 #pragma omp for schedule(static)
       for (std::ptrdiff_t blk = 0; blk < n_blocks; blk++) {
         // Block blk = plane blk / blocks_per_plane, columns c0 .. c0 + cb - 1 of that plane.
