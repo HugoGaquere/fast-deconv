@@ -4,7 +4,7 @@
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/core/profiler.hpp>
-#include <fast_deconv/linalg/convolution.hpp>
+#include <fast_deconv/linalg/gaussian_convolution.hpp>
 #include <fast_deconv/matrix/argmax.hpp>
 #include <stdexcept>
 
@@ -12,7 +12,7 @@
 
 namespace fast_deconv::scale {
 
-scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::convolution_ctx& conv_ctx,
+scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gaussian_convolution_ctx& conv_ctx,
                                core::span2d<const float> dirty, const std::vector<float>& sigmas,
                                core::host_span1d<float> bias, const std::vector<int>& retired, core::span3d<bool> mask,
                                bool absolute)
@@ -48,15 +48,15 @@ scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::con
   if (!is_retired(0)) is_better(0, matrix::find_peak(exec_ctx, dirty, criterion_for(0)));
 
   // One forward transform, shared by every scale's convolution.
-  auto spectrum = exec_ctx.alloc_mdcontainer_async<linalg::complex_type>(conv_ctx.dims().freq_total());
+  auto spectrum = conv_ctx.make_spectrum();
   if (sigmas.size() > 1)
     conv_ctx.forward(core::span3d<const float>(dirty.data_handle(), 1, dirty.extent(0), dirty.extent(1)), spectrum);
 
   for (int s = 1; s < static_cast<int>(sigmas.size()); s++) {
     if (is_retired(s)) continue;
     // Rebuilt each time: the swap below moves current onto the other buffer.
-    conv_ctx.convolve_spectrum(spectrum, sigmas.at(s),
-                               core::span3d<float>(current.data_handle(), 1, current.extent(0), current.extent(1)));
+    conv_ctx.convolve(spectrum, sigmas.at(s),
+                      core::span3d<float>(current.data_handle(), 1, current.extent(0), current.extent(1)));
     if (is_better(s, matrix::find_peak(exec_ctx, current, criterion_for(s)))) std::swap(current, best);
   }
 

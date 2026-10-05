@@ -6,7 +6,8 @@
 #include <cmath>
 #include <cstddef>
 #include <fast_deconv/core/profiler.hpp>
-#include <fast_deconv/linalg/convolution.hpp>
+#include <fast_deconv/linalg/fft.hpp>
+#include <fast_deconv/linalg/gaussian_convolution.hpp>
 #include <numbers>
 
 #include "fast_deconv/linalg/fft_dims.hpp"
@@ -55,55 +56,73 @@ int gaussian_reach(float sigma)
 }
 }  // namespace
 
-convolution_ctx::convolution_ctx(const core::exec_ctx& ctx, int nrow, int ncol, float padding, int batch)
-    : ctx_(ctx), dims_(nrow, ncol, padding), batch_(batch)
+gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, int batch, int nrow, int ncol,
+                                                   float /*padding*/)
+    : ctx_(ctx), batch_(batch), nrow_(nrow), ncol_(ncol)
 {
 }
 
-// Separable Gaussian through per-thread tiles. Each line (row, then column) is zero-padded on the fly in a
-// small per-thread buffer, convolved there by ducc0::convolve_axis along the contiguous axis, and its image
-// part written to `out`; the padding never exists as a plane. The column pass gathers kTileLines adjacent
-// columns, one 64 B cache line per row, transposed into the buffer. The padding is per scale, from the
-// kernel's reach (gaussian_reach): the fft_padding factor (dims_) no longer applies to this path.
-// On this backend the "spectrum" buffer only carries a copy of the input, (batch, input_nrow, input_ncol).
-void convolution_ctx::forward(core::span3d<const float> input, core::span1d<complex_type> spectrum) const
+gaussian_convolution_ctx::spectrum gaussian_convolution_ctx::make_spectrum() const
+{
+  return ctx_.alloc_mdcontainer_async<float>(batch_, nrow_, ncol_);
+}
+
+// On this backend the spectrum is a copy of the input: convolve() needs no transform, only the data.
+void gaussian_convolution_ctx::forward(core::span3d<const float> input, spectrum& out) const
 {
   FD_PROFILE_FN();
   assert(input.is_exhaustive() && input.extent(0) == batch_);
-  assert(input.extent(1) == dims_.input_nrow && input.extent(2) == dims_.input_ncol);
-  assert(spectrum.size() == static_cast<std::size_t>(batch_) * dims_.freq_total());
+  assert(input.extent(1) == nrow_ && input.extent(2) == ncol_);
+  assert(out.extent(0) == batch_ && out.extent(1) == nrow_ && out.extent(2) == ncol_);
 
   const float* in = input.data_handle();
-  float* copy = reinterpret_cast<float*>(spectrum.data_handle());
-  const std::ptrdiff_t n_rows = static_cast<std::ptrdiff_t>(batch_) * dims_.input_nrow;
-  const std::ptrdiff_t ncol = dims_.input_ncol;
+  float* copy = out.data_handle();
+  const std::ptrdiff_t n_rows = static_cast<std::ptrdiff_t>(batch_) * nrow_;
+  const std::ptrdiff_t ncol = ncol_;
   // Row r of the (batch * nrow, ncol) stack is the ncol floats starting at r * ncol, in both buffers.
 #pragma omp parallel for
   for (std::ptrdiff_t r = 0; r < n_rows; r++) std::copy(in + r * ncol, in + (r + 1) * ncol, copy + r * ncol);
 }
 
-void convolution_ctx::convolve_spectrum(core::span1d<const complex_type> spectrum, float sigma,
-                                        core::span3d<float> out) const
+void gaussian_convolution_ctx::convolve(const spectrum& in, float sigma, core::span3d<float> out) const
 {
   FD_PROFILE_FN();
-  assert(spectrum.size() == static_cast<std::size_t>(batch_) * dims_.freq_total());
-  assert(out.is_exhaustive() && out.extent(0) == batch_);
-  assert(out.extent(1) == dims_.input_nrow && out.extent(2) == dims_.input_ncol);
+  assert(in.extent(0) == batch_ && in.extent(1) == nrow_ && in.extent(2) == ncol_);
+  convolve_tiled_(in.data_handle(), sigma, out);
+}
 
-  const auto nrow = static_cast<std::size_t>(dims_.input_nrow);
-  const auto ncol = static_cast<std::size_t>(dims_.input_ncol);
+// Straight from the input: the copy into a spectrum is only needed to reuse it across sigmas.
+void gaussian_convolution_ctx::convolve(core::span3d<const float> input, float sigma, core::span3d<float> out) const
+{
+  FD_PROFILE_FN();
+  assert(input.is_exhaustive() && input.extent(0) == batch_);
+  assert(input.extent(1) == nrow_ && input.extent(2) == ncol_);
+  convolve_tiled_(input.data_handle(), sigma, out);
+}
+
+// Separable Gaussian through per-thread tiles. Each line (row, then column) is zero-padded on the fly in a
+// small per-thread buffer, convolved there by ducc0::convolve_axis along the contiguous axis, and its image
+// part written to `out`; the padding never exists as a plane. The column pass gathers kTileLines adjacent
+// columns, one 64 B cache line per row, transposed into the buffer. The padding is per sigma, from the
+// kernel's reach (gaussian_reach).
+void gaussian_convolution_ctx::convolve_tiled_(const float* in, float sigma, core::span3d<float> out) const
+{
+  assert(out.is_exhaustive() && out.extent(0) == batch_);
+  assert(out.extent(1) == nrow_ && out.extent(2) == ncol_);
+
+  const auto nrow = static_cast<std::size_t>(nrow_);
+  const auto ncol = static_cast<std::size_t>(ncol_);
   const auto batch = static_cast<std::size_t>(batch_);
   // P - n >= reach: a wrapped tail crosses the zero strip, in either direction, before it can reach the image.
   const int reach = gaussian_reach(sigma);
-  const auto row_len = static_cast<std::size_t>(next_fast_size(dims_.input_ncol + reach));  // padded row length
-  const auto col_len = static_cast<std::size_t>(next_fast_size(dims_.input_nrow + reach));  // padded column length
+  const auto row_len = static_cast<std::size_t>(next_fast_size(ncol_ + reach));  // padded row length
+  const auto col_len = static_cast<std::size_t>(next_fast_size(nrow_ + reach));  // padded column length
 
   const auto kx = gaussian_kernel(ctx_, static_cast<int>(row_len), sigma);
   const auto ky = gaussian_kernel(ctx_, static_cast<int>(col_len), sigma);
   const ducc0::cmav<float, 1> kernel_x(kx.data_handle(), {row_len});
   const ducc0::cmav<float, 1> kernel_y(ky.data_handle(), {col_len});
 
-  const auto* in = reinterpret_cast<const float*>(spectrum.data_handle());
   float* dst = out.data_handle();
   const std::size_t tile = kTileLines * std::max(row_len, col_len);
   const auto scratch = ctx_.alloc_ptr_async<float>(static_cast<std::size_t>(omp_get_max_threads()) * tile);

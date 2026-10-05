@@ -2,8 +2,8 @@
 #include <array>
 #include <cassert>
 #include <fast_deconv/core/profiler.hpp>
-#include <fast_deconv/linalg/convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
+#include <fast_deconv/linalg/gaussian_convolution.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
 #include <fast_deconv/util/cufft_macros.hpp>
@@ -107,7 +107,8 @@ void fftshift_crop_async(const core::exec_ctx& ctx, const fft_dims& dims, const 
       dims.padding_ncol, n_batch);
 }
 
-convolution_ctx::convolution_ctx(const core::exec_ctx& ctx, int nrow, int ncol, float padding, int batch)
+gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, int batch, int nrow, int ncol,
+                                                   float padding)
     : ctx_(ctx),
       dims_(nrow, ncol, padding),
       batch_(batch),
@@ -126,45 +127,57 @@ convolution_ctx::convolution_ctx(const core::exec_ctx& ctx, int nrow, int ncol, 
   make_plan(c2r_, CUFFT_C2R);
 }
 
-convolution_ctx::~convolution_ctx()
+gaussian_convolution_ctx::~gaussian_convolution_ctx()
 {
   CUFFT_CALL(cufftDestroy(r2c_));
   CUFFT_CALL(cufftDestroy(c2r_));
 }
 
-void convolution_ctx::forward_(float* input, complex_type* output) const
+void gaussian_convolution_ctx::forward_(float* input, complex_type* output) const
 {
   CUFFT_CALL(cufftExecR2C(r2c_, input, output));
 }
 
-void convolution_ctx::backward_(complex_type* input, float* output) const
+void gaussian_convolution_ctx::backward_(complex_type* input, float* output) const
 {
   CUFFT_CALL(cufftExecC2R(c2r_, input, output));
 }
 
-void convolution_ctx::forward(core::span3d<const float> input, core::span1d<complex_type> spectrum) const
+gaussian_convolution_ctx::spectrum gaussian_convolution_ctx::make_spectrum() const
+{
+  return ctx_.alloc_mdcontainer_async<complex_type>(static_cast<std::size_t>(batch_) * dims_.freq_total());
+}
+
+void gaussian_convolution_ctx::forward(core::span3d<const float> input, spectrum& out) const
 {
   FD_PROFILE_FN();
   assert(input.is_exhaustive() && input.extent(0) == batch_);
   assert(input.extent(1) == dims_.input_nrow && input.extent(2) == dims_.input_ncol);
-  assert(spectrum.size() == static_cast<std::size_t>(batch_) * dims_.freq_total());
+  assert(out.size() == static_cast<std::size_t>(batch_) * dims_.freq_total());
 
   pad_ifftshift_batched_async(ctx_, dims_, input.data_handle(), padded_.get(), batch_);
-  forward_(padded_.get(), spectrum.data_handle());
+  forward_(padded_.get(), out.data_handle());
 }
 
-void convolution_ctx::convolve_spectrum(core::span1d<const complex_type> spectrum, float sigma,
-                                        core::span3d<float> out) const
+void gaussian_convolution_ctx::convolve(const spectrum& in, float sigma, core::span3d<float> out) const
 {
   FD_PROFILE_FN();
-  assert(spectrum.size() == static_cast<std::size_t>(batch_) * dims_.freq_total());
+  assert(in.size() == static_cast<std::size_t>(batch_) * dims_.freq_total());
   assert(out.is_exhaustive() && out.extent(0) == batch_);
   assert(out.extent(1) == dims_.input_nrow && out.extent(2) == dims_.input_ncol);
 
   // The multiply writes product_, so the caller's spectrum survives for the next sigma.
-  multiply_with_gaussian(ctx_, dims_, batch_, spectrum.data_handle(), product_.get(), sigma);
+  multiply_with_gaussian(ctx_, dims_, batch_, in.data_handle(), product_.get(), sigma);
   backward_(product_.get(), padded_.get());
   fftshift_crop_async(ctx_, dims_, padded_.get(), out.data_handle(), batch_);
+}
+
+void gaussian_convolution_ctx::convolve(core::span3d<const float> input, float sigma, core::span3d<float> out) const
+{
+  FD_PROFILE_FN();
+  auto spectrum = make_spectrum();
+  forward(input, spectrum);
+  convolve(spectrum, sigma, out);
 }
 
 }  // namespace fast_deconv::linalg

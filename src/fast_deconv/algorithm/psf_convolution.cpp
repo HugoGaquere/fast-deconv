@@ -13,8 +13,8 @@ psf_convolution::psf_convolution(const core::exec_ctx& exec_ctx, core::span4d<co
                                  std::vector<float> sigmas, core::span1d<const float> weights, float gamma,
                                  float padding)
     : exec_ctx_(exec_ctx),
-      conv_ctx_(exec_ctx, raw_psfs.extent(2), raw_psfs.extent(3), padding, raw_psfs.extent(1)),
-      mean_conv_ctx_(exec_ctx, raw_psfs.extent(2), raw_psfs.extent(3), padding, 1),
+      conv_ctx_(exec_ctx, raw_psfs.extent(1), raw_psfs.extent(2), raw_psfs.extent(3), padding),
+      mean_conv_ctx_(exec_ctx, 1, raw_psfs.extent(2), raw_psfs.extent(3), padding),
       raw_psfs_(raw_psfs),
       weights_(weights),
       sigmas_(std::move(sigmas)),
@@ -51,10 +51,7 @@ psf_convolution::entry psf_convolution::build(int scale, int facet)
     auto conv = exec_ctx_.alloc_mdcontainer_async<float>(n_freq_, psf_nrow_, psf_ncol_);
     {
       FD_PROFILE_SCOPE("psf_convolution/conv");
-      auto spectrum = exec_ctx_.alloc_mdcontainer_async<linalg::complex_type>(static_cast<std::size_t>(n_freq_) *
-                                                                              conv_ctx_.dims().freq_total());
-      conv_ctx_.forward(raw, spectrum);
-      conv_ctx_.convolve_spectrum(spectrum, sigma, conv);
+      conv_ctx_.convolve(raw, sigma, conv);
     }
     // Only the channel-weighted mean of conv2 is kept. G(sigma) twice is G(sigma * sqrt(2)) (the spectra
     // multiply: H(sigma)^2 = H(sigma * sqrt(2))), and convolution is linear, so
@@ -63,7 +60,9 @@ psf_convolution::entry psf_convolution::build(int scale, int facet)
       FD_PROFILE_SCOPE("psf_convolution/conv2");
       auto raw_mean = exec_ctx_.alloc_mdcontainer_async<float>(psf_nrow_, psf_ncol_);
       linalg::weighted_sum_async(exec_ctx_, raw, weights_, raw_mean);
-      mean_conv_ctx_.convolve_with_gaussian(raw_mean, sigma * std::numbers::sqrt2_v<float>, conv2_mean);
+      mean_conv_ctx_.convolve(core::span3d<const float>(raw_mean.data_handle(), 1, psf_nrow_, psf_ncol_),
+                              sigma * std::numbers::sqrt2_v<float>,
+                              core::span3d<float>(conv2_mean.data_handle(), 1, psf_nrow_, psf_ncol_));
     }
     e.gain = common::compute_gain(exec_ctx_, conv, weights_, gamma_);
     e.conv = conv;

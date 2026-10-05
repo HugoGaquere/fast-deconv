@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <fast_deconv/algorithm/psf_convolution.hpp>
-#include <fast_deconv/linalg/convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
+#include <fast_deconv/linalg/gaussian_convolution.hpp>
 #include <utility>
 #include <vector>
 
@@ -111,26 +111,24 @@ class FftLayout : public fdtest::BackendTest {};
 // Gaussian(0) is 1 everywhere, so a zero-sigma convolution through the padded grid
 // must give the input back: pad, R2C, the 1/padded_total normalization, C2R and
 // crop all have to agree. Running it twice from the same spectrum checks that
-// convolve_spectrum leaves the spectrum intact, as the per-scale search relies on.
+// convolve leaves the spectrum intact, as the per-scale search relies on.
 TEST_F(FftLayout, ZeroSigmaConvolutionIsIdentityAndKeepsTheSpectrum)
 {
   const auto sr = res().make_ctx();
   for (const auto& [rows, cols] : {std::pair{8, 10}, std::pair{9, 15}, std::pair{10, 9}}) {
     for (int batch : {1, 3, 9}) {
       SCOPED_TRACE(::testing::Message() << rows << 'x' << cols << " batch=" << batch);
-      const linalg::convolution_ctx conv(sr, rows, cols, /*padding=*/1.5f, batch);
+      const linalg::gaussian_convolution_ctx conv(sr, batch, rows, cols, /*padding=*/1.5f);
       const auto count = static_cast<std::size_t>(batch) * rows * cols;
-      const auto freq_count = static_cast<std::size_t>(batch) * conv.dims().freq_total();
 
       std::vector<float> input(count);
       for (std::size_t i = 0; i < count; ++i) input[i] = static_cast<float>((i * 17) % 101) / 101.0f - 0.5f;
       fdtest::device_buffer<float> d_input(sr, input), d_output(sr, count);
-      fdtest::device_buffer<linalg::complex_type> d_spectrum(sr, freq_count);
 
-      const core::span1d<linalg::complex_type> spectrum(d_spectrum.get(), freq_count);
+      auto spectrum = conv.make_spectrum();
       conv.forward(core::span3d<const float>(d_input.get(), batch, rows, cols), spectrum);
       for (int rep = 0; rep < 2; ++rep) {
-        conv.convolve_spectrum(spectrum, 0.0f, core::span3d<float>(d_output.get(), batch, rows, cols));
+        conv.convolve(spectrum, 0.0f, core::span3d<float>(d_output.get(), batch, rows, cols));
         const auto actual = d_output.to_host();
         for (std::size_t i = 0; i < count; ++i)
           ASSERT_NEAR(actual[i], input[i], 2e-5f) << "rep=" << rep << " index=" << i;
@@ -139,33 +137,38 @@ TEST_F(FftLayout, ZeroSigmaConvolutionIsIdentityAndKeepsTheSpectrum)
   }
 }
 
-// convolve_spectrum is the linear convolution (zero outside the image) with the band-limited Gaussian,
-// in every plane of a batch, on odd and even, non-square sizes. The padding factor is large enough that
-// both backends are free of wrap-around here: the FFT path pads by the factor, the host tiles by the
+// convolve, from a spectrum and in one shot, is the linear convolution (zero outside the image) with the
+// band-limited Gaussian, in every plane of a batch, on odd and even, non-square sizes. The padding factor is large
+// enough that both backends are free of wrap-around here: the FFT path pads by the factor, the host tiles by the
 // kernel's reach.
 TEST_F(FftLayout, ConvolveSpectrumMatchesLinearConvolutionOracle)
 {
   const auto sr = res().make_ctx();
   for (const auto& [rows, cols] : {std::pair{24, 40}, std::pair{33, 21}}) {
     for (int batch : {1, 3}) {
-      const linalg::convolution_ctx conv(sr, rows, cols, /*padding=*/3.0f, batch);
+      const linalg::gaussian_convolution_ctx conv(sr, batch, rows, cols, /*padding=*/3.0f);
       const auto count = static_cast<std::size_t>(batch) * rows * cols;
-      const auto freq_count = static_cast<std::size_t>(batch) * conv.dims().freq_total();
 
       std::vector<float> input(count);
       for (std::size_t i = 0; i < count; ++i) input[i] = static_cast<float>((i * 37) % 101) / 101.0f - 0.5f;
       fdtest::device_buffer<float> d_input(sr, input), d_output(sr, count);
-      fdtest::device_buffer<linalg::complex_type> d_spectrum(sr, freq_count);
-      const core::span1d<linalg::complex_type> spectrum(d_spectrum.get(), freq_count);
-      conv.forward(core::span3d<const float>(d_input.get(), batch, rows, cols), spectrum);
+      const core::span3d<const float> in(d_input.get(), batch, rows, cols);
+      auto spectrum = conv.make_spectrum();
+      conv.forward(in, spectrum);
 
       for (float sigma : {1.5f, 2.5f, 4.0f}) {
         SCOPED_TRACE(::testing::Message() << rows << 'x' << cols << " batch=" << batch << " sigma=" << sigma);
-        conv.convolve_spectrum(spectrum, sigma, core::span3d<float>(d_output.get(), batch, rows, cols));
-        const auto actual = d_output.to_host();
+        const core::span3d<float> out(d_output.get(), batch, rows, cols);
         const auto taps = fdtest::band_limited_gaussian_taps(sigma, std::max(rows, cols));
         const auto expected = fdtest::separable_linear_convolve(input, batch, rows, cols, taps);
+
+        conv.convolve(spectrum, sigma, out);
+        const auto actual = d_output.to_host();
         for (std::size_t i = 0; i < count; ++i) ASSERT_NEAR(actual[i], expected[i], 2e-5f) << "index=" << i;
+
+        conv.convolve(in, sigma, out);
+        const auto one_shot = d_output.to_host();
+        for (std::size_t i = 0; i < count; ++i) ASSERT_NEAR(one_shot[i], expected[i], 2e-5f) << "one-shot index=" << i;
       }
     }
   }
