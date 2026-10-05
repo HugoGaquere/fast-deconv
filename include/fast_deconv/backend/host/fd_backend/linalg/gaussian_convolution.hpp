@@ -8,7 +8,7 @@ namespace fast_deconv::linalg {
  * Linear (zero outside) convolution of a batch of same-sized images with the band-limited Gaussian
  * H(f) = exp(-2 pi^2 sigma^2 f^2). A caller that blurs one input with several sigmas runs forward()
  * once and convolve() per sigma. On this backend the convolution is separable, rows then columns,
- * through per-thread tiles: no 2D FFT. The lane given at construction must outlive this.
+ * through per-thread line batches: no 2D FFT. The lane given at construction must outlive this.
  */
 class gaussian_convolution_ctx {
  public:
@@ -40,8 +40,8 @@ class gaussian_convolution_ctx {
   int batch() const { return batch_; }
 
  private:
-  // The tiled convolution of (batch, nrow, ncol) floats at @p in into @p out.
-  void convolve_tiled_(const float* in, float sigma, core::span3d<float> out) const;
+  // The separable convolution of (batch, nrow, ncol) floats at @p in into @p out.
+  void convolve_separable_(const float* in, float sigma, core::span3d<float> out) const;
 
   const core::exec_ctx& ctx_;
   int batch_;
