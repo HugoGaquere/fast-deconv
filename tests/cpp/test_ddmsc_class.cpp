@@ -107,7 +107,7 @@ TEST(DdmscContextGuard, RejectsPlaneLargerThanInt32)
   core::host_span1d<float> bias(static_cast<float*>(nullptr), 1);
   core::host_span2d<int> map(static_cast<int*>(nullptr), kSmall, kSmall);
 
-  EXPECT_THROW(ddmsc::context(0, psfs, xdes, mask, sigmas, bias, map, kBig, kBig, 1, 1.5f), std::invalid_argument);
-  EXPECT_THROW(ddmsc::context(0, big_psfs, xdes, mask, sigmas, bias, map, kSmall, kSmall, 1, 1.5f),
+  EXPECT_THROW(ddmsc::context(0, psfs, xdes, mask, sigmas, bias, map, kBig, kBig, 1), std::invalid_argument);
+  EXPECT_THROW(ddmsc::context(0, big_psfs, xdes, mask, sigmas, bias, map, kSmall, kSmall, 1),
                std::invalid_argument);
 }
