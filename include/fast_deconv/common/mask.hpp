@@ -10,16 +10,14 @@ namespace fast_deconv::common {
  * @brief Build a per-scale mask by dilating each scale's peak set by the
  *        FWHM support of the central facet's double-convolved PSF (psf ** g_s ** g_s).
  *
- * Mirrors `psf_convolution::build`, restricted to a single
- * facet and one scale at a time and producing only the doubly-convolved PSF:
- * the per-frequency PSFs are FFT'd in batch once, then per scale the freq
- * arrays are multiplied by G_s^2, IFFT'd batch-back to space, and finally
- * weighted-averaged across channels to obtain the 2D conv2_psf used for the
- * FWHM mask.
+ * Mirrors the conv2 half of `psf_convolution::build`, restricted to a single
+ * facet: the per-frequency PSFs are weighted-averaged across channels into one
+ * plane, transformed once, and per scale convolved with G(sigma_s * sqrt(2))
+ * (= G_s twice) to obtain the 2D conv2_psf used for the FWHM mask.
  *
  * For each scale s:
- *   1. Premask: set mask_per_scale[s, row, col] = true at every (coords[i], col) where scales[i] == s
- *   2. Build conv2_psf[s] = mean_c w[c] * ifft( fft(psf[c]) * G_s^2 )
+ *   1. Premask: set mask_per_scale[s, row, col] = true at every coords[i] where scales[i] == s
+ *   2. Build conv2_psf[s] = G(sigma_s * sqrt(2)) ** (sum_c w[c] psf[c])
  *   3. FWHM bool mask: conv2_psf[s] > 0.5 * max(conv2_psf[s])
  *   4. Dilate mask_per_scale[s] using the FWHM mask as the structuring element
  *   5. Negate (so component-neighborhoods are valid=false), OR external_mask in
