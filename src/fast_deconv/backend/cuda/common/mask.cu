@@ -71,7 +71,6 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
   const int dirty_nrow = mask_per_scale.extent(1);
   const int dirty_ncol = mask_per_scale.extent(2);
   const int dirty_npix = dirty_nrow * dirty_ncol;
-  const int n_freq = central_facet_psfs.extent(0);
   const int psf_nrow = central_facet_psfs.extent(1);
   const int psf_ncol = central_facet_psfs.extent(2);
   const int psf_npix = psf_nrow * psf_ncol;
@@ -97,27 +96,27 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
         d_coords.data_handle(), d_scales.data_handle(), mask_per_scale.data_handle(), n_coords, dirty_ncol, dirty_npix);
   }
 
-  // ---- 2. One batched forward transform of every channel's PSF, reused by every scale ----
+  // ---- 2. Weighted mean of the channels' PSFs, transformed once and reused by every scale ----
+  // Convolution is linear: sum_f w_f (G * psf_f) = G * (sum_f w_f psf_f), so one plane instead of n_freq.
+  auto psf_mean = ctx.alloc_mdcontainer_async<float>(psf_nrow, psf_ncol);
+  linalg::weighted_sum_async(ctx, central_facet_psfs, weights_freq, psf_mean);
   // Wrap-free for every scale's sigma * sqrt(2).
-  const linalg::gaussian_convolution_ctx conv(ctx, /*batch=*/n_freq, psf_nrow, psf_ncol,
+  const linalg::gaussian_convolution_ctx conv(ctx, /*batch=*/1, psf_nrow, psf_ncol,
                                               linalg::max_gaussian_reach(scale_sigmas, std::numbers::sqrt2_v<float>));
   auto spectrum = conv.make_spectrum();
-  conv.forward(central_facet_psfs, spectrum);
+  conv.forward(core::span3d<const float>(psf_mean.data_handle(), 1, psf_nrow, psf_ncol), spectrum);
 
-  // ---- 3. Per-scale: conv2 -> weighted mean -> FWHM -> dilate ----
-  auto conv2_cropped = ctx.alloc_mdcontainer_async<float>(n_freq, psf_nrow, psf_ncol);
+  // ---- 3. Per-scale: conv2 -> FWHM -> dilate ----
   auto conv2_psf = ctx.alloc_mdcontainer_async<float>(psf_nrow, psf_ncol);
   auto fwhm_mask = ctx.alloc_mdcontainer_async<bool>(psf_nrow, psf_ncol);
   auto dilation_out = ctx.alloc_mdcontainer_async<bool>(dirty_nrow, dirty_ncol);
 
   for (int i = 0; i < n_scales; i++) {
-    // 3a. psf ** G_s ** G_s, one convolution with G(sigma * sqrt(2)) since G(sigma)^2 = G(sigma * sqrt(2)).
-    conv.convolve(spectrum, scale_sigmas.at(i) * std::numbers::sqrt2_v<float>, conv2_cropped);
+    // 3a. psf_mean ** G_s ** G_s, one convolution with G(sigma * sqrt(2)) since G(sigma)^2 = G(sigma * sqrt(2)).
+    conv.convolve(spectrum, scale_sigmas.at(i) * std::numbers::sqrt2_v<float>,
+                  core::span3d<float>(conv2_psf.data_handle(), 1, psf_nrow, psf_ncol));
 
-    // 3b. Weighted mean across channels -> 2D conv2_psf
-    linalg::weighted_sum_async(ctx, conv2_cropped, weights_freq, conv2_psf);
-
-    // 3c. Max-reduce conv2_psf (synchronizes the stream)
+    // 3b. Max-reduce conv2_psf (synchronizes the stream)
     auto max_iter =
         thrust::max_element(thrust::cuda::par.on(cuda_stream), thrust::device_pointer_cast(conv2_psf.data_handle()),
                             thrust::device_pointer_cast(conv2_psf.data_handle() + psf_npix));
@@ -126,20 +125,20 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
                                cuda_stream));
     ctx.wait();
 
-    // 3d. FWHM threshold: bool out = (conv2_psf > psf_max / 2)
+    // 3c. FWHM threshold: bool out = (conv2_psf > psf_max / 2)
     kernel::threshold_fwhm_kernel<<<CEIL_DIV(psf_npix, 256), 256, 0, cuda_stream>>>(
         conv2_psf.data_handle(), psf_max * 0.5f, fwhm_mask.data_handle(), psf_npix);
 
-    // 3e. Bounding box of FWHM (synchronous host-side reduction)
+    // 3d. Bounding box of FWHM (synchronous host-side reduction)
     const roi structure_roi = morphology::compute_mask_roi(ctx, fwhm_mask);
 
-    // 3f. Dilate mask_per_scale[i] using FWHM as structuring element
+    // 3e. Dilate mask_per_scale[i] using FWHM as structuring element
     // binary_dilation only writes out[tid]=true on matches; zero the buffer first.
     CHECK_CUDA(cudaMemsetAsync(dilation_out.data_handle(), 0, dirty_npix * sizeof(bool), cuda_stream));
     core::span2d<bool> current_mask = emu::submdspan(mask_per_scale, i);
     morphology::binary_dilation(ctx, current_mask, fwhm_mask, structure_roi, dilation_out);
 
-    // 3g. Copy dilation result back into mask_per_scale[i]
+    // 3f. Copy dilation result back into mask_per_scale[i]
     CHECK_CUDA(cudaMemcpyAsync(current_mask.data_handle(), dilation_out.data_handle(), dirty_npix * sizeof(bool),
                                cudaMemcpyDeviceToDevice, cuda_stream));
   }
