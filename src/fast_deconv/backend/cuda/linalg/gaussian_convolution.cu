@@ -127,12 +127,20 @@ void gaussian_convolution_ctx::convolve(const spectrum& in, float sigma, core::s
   crop_async(ctx_, dims_, padded_.get(), out.data_handle(), batch_);
 }
 
+// The multiply runs in place on product_: no spectrum survives for another sigma.
 void gaussian_convolution_ctx::convolve(core::span3d<const float> input, float sigma, core::span3d<float> out) const
 {
   FD_PROFILE_FN();
-  auto spectrum = make_spectrum();
-  forward(input, spectrum);
-  convolve(spectrum, sigma, out);
+  assert(input.is_exhaustive() && input.extent(0) == batch_);
+  assert(input.extent(1) == dims_.input_nrow && input.extent(2) == dims_.input_ncol);
+  assert(out.is_exhaustive() && out.extent(0) == batch_);
+  assert(out.extent(1) == dims_.input_nrow && out.extent(2) == dims_.input_ncol);
+
+  pad_async(ctx_, dims_, input.data_handle(), padded_.get(), batch_);
+  forward_(padded_.get(), product_.get());
+  multiply_with_gaussian(ctx_, dims_, batch_, product_.get(), product_.get(), sigma);
+  backward_(product_.get(), padded_.get());
+  crop_async(ctx_, dims_, padded_.get(), out.data_handle(), batch_);
 }
 
 }  // namespace fast_deconv::linalg
