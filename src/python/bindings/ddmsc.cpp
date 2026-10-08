@@ -44,9 +44,14 @@ void bind_ddmsc(py::module_& m)
                                const auto n = static_cast<py::ssize_t>(r.peak_coords.size());
                                return py::array_t<float>({n, static_cast<py::ssize_t>(r.n_order)}, r.coeffs.data());
                              })
+      .def_property_readonly("n_components", &ddmsc::ddmsc_result::n_components)
+      .def_readonly("initial_flux", &ddmsc::ddmsc_result::initial_flux)
+      .def_readonly("initial_rms", &ddmsc::ddmsc_result::initial_rms)
       .def_readonly("final_flux", &ddmsc::ddmsc_result::final_flux)
+      .def_readonly("final_rms", &ddmsc::ddmsc_result::final_rms)
       .def_readonly("stop_flux", &ddmsc::ddmsc_result::stop_flux)
       .def_readonly("total_iterations", &ddmsc::ddmsc_result::total_iterations)
+      .def_readonly("outer_iterations", &ddmsc::ddmsc_result::outer_iterations)
       .def_readonly("status", &ddmsc::ddmsc_result::status);
 
   py::class_<ddmsc::Ddmsc>(ddmsc_module, "DDMSC")
