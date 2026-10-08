@@ -164,8 +164,9 @@ int main(int argc, char** argv)
       cycle_ms.at(cycle - first_cycle).push_back(ms);
 
       if (run == 0)
-        printf("cycle %d: %.3f ms, %zu components, %d iterations, flux %.6g (stop %.6g)\n", cycle, ms,
-               result.peak_coords.size(), result.total_iterations, result.final_flux, result.stop_flux);
+        printf("cycle %d: %.3f ms, %zu components, %d outer, flux %.6g -> %.6g (stop %.6g), rms %.6g -> %.6g\n",
+               cycle, ms, result.n_components(), result.outer_iterations, result.initial_flux, result.final_flux,
+               result.stop_flux, result.initial_rms, result.final_rms);
       if (only_cycle >= 0) {
         break;
       }

@@ -113,9 +113,13 @@ struct ddmsc_result {
   std::vector<float> gains;
   std::vector<float> coeffs;  // row-major [component][n_order]
   int n_order = 0;
+  float initial_flux = 0.0f;  // peak flux of the mean residual on entry
+  float initial_rms = 0.0f;   // rms of the mean residual on entry
   float final_flux = 0.0f;   // peak flux of the mean residual after the last outer iteration
+  float final_rms = 0.0f;    // rms of the mean residual after the last outer iteration
   float stop_flux = 0.0f;    // composed stop-flux threshold used for this call (max of the four limits)
   int total_iterations = 0;  // total minor iterations consumed across all outer cycles
+  int outer_iterations = 0;  // scale selections, including the one that found no component
   common::convergence_status status = common::convergence_status::running;  // why the outer loop ended
 
   /// @p capacity is the most components one call can produce.
@@ -125,6 +129,8 @@ struct ddmsc_result {
     scales.reserve(capacity);
     gains.reserve(capacity);
   }
+
+  [[nodiscard]] std::size_t n_components() const { return peak_coords.size(); }
 
   void add_component(common::index2d coords, int scale, float gain)
   {

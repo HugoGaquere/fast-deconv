@@ -265,12 +265,15 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   if (p.psf_cache_policy == psf_cache_mode::eager_all) ws.psf_cache.prefetch_all();
 
   ddmsc_result result{static_cast<std::size_t>(p.max_iteration + p.max_clean_iteration)};
+  result.initial_flux = track_flux;
+  result.initial_rms = track_rms;
   int last_selected_scale = -1;
 
   stream_a.wait();
   while (!deconv_convergence.should_stop()) {
     FD_PROFILE_FRAME();
     FD_PROFILE_SCOPE("outer_iter");
+    result.outer_iterations++;
     FD_LOG_DEBUG("run_ddmsc: outer iter start total_iterations={} track_flux={:.8f} track_rms={:.8f}",
                  deconv_convergence.iteration(), track_flux, track_rms);
     FD_PROFILE_PLOT("peak_flux", track_flux);
@@ -347,6 +350,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
 
   result.set_coeffs(stream_b, core::span2d<const float>{ws.all_coeffs.data_handle(), total_iterations, n_order});
   result.final_flux = track_flux;
+  result.final_rms = track_rms;
   result.stop_flux = stop_flux;
   result.total_iterations = total_iterations;
   result.status = deconv_convergence.status();
