@@ -66,3 +66,7 @@ CMakeUserPresets.json
 # Mutagen sync
 mutagen.yml
 mutagen.yml.lock
+
+# Local Tracy captures and notes
+*.tracy
+todo.md

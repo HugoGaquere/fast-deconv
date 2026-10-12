@@ -1,8 +1,8 @@
 #pragma once
 
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
-#include <fast_deconv/core/resources.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
+#include <fast_deconv/core/memory_types.hpp>
 
 namespace fast_deconv::algorithm::ddmsc {
 
@@ -19,8 +19,8 @@ namespace fast_deconv::algorithm::ddmsc {
  *
  * @return ddmsc_result with all extracted components, final flux, and iteration count.
  */
-ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::device_span3d<float>& dirty,
-                              const core::device_span3d<float>& jones_norm,
-                              const core::device_vect<float>& weights_freq);
+ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>& dirty,
+                              const core::span3d<const float>& jones_norm,
+                              const core::span1d<const float>& weights_freq);
 
 }  // namespace fast_deconv::algorithm::ddmsc

@@ -1,61 +1,58 @@
 find_package(GTest CONFIG REQUIRED)
 
-# Mark GTest targets as SYSTEM so clangd doesn't surface their warnings.
-foreach(_tp_target IN ITEMS GTest::gtest GTest::gtest_main GTest::gmock GTest::gmock_main)
-  if(TARGET ${_tp_target})
-    set_target_properties(${_tp_target} PROPERTIES SYSTEM TRUE)
-  endif()
-endforeach()
-
 #-------------------------------------------------------------------#
-# Unit tests (label UNIT): fast, one module per file, CPU oracles.
+# Unit tests (label UNIT). The sources are backend-agnostic: every
+# transfer goes through core::exec_ctx's neutral primitives, so the
+# same files compile for both backends.
 #-------------------------------------------------------------------#
 add_executable(fast_deconv_unit_tests
-  test_main.cpp
   test_convergence.cpp
-  test_resources.cu
-  test_utils.cu
-  test_fft.cu
-  test_linalg.cu
-  test_pseudo_inverse.cu
-  test_matrix.cu
-  test_morphology.cu
-  test_mask.cu
-  test_tiled_argmax.cu
-  test_clean.cu
-  test_gain.cu
-  test_multi_frequency.cu
-  test_scales.cu
-  test_ddmsc_class.cu
+  test_large_index.cpp
+  test_resources.cpp
+  test_fft.cpp
+  test_linalg.cpp
+  test_pseudo_inverse.cpp
+  test_matrix.cpp
+  test_morphology.cpp
+  test_mask.cpp
+  test_tiled_argmax.cpp
+  test_clean.cpp
+  test_gain.cpp
+  test_multi_frequency.cpp
+  test_ddmsc_class.cpp
 )
 
 target_link_libraries(fast_deconv_unit_tests PRIVATE
   fast_deconv
-  GTest::gtest
+  GTest::gtest_main
 )
 
 target_include_directories(fast_deconv_unit_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+if(FAST_DECONV_WITH_CUDA)
+  target_compile_definitions(fast_deconv_unit_tests PRIVATE FAST_DECONV_WITH_CUDA)
+endif()
+
 include(GoogleTest)
 gtest_discover_tests(fast_deconv_unit_tests PROPERTIES LABELS "UNIT")
 
 #-------------------------------------------------------------------#
 # Non-regression test (label NONREG): full synthetic DDMSC run whose
-# scalar metrics are compared against a committed JSON baseline.
+# scalar metrics are compared against a committed JSON baseline. Backend
+# agnostic like the unit tests; both backends share the one baseline.
 # Regenerate the baseline with FAST_DECONV_UPDATE_BASELINE=1.
 #-------------------------------------------------------------------#
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(fast_deconv_nonreg_tests
-  test_main.cpp
-  test_ddmsc_nonreg.cu
+  test_ddmsc_nonreg.cpp
 )
 
 target_link_libraries(fast_deconv_nonreg_tests PRIVATE
   fast_deconv
-  GTest::gtest
+  GTest::gtest_main
   nlohmann_json::nlohmann_json
 )
 

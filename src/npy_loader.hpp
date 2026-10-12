@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -13,11 +14,12 @@ namespace npy {
 /**
  * Simple .npy file loader for test data.
  * Supports: float32, int32, bool, complex64
+ * The data is read fully into memory at load time.
  */
 struct NpyArray {
   std::vector<size_t> shape;
   std::string dtype;
-  std::vector<std::byte> data;
+  std::unique_ptr<std::byte[]> data;
   bool fortran_order = false;
 
   size_t size() const
@@ -39,13 +41,13 @@ struct NpyArray {
   template <typename T>
   T* as()
   {
-    return reinterpret_cast<T*>(data.data());
+    return reinterpret_cast<T*>(data.get());
   }
 
   template <typename T>
   const T* as() const
   {
-    return reinterpret_cast<const T*>(data.data());
+    return reinterpret_cast<const T*>(data.get());
   }
 
   float* as_float32() { return as<float>(); }
@@ -165,9 +167,12 @@ inline NpyArray load_npy(const std::string& path)
   }
 
   // Read data
-  size_t total_bytes = arr.size() * elem_size;
-  arr.data.resize(total_bytes);
-  file.read(reinterpret_cast<char*>(arr.data.data()), total_bytes);
+  const size_t total_bytes = arr.size() * elem_size;
+  arr.data = std::make_unique_for_overwrite<std::byte[]>(total_bytes);
+  file.read(reinterpret_cast<char*>(arr.data.get()), static_cast<std::streamsize>(total_bytes));
+  if (!file) {
+    throw std::runtime_error("Truncated .npy file: " + path);
+  }
 
   return arr;
 }

@@ -1,72 +1,34 @@
 #pragma once
-#include <fast_deconv/algorithm/ddmsc_types.hpp>
-#include <fast_deconv/core/resources.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
+#include <fast_deconv/core/memory_types.hpp>
+#include <fast_deconv/linalg/fft.hpp>
+#include <fast_deconv/linalg/gaussian_convolution.hpp>
+#include <fast_deconv/matrix/argmax.hpp>
+#include <limits>
+#include <vector>
 
 namespace fast_deconv::scale {
 
-/**
- * @brief   Build Gaussian scale kernels in half-complex frequency space.
- * @details Each thread computes one (row, col) frequency bin for all scales.
- *
- * @param[in]  sigmas          Gaussian sigmas, device, shape (n_scales,).
- * @param[in]  scale_ncol_full Full spatial column count (used for frequency normalization).
- * @param[out] scales          Output kernels, device,
- *                             shape (n_scales, scale_nrow, scale_ncol_half).
- */
-void make_gaussian_kernels_async(const core::stream_resources& stream_res, core::device_vect<float> sigmas,
-                                 int scale_ncol_full, core::device_span3d<float> scales);
+/// Selected scale, its residual plane and that plane's peak.
+struct scale_result {
+  int scale;                            ///< index of the selected scale
+  core::cont2d<float> scaled_residual;  ///< residual convolved with the selected scale
+  matrix::peak peak;                    ///< peak value and flat index within scaled_residual
+  matrix::peak_criterion criterion;     ///< how scaled_residual was ranked; mask points into the caller's mask
+};
 
-/**
- * @brief   Convolve a 2D mean residual image with Gaussian scale kernels.
- * @details Internally: pad+ifftshift -> R2C (once) -> per-scale: multiply -> C2R -> fftshift+crop.
- *
- * @param[in]  dirty            Mean residual, device, shape (nrow, ncol).
- * @param[in]  scales           Gaussian kernels in freq domain, device,
- *                              shape (n_scales, freq_nrow, freq_ncol).
- * @param[out] out_scaled_dirty Per-scale convolved output, device,
- *                              shape (n_scales, nrow, ncol).
- */
-void convolve_with_scales(const algorithm::ddmsc::scale_convolve_ctx& ctx, core::device_span2d<float> dirty,
-                          core::device_span3d<float> scales, core::device_span3d<float> out_scaled_dirty);
+scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gaussian_convolution_ctx& conv_ctx,
+                               core::span2d<const float> dirty, const std::vector<float>& sigmas,
+                               core::host_span1d<float> bias, const std::vector<int>& retired, core::span3d<bool> mask,
+                               bool absolute);
 
-/**
- * @brief   Finds the best scale and peak pixel via biased peak-finding.
- *
- * @param[in,out] scaled_dirty   Per-scale residuals, device, shape (n_scales, nrow, ncol).
- * @param[in]     bias           Per-scale bias, host, shape (n_scales,).
- * @param[in]     retired_scales Scale indices to exclude from selection.
- * @return Unbiased peak value and pixel coordinates of the selected scale.
- */
-int scale_selection(const core::stream_resources& stream_res, core::device_span3d<float> scaled_dirty,
-                    core::host_vect<float> bias, const std::vector<int>& retired_scales);
-
-/**
- * @brief   Convolve PSFs with Gaussian(sigma) for all facets, producing
- *          single-convolved and double-convolved (weighted mean) PSFs.
- * @details For each facet, batches over n_freq frequency channels:
- *          - conv_psf   = PSF * G(sigma)      [per-channel]
- *          - conv2_mean = wmean(PSF * G^2)    [weighted mean over channels]
- *
- *          Scale 0 (sigma == 0) is handled as a fast path: conv_psf is a
- *          device-to-device copy and conv2_mean is a weighted channel mean.
- *
- * @param[in]  psfs           PSFs, device, shape (n_facets, n_freq, psf_h, psf_w).
- * @param[in]  d_sigma        Gaussian sigma for this scale, device, shape (1,).
- * @param[in]  scale_idx      Index of the selected scale (0 = delta / no convolution).
- * @param[in]  weights        Per-channel weights, device, shape (n_freq,).
- * @param[out] out_conv_psf   Single-convolved PSFs, device,
- *                            shape (n_facets, n_freq, psf_h, psf_w), pre-allocated.
- * @param[out] out_conv2_mean Double-convolved weighted-mean PSFs, device,
- *                            shape (n_facets, psf_h, psf_w), pre-allocated.
- */
-void convolve_psfs_with_scale_async(const algorithm::ddmsc::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
-                                    core::device_vect<float> d_sigma, int scale_idx, core::device_vect<float> weights,
-                                    core::device_span4d<float> out_conv_psf, core::device_span3d<float> out_conv2_mean);
-
-void convolve_psfs_with_scales_async(const algorithm::ddmsc::psf_convolve_ctx& ctx, core::device_span4d<float> psfs,
-                                     core::device_vect<float> d_sigmas, core::device_vect<float> weights,
-                                     core::device_span5d<float> out_conv_psf,
-                                     core::device_span4d<float> out_conv2_mean);
+inline scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gaussian_convolution_ctx& conv_ctx,
+                                      core::span2d<const float> dirty, const std::vector<float>& sigmas,
+                                      core::host_span1d<float> bias, const std::vector<int>& retired,
+                                      core::span2d<bool> mask, bool absolute)
+{
+  return select_best_scale(exec_ctx, conv_ctx, dirty, sigmas, bias, retired,
+                           core::span3d<bool>(mask.data_handle(), 1, mask.extent(0), mask.extent(1)), absolute);
+}
 
 }  // namespace fast_deconv::scale
