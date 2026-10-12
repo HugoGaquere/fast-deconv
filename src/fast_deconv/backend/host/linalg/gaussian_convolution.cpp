@@ -32,9 +32,37 @@ core::mdcontainer<float, 1> gaussian_kernel(const core::exec_ctx& ctx, int n, fl
              1.0f / static_cast<float>(n), 1);
   return kernel;
 }
-// Lines per batch in the separable Gaussian: 16 floats are one 64 B cache line, so the column gather reads whole
-// lines, and a multiple of ducc0's SIMD bunch (4 lines on SSE2, 8 on AVX2).
+
+// Lines per batch in both passes: two of ducc0's 8-line FFT bunches, and one 64 B cache line per strip row in the
+// column pass. Measured on Zen 3 (docs/2026-10-05, section 7, and the 2026-10-09 sweep).
 constexpr std::size_t kBatchLines = 16;
+
+// Zero-padded convolution of the h x w block at src (row stride ld) through buf: the block goes to the top-left of
+// a padded_h x padded_w buffer, the rest is zeroed, the buffer is convolved along axis, and the h x w part is
+// copied to dst (row stride ld). src and dst may be the same block.
+void convolve_block(const float* src, float* dst, std::size_t ld, std::size_t h, std::size_t w, std::size_t padded_h,
+                    std::size_t padded_w, std::size_t axis, const ducc0::cmav<float, 1>& kernel, float* buf)
+{
+  // A full column strip: kBatchLines floats per row and no row padding. The constant width lets the compiler
+  // inline each row copy as two 32 B loads and stores instead of a memmove call per 64 B row.
+  const bool full_strip = w == kBatchLines && padded_w == kBatchLines;
+  if (full_strip) {
+    for (std::size_t i = 0; i < h; i++) std::copy_n(src + i * ld, kBatchLines, buf + i * kBatchLines);
+  } else {
+    for (std::size_t i = 0; i < h; i++) {
+      std::copy_n(src + i * ld, w, buf + i * padded_w);
+      std::fill(buf + i * padded_w + w, buf + (i + 1) * padded_w, 0.0f);
+    }
+  }
+  std::fill(buf + h * padded_w, buf + padded_h * padded_w, 0.0f);
+  const ducc0::vfmav<float> lines(buf, {padded_h, padded_w});
+  ducc0::convolve_axis(lines, lines, axis, kernel, 1);
+  if (full_strip) {
+    for (std::size_t i = 0; i < h; i++) std::copy_n(buf + i * kBatchLines, kBatchLines, dst + i * ld);
+  } else {
+    for (std::size_t i = 0; i < h; i++) std::copy_n(buf + i * padded_w, w, dst + i * ld);
+  }
+}
 
 }  // namespace
 
@@ -82,10 +110,12 @@ void gaussian_convolution_ctx::convolve(core::span3d<const float> input, float s
 }
 
 // Separable Gaussian through per-thread line batches. Each line (row, then column) is zero-padded on the fly in a
-// small per-thread buffer, convolved there by ducc0::convolve_axis along the contiguous axis, and its image
-// part written to `out`; the padding never exists as a plane. The column pass gathers kBatchLines adjacent
-// columns, one 64 B cache line per row, transposed into the buffer. The padding is per sigma, from the
-// kernel's reach, capped at gap_: beyond it the lines wrap as the CUDA backend's P = next_fast_size(n + gap).
+// small per-thread buffer, convolved there by ducc0::convolve_axis, and its image part written to `out`; the
+// padding never exists as a plane. The row pass convolves along the buffer's contiguous axis. The column pass
+// copies kBatchLines adjacent columns, one 64 B cache line per row, into a buffer with the strip's own layout and
+// convolves along its axis 0: one column per SIMD lane, as ducc0's FFT bunches want, so nothing is transposed.
+// The padding is per sigma, from the kernel's reach, capped at gap_: beyond it the lines wrap as the CUDA
+// backend's P = next_fast_size(n + gap).
 void gaussian_convolution_ctx::convolve_separable_(const float* in, float sigma, core::span3d<float> out) const
 {
   assert(out.is_exhaustive() && out.extent(0) == batch_);
@@ -119,24 +149,14 @@ void gaussian_convolution_ctx::convolve_separable_(const float* in, float sigma,
       float* buf = scratch.get() + static_cast<std::size_t>(omp_get_thread_num()) * scratch_size_per_thread;
 #pragma omp for schedule(static)
       for (std::ptrdiff_t blk = 0; blk < n_blocks; blk++) {
-        // This block is stack rows r0 .. r0 + rb - 1; the last block may hold fewer than kBatchLines.
+        // Stack rows r0 .. r0 + rb - 1, each zero-padded to row_len; the last block may hold fewer than kBatchLines.
         const std::size_t r0 = static_cast<std::size_t>(blk) * kBatchLines;
         const std::size_t rb = std::min(kBatchLines, n_rows - r0);
-        // Batch line r = stack row r0 + r, then zeros up to row_len.
-        for (std::size_t r = 0; r < rb; r++) {
-          float* line = buf + r * row_len;
-          std::copy(in + (r0 + r) * ncol, in + (r0 + r + 1) * ncol, line);
-          std::fill(line + ncol, line + row_len, 0.0f);
-        }
-        const ducc0::vfmav<float> lines(buf, {rb, row_len});
-        ducc0::convolve_axis(lines, lines, std::size_t{1}, kernel_x, 1);
-        // Crop: the first ncol floats of each batch line go back to their stack row in `out`.
-        for (std::size_t r = 0; r < rb; r++)
-          std::copy(buf + r * row_len, buf + r * row_len + ncol, dst + (r0 + r) * ncol);
+        convolve_block(in + r0 * ncol, dst + r0 * ncol, ncol, rb, ncol, rb, row_len, 1, kernel_x, buf);
       }
     }
   }
-  // Columns, in place in `out`: kBatchLines adjacent columns of one plane at a time, gathered transposed.
+  // Columns, in place in `out`: kBatchLines adjacent columns of one plane at a time, each zero-padded to col_len.
   {
     FD_PROFILE_SCOPE("convolve/cols");
     const std::size_t blocks_per_plane = (ncol + kBatchLines - 1) / kBatchLines;
@@ -150,20 +170,7 @@ void gaussian_convolution_ctx::convolve_separable_(const float* in, float sigma,
         float* plane = dst + (static_cast<std::size_t>(blk) / blocks_per_plane) * nrow * ncol;
         const std::size_t c0 = (static_cast<std::size_t>(blk) % blocks_per_plane) * kBatchLines;
         const std::size_t cb = std::min(kBatchLines, ncol - c0);
-        // Batch line c holds column c0 + c: image rows in [0, nrow), zeros in [nrow, col_len).
-        for (std::size_t c = 0; c < cb; c++) std::fill(buf + c * col_len + nrow, buf + (c + 1) * col_len, 0.0f);
-        // Gather (transpose): pixel (i, c0 + c) goes to batch line c, slot i.
-        for (std::size_t i = 0; i < nrow; i++) {
-          const float* src = plane + i * ncol + c0;
-          for (std::size_t c = 0; c < cb; c++) buf[c * col_len + i] = src[c];
-        }
-        const ducc0::vfmav<float> lines(buf, {cb, col_len});
-        ducc0::convolve_axis(lines, lines, std::size_t{1}, kernel_y, 1);
-        // Scatter (the same transpose back): batch line c, slot i returns to pixel (i, c0 + c).
-        for (std::size_t i = 0; i < nrow; i++) {
-          float* row = plane + i * ncol + c0;
-          for (std::size_t c = 0; c < cb; c++) row[c] = buf[c * col_len + i];
-        }
+        convolve_block(plane + c0, plane + c0, ncol, nrow, cb, col_len, cb, 0, kernel_y, buf);
       }
     }
   }
