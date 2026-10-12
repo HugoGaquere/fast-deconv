@@ -12,6 +12,7 @@
 #   ./scripts/build.sh host            # host, Release
 #   ./scripts/build.sh all             # both backends, Release
 #   ./scripts/build.sh cuda Debug      # cuda, Debug
+#   ./scripts/build.sh host RelWithDebInfo  # host, Release code + debug info (MAQAO)
 #   ./scripts/build.sh --flamegraph    # cuda, Release, with perf-friendly stacks
 #   ./scripts/build.sh --profile       # cuda, Release, NVTX ranges compiled in
 #   ./scripts/build.sh host --profile  # host, Release, Tracy client linked in
@@ -28,6 +29,11 @@
 # info and an exported symbol table (-rdynamic). The client is fetched at
 # configure time and must match the server version: v0.14.1, which is what
 # `dnf install tracy` provides.
+#
+# RelWithDebInfo is for MAQAO and other sampling profilers: it builds the same
+# -O3 code as Release with -g on top, so hot loops map back to source lines.
+# CMake's own RelWithDebInfo default is -O2, hence the override below.
+# Dependencies stay on their Release packages; only this project changes.
 
 set -euo pipefail
 
@@ -46,14 +52,14 @@ for arg in "$@"; do
   case "$arg" in
     cuda|host)     BACKENDS=("$arg") ;;
     all)           BACKENDS=(cuda host) ;;
-    Release|Debug) BUILD_TYPE="$arg" ;;
+    Release|Debug|RelWithDebInfo) BUILD_TYPE="$arg" ;;
     -t|--test)     RUN_TESTS=1 ;;
     -t=*|--test=*) RUN_TESTS=1; CTEST_FILTER="${arg#*=}" ;;
     -p|--python)   BUILD_PYTHON=1 ;;
     -f|--flamegraph) BUILD_FLAMEGRAPH=1 ;;
     --profile)     BUILD_PROFILE=1 ;;
-    -h|--help)     sed -n '3,30p' "${BASH_SOURCE[0]}"; exit 0 ;;
-    *) echo "usage: $0 [cuda|host|all] [Release|Debug] [-t[=REGEX]] [--flamegraph] [--profile] [--python]" >&2; exit 2 ;;
+    -h|--help)     sed -n '3,36p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "usage: $0 [cuda|host|all] [Release|Debug|RelWithDebInfo] [-t[=REGEX]] [--flamegraph] [--profile] [--python]" >&2; exit 2 ;;
   esac
 done
 
@@ -92,6 +98,13 @@ if [ "$BUILD_PROFILE" -eq 1 ]; then
   CMAKE_WITH_PROFILER=ON
 fi
 
+# Build dependencies as Release so the cached packages are reused; `&:` scopes
+# the RelWithDebInfo setting to this project, which also names the build tree.
+CONAN_BUILD_TYPE_ARGS=(-s "build_type=${BUILD_TYPE}")
+if [ "$BUILD_TYPE" = RelWithDebInfo ]; then
+  CONAN_BUILD_TYPE_ARGS=(-s build_type=Release -s "&:build_type=RelWithDebInfo")
+fi
+
 CONAN_WITH_TESTS=False
 CONAN_SKIP_TESTS=True
 if [ "$RUN_TESTS" -eq 1 ]; then
@@ -120,7 +133,7 @@ for BACKEND in "${BACKENDS[@]}"; do
   conan install . -o "fast-deconv/*:backend=${BACKEND}" \
         -o "fast-deconv/*:with_tests=${CONAN_WITH_TESTS}" \
         -c "tools.build:skip_test=${CONAN_SKIP_TESTS}" \
-        --build=missing -s "build_type=${BUILD_TYPE}"
+        --build=missing "${CONAN_BUILD_TYPE_ARGS[@]}"
 
   banner "cmake configure (${BACKEND})"
   # FAST_DECONV_BACKEND is passed explicitly: conan puts its cache_variables in
@@ -133,6 +146,8 @@ for BACKEND in "${BACKENDS[@]}"; do
         -DFAST_DECONV_BUILD_TOOLS=ON \
         -DFAST_DECONV_WITH_PROFILER="$CMAKE_WITH_PROFILER" \
         -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+        -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
+        -DCMAKE_CUDA_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
         -DCMAKE_CXX_FLAGS="$CMAKE_CXX_PROFILE_FLAGS" \
         -DCMAKE_CUDA_FLAGS="$CMAKE_CUDA_PROFILE_FLAGS" \
         -DCMAKE_EXE_LINKER_FLAGS="$CMAKE_EXE_PROFILE_LINK_FLAGS"

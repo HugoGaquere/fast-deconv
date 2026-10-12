@@ -212,7 +212,7 @@ if(FAST_DECONV_WITH_CUDA)
 endif()
 
 target_compile_definitions(fast_deconv PUBLIC
-  $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO>
+  $<$<CONFIG:Release,RelWithDebInfo>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO>
   $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
 )
 
@@ -225,7 +225,7 @@ target_compile_options(fast_deconv PUBLIC
 function(fast_deconv_cuda_options target)
   target_compile_options(${target} PRIVATE
     "$<$<COMPILE_LANGUAGE:CUDA>:--compiler-options=-Wall>"
-    "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Release>>:--restrict;--generate-line-info>"
+    "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Release,RelWithDebInfo>>:--restrict;--generate-line-info>"
   )
 endfunction()
 fast_deconv_cuda_options(fast_deconv)
