@@ -1,0 +1,138 @@
+#pragma once
+#include <cassert>
+#include <concepts>
+#include <cstdint>
+#include <fast_deconv/core/memory_types.hpp>
+#include <memory>
+#include <stdexcept>
+
+// Resolved by the include path: CMake puts backend/${FAST_DECONV_BACKEND}
+#include <fd_backend/core/exec_impl.hpp>
+
+namespace fast_deconv::core {
+
+struct ctx_deleter {
+  const exec_ctx_impl* ctx{};
+  void operator()(void* ptr) const noexcept
+  {
+    if (ctx != nullptr) ctx->free_bytes(ptr);
+  }
+};
+
+template <typename T>
+using owned_ptr = std::unique_ptr<T[], ctx_deleter>;
+
+/// One execution lane: where work runs and where its memory comes from.
+/// The backend supplies the handles and the primitives below it; the
+/// typed layer here is written once and shared by every backend.
+class exec_ctx : public exec_ctx_impl {
+ public:
+  using impl = exec_ctx_impl;
+
+  template <typename T = void>
+  T* alloc_async(std::uint64_t n) const
+  {
+    if (n == 0) throw std::invalid_argument("alloc_async: n must be > 0");
+
+    std::uint64_t num_bytes;
+    if constexpr (std::is_void_v<T>)
+      num_bytes = n;
+    else
+      num_bytes = n * sizeof(T);
+
+    return static_cast<T*>(this->alloc_bytes(num_bytes));
+  }
+
+  template <typename T, typename... Exts>
+    requires((std::convertible_to<Exts, std::int32_t> && ...) && sizeof...(Exts) > 0)
+  mdcontainer<T, sizeof...(Exts)> alloc_mdcontainer_async(Exts... exts) const
+  {
+    const std::uint64_t n = (std::uint64_t{1} * ... * static_cast<std::uint64_t>(exts));
+    T* ptr = alloc_async<T>(n);
+    return mdcontainer<T, sizeof...(Exts)>(ptr, owned_ptr<T>(ptr, ctx_deleter{this}), emu::exts_flag, exts...);
+  }
+
+  template <typename T, typename Extents>
+    requires requires { Extents::rank(); }
+  mdcontainer<T, Extents::rank()> alloc_mdcontainer_async(const Extents& exts) const
+  {
+    std::uint64_t n = 1;
+    for (std::size_t i = 0; i < Extents::rank(); ++i) n *= static_cast<std::uint64_t>(exts.extent(i));
+    T* ptr = alloc_async<T>(n);
+    return mdcontainer<T, Extents::rank()>(ptr, owned_ptr<T>(ptr, ctx_deleter{this}), dims<Extents::rank()>(exts));
+  }
+
+  template <typename T>
+  owned_ptr<T> alloc_ptr_async(std::uint64_t n) const
+  {
+    return {alloc_async<T>(n), ctx_deleter{this}};
+  }
+
+  /// Copies @p src into @p dst; either side may be host or backend memory.
+  /// Async, so wait() before reading @p dst.
+  template <typename Dst, typename Src>
+  void copy(const Dst& dst, const Src& src) const
+  {
+    if (dst.size() != src.size()) throw std::invalid_argument("copy: dst and src sizes differ");
+    copy(dst.data_handle(), src.data_handle(), src.size());
+  }
+
+  /// Raw-pointer copy() of @p n elements.
+  template <typename T>
+  void copy(T* dst, const T* src, std::uint64_t n) const
+  {
+    this->copy_bytes(dst, src, n * sizeof(T));
+  }
+
+  /// Backend-resident view of caller-owned host memory: a copy on a device
+  /// backend, a borrow when backend memory already is host memory. @p src must
+  /// outlive the returned view.
+  template <typename HostSpan>
+  auto stage(const HostSpan& src) const
+  {
+    using T = typename HostSpan::element_type;
+    constexpr std::size_t rank = HostSpan::rank();
+
+    if constexpr (impl::host_resident) {
+      return mdcontainer<T, rank>(src.data_handle(), emu::capsule{}, src.extents());
+    } else {
+      // The staging buffer is written, so it is allocated mutable; the view handed
+      // back keeps the caller's element type, so a const input stays unwritable.
+      auto owner = alloc_mdcontainer_async<std::remove_const_t<T>>(src.extents());
+      copy(owner, src);
+      return mdcontainer<T, rank>(owner.data_handle(), std::move(owner).capsule(), src.extents());
+    }
+  }
+
+  /// Undoes stage() for an in/out buffer: a copy() where stage() copied,
+  /// nothing where it borrowed and the kernels already wrote @p host_dst.
+  template <typename Span>
+  void unstage(const Span& src, typename Span::element_type* host_dst) const
+  {
+    if constexpr (impl::host_resident)
+      assert(src.data_handle() == host_dst && "unstage() target is not the buffer stage() borrowed");
+    else
+      copy(host_dst, src.data_handle(), src.size());
+  }
+
+  template <typename T>
+  void free_async(T* ptr) const
+  {
+    this->free_bytes(ptr);
+  }
+
+ private:
+  friend class exec_resources;
+  explicit exec_ctx(const exec_resources_impl& res) : impl(res) {}
+};
+
+/// Owns whatever the backend executes on and allocates from
+class exec_resources : public exec_resources_impl {
+ public:
+  using impl = exec_resources_impl;
+  using impl::impl;
+
+  exec_ctx make_ctx() const { return exec_ctx(*this); }
+};
+
+}  // namespace fast_deconv::core

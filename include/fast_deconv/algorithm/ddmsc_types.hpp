@@ -1,76 +1,22 @@
 #pragma once
 
-#include <cufft.h>
-
 #include <algorithm>
-#include <fast_deconv/core/resources.hpp>
-#include <fast_deconv/core/span_types.hpp>
+#include <cstddef>
+#include <fast_deconv/algorithm/psf_convolution.hpp>
+#include <fast_deconv/algorithm/scales.hpp>
+#include <fast_deconv/common/convergence.hpp>
+#include <fast_deconv/common/region.hpp>
+#include <fast_deconv/core/exec_ctx.hpp>
+#include <fast_deconv/core/memory_types.hpp>
+#include <fast_deconv/linalg/fft.hpp>
 #include <optional>
+#include <stdexcept>
+#include <utility>
 #include <vector>
-
-#include "fast_deconv/linalg/fft.hpp"
 
 namespace fast_deconv::algorithm::ddmsc {
 
 static constexpr int MAX_SPECTRAL_ORDER = 4;
-
-/// Image-domain scale convolution context: one R2C plan (batch=1, forward FFT
-/// of mean dirty) + one batched C2R plan (batch=backward_batch_size).
-/// `convolve_with_scales` loops over chunks of `backward_batch_size` scales
-/// per IFFT call — pick the batch size to balance throughput vs. memory.
-struct scale_convolve_ctx : public linalg::convolve_ctx {
-  /// Build plans for a single forward FFT and a batched backward FFT of
-  /// @p backward_batch_size at a time. The plans run on @p stream_res;
-  /// `convolve_with_scales` must drive the convolution on that same stream
-  /// and ensure (n_scales - 1) is a multiple of @p backward_batch_size. The
-  /// owner must bind_work_area() before the first convolution.
-  scale_convolve_ctx(const core::stream_resources& stream_res, int nrow, int ncol, int backward_batch_size,
-                     float padding)
-      : linalg::convolve_ctx(stream_res, nrow, ncol, /*forward_batch=*/1,
-                             /*backward_batch=*/std::max(1, backward_batch_size), /*n_backward_plans=*/1, padding)
-  {
-  }
-
-  cufftHandle& plan_forward() { return plans_forward[0]; }
-  cufftHandle plan_forward() const { return plans_forward[0]; }
-  cufftHandle& plan_backward() { return plans_backward[0]; }
-  cufftHandle plan_backward() const { return plans_backward[0]; }
-};
-
-/// PSF-domain convolution context: batched R2C + two C2R plans (one for conv, one for conv^2).
-struct psf_convolve_ctx : public linalg::convolve_ctx {
-  /// Build batched plans (over n_freq channels). The plans run on
-  /// @p stream_res; the owner must bind_work_area() before the first use.
-  psf_convolve_ctx(const core::stream_resources& stream_res, int psf_nrow, int psf_ncol, int nch, float padding)
-      : linalg::convolve_ctx(stream_res, psf_nrow, psf_ncol, /*forward_batch=*/nch, /*backward_batch=*/nch,
-                             /*n_backward_plans=*/2, padding)
-  {
-  }
-
-  cufftHandle& plan_forward() { return plans_forward[0]; }
-  cufftHandle plan_forward() const { return plans_forward[0]; }
-  cufftHandle& plan_backward() { return plans_backward[0]; }
-  cufftHandle plan_backward() const { return plans_backward[0]; }
-  cufftHandle& plan_backward_2() { return plans_backward[1]; }
-  cufftHandle plan_backward_2() const { return plans_backward[1]; }
-};
-
-struct workspace {
-  scale_convolve_ctx scale_convolve;
-  psf_convolve_ctx psf_convolve;
-  core::device_span4d<float> raw_psfs;
-  core::device_span2d<float> xdes;
-  core::device_span2d<bool> mask;
-  core::device_vect<float> scale_sigmas;
-  core::host_vect<float> scale_bias;
-  core::host_span2d<int> map_pixel_facet;
-
-  // Component history accumulated across run_ddmsc_cycles calls — feeds the
-  // auto-mask so neighborhoods of every previously-cleaned component
-  // (across all major cycles) stay valid.
-  std::vector<std::pair<int, int>> historical_peak_coords;
-  std::vector<int> historical_scales;
-};
 
 enum class auto_mask_threshold_type {
   peak_value,
@@ -102,60 +48,48 @@ struct params {
   bool force_enable_auto_mask;                    // engage masking unconditionally, bypassing thresholds
   std::optional<float> auto_mask_peak_threshold;  // engage when residual peak <= this (absolute flux)
   std::optional<float> auto_mask_rms_threshold;   // engage when residual peak <= this * running RMS
+
+  // conv-PSF cache params
+  psf_cache_mode psf_cache_policy;  // when the convolved PSFs get built
 };
 
 struct context {
-  core::resources exec_resources;
-  // Named streams owned by the context. compute_stream drives the whole
-  // convolution path: both FFT contexts bind their plans to it, and
-  // run_ddmsc_cycles uses it as its main stream so the plans execute on the
-  // same stream as the surrounding kernels. aux_stream carries the clean-loop
-  // per-channel fit/subtract path that overlaps with the main stream.
-  core::stream_resources compute_stream;
-  core::stream_resources aux_stream;
-  // Single cuFFT workspace shared by both FFT contexts: their plans all run
-  // sequentially on compute_stream, so one buffer of the max required size
-  // suffices. Owned here, freed on compute_stream at destruction.
-  void* fft_work_area = nullptr;
-  ddmsc::workspace workspace;
+  core::exec_resources resources;
+  core::exec_ctx compute_stream;  // scale search, PSF builds and the mean-residual clean loop
+  core::exec_ctx aux_stream;      // clean-loop fit/subtract, overlapping compute_stream
+  core::cont4d<float> raw_psfs;
+  core::cont2d<float> xdes;
+  core::cont2d<bool> mask;
+  std::vector<float> scale_sigmas;
+  core::host_span1d<float> scale_bias;
+  core::host_span2d<int> map_pixel_facet;
+  int dirty_nrow;
+  int dirty_ncol;
+  int n_freq;
 
-  /**
-   * @brief Build the GPU memory pool and streams, the cuFFT plans for scale
-   *        and PSF convolutions (bound to compute_stream and sharing one work
-   *        area), and bind the user-provided spans into the workspace.
-   *
-   * Spans are stored as views — the caller must keep their backing memory alive
-   * for the lifetime of the context.
-   */
-  context(int exec_device, const core::device_span4d<float>& raw_psfs, const core::device_span2d<float>& xdes,
-          const core::device_span2d<bool>& mask, const core::device_vect<float>& scale_sigmas,
-          const core::host_vect<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
-          int dirty_ncol, int n_freq, float fft_padding)
-      : exec_resources(exec_device),
-        compute_stream(exec_resources.make_stream()),
-        aux_stream(exec_resources.make_stream()),
-        workspace{
-            .scale_convolve =
-                scale_convolve_ctx(compute_stream, dirty_nrow, dirty_ncol,
-                                   /*backward_batch_size=*/static_cast<int>(scale_sigmas.size()) - 1, fft_padding),
-            .psf_convolve =
-                psf_convolve_ctx(compute_stream, raw_psfs.extent(2), raw_psfs.extent(3), n_freq, fft_padding),
-            .raw_psfs = raw_psfs,
-            .xdes = xdes,
-            .mask = mask,
-            .scale_sigmas = scale_sigmas,
-            .scale_bias = scale_bias,
-            .map_pixel_facet = map_pixel_facet,
-        }
+  std::vector<common::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
+  std::vector<int> historical_scales;                   // scale of each historical component
+
+  /// Validates the dimensions, stages the run-constant inputs and copies the scale sigmas.
+  /// The host spans must outlive the context: the host backend borrows them.
+  context(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
+          const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
+          const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
+          int dirty_ncol, int n_freq)
+      : resources(checked_device(exec_device, raw_psfs, dirty_nrow, dirty_ncol)),
+        compute_stream(resources.make_ctx()),
+        aux_stream(resources.make_ctx()),
+        raw_psfs(compute_stream.stage(raw_psfs)),
+        xdes(compute_stream.stage(xdes)),
+        mask(compute_stream.stage(mask)),
+        scale_sigmas(scale_sigmas.data_handle(), scale_sigmas.data_handle() + scale_sigmas.size()),
+        scale_bias(scale_bias),
+        map_pixel_facet(map_pixel_facet),
+        dirty_nrow(dirty_nrow),
+        dirty_ncol(dirty_ncol),
+        n_freq(n_freq)
   {
-    const size_t shared_work_size =
-        std::max(workspace.scale_convolve.required_work_size(), workspace.psf_convolve.required_work_size());
-    if (shared_work_size > 0) {
-      fft_work_area = compute_stream.alloc_async(shared_work_size);
-      compute_stream.sync();
-    }
-    workspace.scale_convolve.bind_work_area(fft_work_area);
-    workspace.psf_convolve.bind_work_area(fft_work_area);
+    compute_stream.wait();  // staging copies complete before construction returns
   }
 
   context(const context&) = delete;
@@ -163,51 +97,60 @@ struct context {
   context(context&&) = delete;
   context& operator=(context&&) = delete;
 
-  ~context()
+ private:
+  // Runs before resources: an oversized plane throws before any device allocation.
+  static int checked_device(int exec_device, const core::host_span4d<float>& raw_psfs, int dirty_nrow, int dirty_ncol)
   {
-    // Stream-ordered after the last plan execution; compute_stream's own
-    // destructor synchronizes before the stream is destroyed.
-    if (fft_work_area != nullptr) compute_stream.free_async(fft_work_area);
+    core::check_plane_fits_int32(dirty_nrow, dirty_ncol, "dirty");
+    core::check_plane_fits_int32(raw_psfs.extent(2), raw_psfs.extent(3), "psf");
+    return exec_device;
   }
 };
 
 struct ddmsc_result {
-  std::vector<std::pair<int, int>> peak_coords;
+  std::vector<std::pair<int, int>> peak_coords;  // pair, not index2d: bound read-only to Python as list[tuple]
   std::vector<int> scales;
   std::vector<float> gains;
-  std::vector<std::vector<float>> coeffs;
+  std::vector<float> coeffs;  // row-major [component][n_order]
+  int n_order = 0;
+  float initial_flux = 0.0f;  // peak flux of the mean residual on entry
+  float initial_rms = 0.0f;   // rms of the mean residual on entry
   float final_flux = 0.0f;   // peak flux of the mean residual after the last outer iteration
+  float final_rms = 0.0f;    // rms of the mean residual after the last outer iteration
   float stop_flux = 0.0f;    // composed stop-flux threshold used for this call (max of the four limits)
   int total_iterations = 0;  // total minor iterations consumed across all outer cycles
+  int outer_iterations = 0;  // scale selections, including the one that found no component
+  common::convergence_status status = common::convergence_status::running;  // why the outer loop ended
 
-  ddmsc_result(int max_iter, int coeff_order)
+  /// @p capacity is the most components one call can produce.
+  explicit ddmsc_result(std::size_t capacity)
   {
-    peak_coords.reserve(max_iter);
-    scales.reserve(max_iter);
-    gains.reserve(max_iter);
-    coeffs.reserve(max_iter);
-  };
+    peak_coords.reserve(capacity);
+    scales.reserve(capacity);
+    gains.reserve(capacity);
+  }
 
-  void add_component(std::pair<int, int> coords, int scale, float gain)
+  [[nodiscard]] std::size_t n_components() const { return peak_coords.size(); }
+
+  void add_component(common::index2d coords, int scale, float gain)
   {
-    peak_coords.push_back(coords);
+    peak_coords.emplace_back(coords.row, coords.col);
     scales.push_back(scale);
     gains.push_back(gain);
-  };
+  }
 
-  void add_coeffs_from_device(core::device_span2d<float> d_coeffs)
+  /// One row per component; @p ctx must be the stream @p rows was written on.
+  void set_coeffs(const core::exec_ctx& ctx, core::span2d<const float> rows)
   {
-    const std::size_t n_components = d_coeffs.extent(0);
-    const std::size_t n_order = d_coeffs.extent(1);
-    const std::size_t n_total = n_components * n_order;
+    if (static_cast<std::size_t>(rows.extent(0)) != peak_coords.size())
+      throw std::logic_error("ddmsc_result: coefficient rows do not match the components added");
 
-    std::vector<float> h_buffer(n_total);
-    cudaMemcpy(h_buffer.data(), d_coeffs.data_handle(), n_total * sizeof(float), cudaMemcpyDeviceToHost);
-
-    for (std::size_t i = 0; i < n_components; ++i) {
-      coeffs.emplace_back(h_buffer.begin() + i * n_order, h_buffer.begin() + (i + 1) * n_order);
-    }
-  };
+    n_order = static_cast<int>(rows.extent(1));
+    coeffs.resize(rows.size());
+    if (coeffs.empty()) return;
+    ctx.copy(coeffs.data(), rows.data_handle(), coeffs.size());
+    ctx.wait();
+  }
 };
 
 }  // namespace fast_deconv::algorithm::ddmsc
