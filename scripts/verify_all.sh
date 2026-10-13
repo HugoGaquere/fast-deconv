@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Sequential verification pipeline for fast-deconv:
+# Sequential verification pipeline for fast-deconv, over both backends
+# (cuda, host):
 #   format -> clang-tidy -> configure/compile -> tests -> device memcheck
 #   -> host sanitizers
 #
@@ -33,6 +34,8 @@ for arg in "$@"; do
   esac
 done
 
+BACKENDS=(cuda host)
+
 banner() { printf '\n\033[1;34m========== %s ==========\033[0m\n' "$1"; }
 note()   { printf '\033[0;36m  %s\033[0m\n' "$1"; }
 
@@ -64,19 +67,31 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-banner "2/7  configure Release cuda (conan install + cmake preset)"
-conan install . -o "fast-deconv/*:backend=cuda" --build=missing -s build_type=Release
-cmake --preset conan-release-backend_cuda
+banner "2/7  configure Release (conan install + cmake preset, per backend)"
+for b in "${BACKENDS[@]}"; do
+  conan install . -o "fast-deconv/*:backend=$b" -c tools.build:skip_test=False --build=missing -s build_type=Release
+  cmake --preset "conan-release-backend_$b"
+done
 
 # ---------------------------------------------------------------------------
 banner "3/7  clang-tidy (advisory — does not abort the pipeline)"
 if ((RUN_TIDY)) && ((${#CHANGED_TU[@]})); then
-  # -p points at the compile database produced by the configure step above.
-  if clang-tidy -p build/release-backend_cuda --quiet "${CHANGED_TU[@]}"; then
-    note "clang-tidy clean"
-  else
-    note "clang-tidy reported findings (see above) — pipeline continues"
-  fi
+  # Host backend sources only exist in the host compile database; everything
+  # else (shared + cuda backend) is tidied once against the cuda one.
+  for b in "${BACKENDS[@]}"; do
+    if [[ $b == host ]]; then
+      mapfile -t tus < <(printf '%s\n' "${CHANGED_TU[@]}" | grep '/backend/host/' || true)
+    else
+      mapfile -t tus < <(printf '%s\n' "${CHANGED_TU[@]}" | grep -v '/backend/host/' || true)
+    fi
+    ((${#tus[@]})) || continue
+    banner "clang-tidy ($b)"
+    if clang-tidy -p "build/release-backend_$b" --quiet "${tus[@]}"; then
+      note "clang-tidy clean"
+    else
+      note "clang-tidy reported findings (see above) — pipeline continues"
+    fi
+  done
 elif ((RUN_TIDY)); then
   note "no changed translation units to tidy"
 else
@@ -85,15 +100,21 @@ fi
 
 # ---------------------------------------------------------------------------
 banner "4/7  compile Release"
-cmake --build build/release-backend_cuda
+for b in "${BACKENDS[@]}"; do
+  banner "compile Release ($b)"
+  cmake --build "build/release-backend_$b"
+done
 
 # ---------------------------------------------------------------------------
 banner "5/7  tests (UNIT + NONREG)"
-ctest --test-dir build/release-backend_cuda -L UNIT   --output-on-failure
-ctest --test-dir build/release-backend_cuda -L NONREG --output-on-failure
+for b in "${BACKENDS[@]}"; do
+  banner "tests ($b)"
+  ctest --test-dir "build/release-backend_$b" -L UNIT   --no-tests=error --output-on-failure
+  ctest --test-dir "build/release-backend_$b" -L NONREG --no-tests=error --output-on-failure
+done
 
 # ---------------------------------------------------------------------------
-banner "6/7  compute-sanitizer (device memcheck + racecheck on the UNIT binary)"
+banner "6/7  compute-sanitizer (cuda only: memcheck + racecheck on the UNIT binary)"
 if ((RUN_MEMCHECK)); then
   if ! command -v compute-sanitizer >/dev/null; then
     note "compute-sanitizer not on PATH — skipping"
@@ -132,19 +153,27 @@ fi
 # ---------------------------------------------------------------------------
 banner "7/7  host sanitizers (ASan + UBSan on UNIT)"
 if ((RUN_SANITIZE)); then
-  # Always turn the option back off, even if the build or run fails.
+  # Always turn the option back off on every tree that was turned on, even if
+  # the build or run fails.
+  SANITIZED=()
   reset_sanitize() {
-    banner "reset FAST_DECONV_SANITIZE=OFF"
-    cmake --preset conan-debug-backend_cuda -DFAST_DECONV_SANITIZE=OFF >/dev/null
+    for b in "${SANITIZED[@]}"; do
+      banner "reset FAST_DECONV_SANITIZE=OFF ($b)"
+      cmake --preset "conan-debug-backend_$b" -DFAST_DECONV_SANITIZE=OFF >/dev/null
+    done
   }
   trap reset_sanitize EXIT
 
-  conan install . -o "fast-deconv/*:backend=cuda" --build=missing -s build_type=Debug
-  cmake --preset conan-debug-backend_cuda -DFAST_DECONV_SANITIZE=ON
-  cmake --build build/debug-backend_cuda
-  ASAN_OPTIONS=protect_shadow_gap=0 \
-    LSAN_OPTIONS="suppressions=$REPO/tests/lsan_suppressions.txt" \
-    ctest --test-dir build/debug-backend_cuda -L UNIT --output-on-failure
+  for b in "${BACKENDS[@]}"; do
+    banner "host sanitizers ($b)"
+    conan install . -o "fast-deconv/*:backend=$b" -c tools.build:skip_test=False --build=missing -s build_type=Debug
+    SANITIZED+=("$b")
+    cmake --preset "conan-debug-backend_$b" -DFAST_DECONV_SANITIZE=ON
+    cmake --build "build/debug-backend_$b"
+    ASAN_OPTIONS=protect_shadow_gap=0 \
+      LSAN_OPTIONS="suppressions=$REPO/tests/lsan_suppressions.txt" \
+      ctest --test-dir "build/debug-backend_$b" -L UNIT --no-tests=error --output-on-failure
+  done
 else
   note "skipped (--no-sanitize)"
 fi
