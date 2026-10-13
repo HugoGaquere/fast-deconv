@@ -1,0 +1,83 @@
+# fast-deconv: Apptainer port of the Dockerfile (same two stages, only the last one ships).
+#
+# Build from the repo root (Apptainer >= 1.2 for --build-arg):
+#   apptainer build --fakeroot fast-deconv.sif fast-deconv.def                             # cuda, every GPU generation
+#   apptainer build --fakeroot --build-arg CUDA_ARCHS=80 fast-deconv.sif fast-deconv.def   # cuda, one GPU (faster build)
+#   apptainer build --fakeroot --build-arg BACKEND=host fast-deconv.sif fast-deconv.def    # host (CPU only)
+#
+# Run:
+#   apptainer exec --nv fast-deconv.sif python3 -c "import fast_deconv"
+
+# =====================================================================================
+# Build stage
+# =====================================================================================
+Bootstrap: docker
+From: ubuntu:24.04
+Stage: build
+
+%arguments
+    BACKEND=cuda
+    CUDA_VER=13-2
+    CUDA_ARCHS=75-real;80-real;90-real;100-real;120
+
+# No .dockerignore equivalent: copy only what the wheel build reads.
+%files
+    CMakeLists.txt /src/CMakeLists.txt
+    conanfile.py /src/conanfile.py
+    pyproject.toml /src/pyproject.toml
+    README.md /src/README.md
+    LICENSE /src/LICENSE
+    cmake /src/cmake
+    include /src/include
+    src /src/src
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    # ---- System packages ----
+    apt-get update && apt-get install -y --no-install-recommends \
+          build-essential ca-certificates git python3-dev python3-venv wget
+    if [ "{{ BACKEND }}" = cuda ]; then
+        wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+        dpkg -i cuda-keyring_1.1-1_all.deb && rm cuda-keyring_1.1-1_all.deb
+        apt-get update && apt-get install -y --no-install-recommends \
+              cuda-nvcc-{{ CUDA_VER }} libcublas-dev-{{ CUDA_VER }} libcufft-dev-{{ CUDA_VER }} cuda-nvtx-{{ CUDA_VER }} \
+              libcusolver-dev-{{ CUDA_VER }} libcusparse-dev-{{ CUDA_VER }}
+    fi
+    rm -rf /var/lib/apt/lists/*
+
+    export PATH=/opt/venv/bin:/usr/local/cuda/bin:$PATH
+
+    # ---- Conan ----
+    python3 -m venv /opt/venv && pip install --no-cache-dir conan
+    conan profile detect
+    conan remote add cosmic https://gitlab.obspm.fr/api/v4/projects/5071/packages/conan
+    printf 'tools.build:skip_test=True\ntools.graph:skip_test=True\n' >> "$(conan config home)/global.conf"
+
+    # ---- Wheel ----
+    # ponytail: host build bakes ducc0's -march=native for the build CPU; build on the target node
+    cd /src
+    CUDAARCHS="{{ CUDA_ARCHS }}" SKBUILD_CMAKE_DEFINE="FAST_DECONV_BACKEND={{ BACKEND }}" \
+        pip wheel . --no-deps -w /dist
+
+# =====================================================================================
+# Runtime stage
+# =====================================================================================
+Bootstrap: docker
+From: ubuntu:24.04
+Stage: runtime
+
+%files from build
+    /dist /dist
+
+%post
+    apt-get update && apt-get install -y --no-install-recommends python3-venv
+    rm -rf /var/lib/apt/lists/*
+    python3 -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir /dist/*.whl
+    rm -rf /dist
+
+%environment
+    export PATH=/opt/venv/bin:$PATH
+
+%runscript
+    exec python3 "$@"
