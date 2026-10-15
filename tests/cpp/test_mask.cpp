@@ -81,7 +81,7 @@ TEST_F(BuildAutoMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
   // Peak coords are the only "near component" pixels → mask=0 there, 1 elsewhere.
   std::vector<uint8_t> expected(static_cast<std::size_t>(n_scales) * plane, 1);
   for (std::size_t k = 0; k < coords.size(); ++k)
-    expected.at(scales.at(k) * plane + coords.at(k).row * ncol + coords.at(k).col) = 0;
+    expected.at(core::narrow<std::size_t>(scales.at(k) * plane + coords.at(k).row * ncol + coords.at(k).col)) = 0;
 
   for (std::size_t i = 0; i < expected.size(); ++i)
     EXPECT_EQ(h_mask.at(i), expected.at(i)) << "Mismatch at flat idx " << i;

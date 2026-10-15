@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <fast_deconv/algorithm/psf_convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <fast_deconv/linalg/gaussian_convolution.hpp>
@@ -23,9 +24,9 @@ using fdtest::flat;
 
 namespace {
 
-bool is_7_smooth(int n)
+bool is_7_smooth(std::int64_t n)
 {
-  for (int r : {2, 3, 5, 7})
+  for (std::int64_t r : {2, 3, 5, 7})
     while (n % r == 0) n /= r;
   return n == 1;
 }
@@ -34,11 +35,11 @@ bool is_7_smooth(int n)
 
 TEST(NextFastSize, ReturnsSmallest7SmoothAtLeastN)
 {
-  for (int n = 1; n <= 2000; ++n) {
-    const int m = linalg::next_fast_size(n);
+  for (std::int64_t n = 1; n <= 2000; ++n) {
+    const std::int64_t m = linalg::next_fast_size(n);
     ASSERT_GE(m, n);
     ASSERT_TRUE(is_7_smooth(m)) << "next_fast_size(" << n << ") = " << m << " is not 7-smooth";
-    for (int k = n; k < m; ++k)
+    for (std::int64_t k = n; k < m; ++k)
       ASSERT_FALSE(is_7_smooth(k)) << "next_fast_size(" << n << ") = " << m << " but " << k << " is 7-smooth";
   }
 }
@@ -244,8 +245,8 @@ TEST_F(FftLayout, ConvolveWithShortGapWrapsLikeCircularOracle)
                 core::span3d<float>(d_output.get(), batch, rows, cols));
   const auto actual = d_output.to_host();
 
-  const auto hr = fdtest::circular_gaussian_kernel(sigma, linalg::next_fast_size(rows + gap));
-  const auto hc = fdtest::circular_gaussian_kernel(sigma, linalg::next_fast_size(cols + gap));
+  const auto hr = fdtest::circular_gaussian_kernel(sigma, core::narrow<int>(linalg::next_fast_size(rows + gap)));
+  const auto hc = fdtest::circular_gaussian_kernel(sigma, core::narrow<int>(linalg::next_fast_size(cols + gap)));
   const auto expected = fdtest::separable_circular_convolve(input, batch, rows, cols, hr, hc);
   for (std::size_t i = 0; i < count; ++i) ASSERT_NEAR(actual[i], expected[i], 2e-5f) << "index=" << i;
 

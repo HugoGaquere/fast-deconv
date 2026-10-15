@@ -21,33 +21,32 @@
 
 namespace fast_deconv::kernel {
 
-__global__ void build_mask_per_scale_kernel(const int2* coords, const int* scales, bool* out_mask_per_scale,
-                                            int n_coords, int inner_scale_stride, int inter_scales_stride)
+__global__ void build_mask_per_scale_kernel(const std::int64_t* offsets, bool* out_mask_per_scale,
+                                            std::int64_t n_coords)
 {
-  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const std::int64_t tid = std::int64_t{blockIdx.x} * blockDim.x + threadIdx.x;
   if (tid >= n_coords) return;
-  const std::int64_t idx = static_cast<std::int64_t>(scales[tid]) * inter_scales_stride +
-                           coords[tid].x * inner_scale_stride + coords[tid].y;  // int2: x is the row, y the column
-  out_mask_per_scale[idx] = true;
+  out_mask_per_scale[offsets[tid]] = true;
 }
 
 // Threshold a real image into a bool FWHM mask.
-__global__ void threshold_fwhm_kernel(const float* data, float threshold, bool* out, int n)
+__global__ void threshold_fwhm_kernel(const float* data, float threshold, bool* out, std::int64_t n)
 {
-  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const std::int64_t tid = std::int64_t{blockIdx.x} * blockDim.x + threadIdx.x;
   if (tid >= n) return;
   out[tid] = data[tid] > threshold;
 }
 
 // Negate each scale slice of mask_per_scale and OR external_mask into it.
 // After this pass: mask_per_scale[s, i] = (!is_near_component[s, i]) || external_mask[i].
-__global__ void finalize_mask_kernel(bool* mask_per_scale, const bool* external_mask, int scale_npix, int n_scales)
+__global__ void finalize_mask_kernel(bool* mask_per_scale, const bool* external_mask, std::int64_t scale_npix,
+                                     std::int64_t n_scales)
 {
-  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const std::int64_t tid = std::int64_t{blockIdx.x} * blockDim.x + threadIdx.x;
   if (tid >= scale_npix) return;
   const bool ext = external_mask[tid];
   bool* slice = mask_per_scale;
-  for (int s = 0; s < n_scales; s++, slice += scale_npix) slice[tid] = (!slice[tid]) || ext;
+  for (std::int64_t s = 0; s < n_scales; s++, slice += scale_npix) slice[tid] = (!slice[tid]) || ext;
 }
 
 }  // namespace fast_deconv::kernel
@@ -66,34 +65,33 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
   assert(weights_freq.extent(0) == central_facet_psfs.extent(0));
   assert(external_mask.extent(0) == mask_per_scale.extent(1) && external_mask.extent(1) == mask_per_scale.extent(2));
 
-  const int n_coords = static_cast<int>(coords.size());
-  const int n_scales = mask_per_scale.extent(0);
-  const int dirty_nrow = mask_per_scale.extent(1);
-  const int dirty_ncol = mask_per_scale.extent(2);
-  const int dirty_npix = dirty_nrow * dirty_ncol;
-  const int psf_nrow = central_facet_psfs.extent(1);
-  const int psf_ncol = central_facet_psfs.extent(2);
-  const int psf_npix = psf_nrow * psf_ncol;
+  const std::int64_t n_scales = mask_per_scale.extent(0);
+  const std::int64_t dirty_nrow = mask_per_scale.extent(1);
+  const std::int64_t dirty_ncol = mask_per_scale.extent(2);
+  const std::int64_t dirty_npix = mask_per_scale.mapping().stride(0);
+  const std::int64_t psf_nrow = central_facet_psfs.extent(1);
+  const std::int64_t psf_ncol = central_facet_psfs.extent(2);
+  const std::int64_t psf_npix = central_facet_psfs.mapping().stride(0);
   const cudaStream_t cuda_stream = ctx.cuda_stream;
 
   // ---- 1. Zero the output and stamp peaks ----
   CHECK_CUDA(cudaMemsetAsync(mask_per_scale.data_handle(), 0, mask_per_scale.size() * sizeof(bool), cuda_stream));
 
-  if (n_coords > 0) {
-    std::vector<int2> h_coords(n_coords);
-    for (int i = 0; i < n_coords; i++) h_coords[i] = make_int2(coords[i].row, coords[i].col);
+  if (!coords.empty()) {
+    // Flat offsets on the host: the kernel then needs neither the coordinates nor the strides.
+    std::vector<std::int64_t> h_offsets;
+    h_offsets.reserve(coords.size());
+    for (std::size_t i = 0; i < coords.size(); i++)
+      h_offsets.push_back(mask_per_scale.mapping()(scales.at(i), coords.at(i).row, coords.at(i).col));
 
-    auto d_coords = ctx.alloc_mdcontainer_async<int2>(n_coords);
-    auto d_scales = ctx.alloc_mdcontainer_async<int>(n_coords);
-    CHECK_CUDA(cudaMemcpyAsync(d_coords.data_handle(), h_coords.data(), n_coords * sizeof(int2), cudaMemcpyHostToDevice,
-                               cuda_stream));
-    CHECK_CUDA(cudaMemcpyAsync(d_scales.data_handle(), scales.data(), n_coords * sizeof(int), cudaMemcpyHostToDevice,
-                               cuda_stream));
+    const std::int64_t n_coords = std::ssize(h_offsets);
+    auto d_offsets = ctx.alloc_mdcontainer_async<std::int64_t>(n_coords);
+    ctx.copy(d_offsets.data_handle(), h_offsets.data(), n_coords);
 
     dim3 block(256);
-    dim3 grid(CEIL_DIV(n_coords, block.x));
-    kernel::build_mask_per_scale_kernel<<<grid, block, 0, cuda_stream>>>(
-        d_coords.data_handle(), d_scales.data_handle(), mask_per_scale.data_handle(), n_coords, dirty_ncol, dirty_npix);
+    dim3 grid(core::narrow<unsigned>(core::ceil_div(n_coords, block.x)));
+    kernel::build_mask_per_scale_kernel<<<grid, block, 0, cuda_stream>>>(d_offsets.data_handle(),
+                                                                         mask_per_scale.data_handle(), n_coords);
   }
 
   // ---- 2. Weighted mean of the channels' PSFs, transformed once and reused by every scale ----
@@ -111,9 +109,9 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
   auto fwhm_mask = ctx.alloc_mdcontainer_async<bool>(psf_nrow, psf_ncol);
   auto dilation_out = ctx.alloc_mdcontainer_async<bool>(dirty_nrow, dirty_ncol);
 
-  for (int i = 0; i < n_scales; i++) {
+  for (std::int64_t i = 0; i < n_scales; i++) {
     // 3a. psf_mean ** G_s ** G_s, one convolution with G(sigma * sqrt(2)) since G(sigma)^2 = G(sigma * sqrt(2)).
-    conv.convolve(spectrum, scale_sigmas.at(i) * std::numbers::sqrt2_v<float>,
+    conv.convolve(spectrum, scale_sigmas.at(core::narrow<std::size_t>(i)) * std::numbers::sqrt2_v<float>,
                   core::span3d<float>(conv2_psf.data_handle(), 1, psf_nrow, psf_ncol));
 
     // 3b. Max-reduce conv2_psf (synchronizes the stream)
@@ -126,7 +124,7 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
     ctx.wait();
 
     // 3c. FWHM threshold: bool out = (conv2_psf > psf_max / 2)
-    kernel::threshold_fwhm_kernel<<<CEIL_DIV(psf_npix, 256), 256, 0, cuda_stream>>>(
+    kernel::threshold_fwhm_kernel<<<core::narrow<unsigned>(core::ceil_div(psf_npix, 256)), 256, 0, cuda_stream>>>(
         conv2_psf.data_handle(), psf_max * 0.5f, fwhm_mask.data_handle(), psf_npix);
 
     // 3d. Bounding box of FWHM (synchronous host-side reduction)
@@ -134,17 +132,16 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
 
     // 3e. Dilate mask_per_scale[i] using FWHM as structuring element
     // binary_dilation only writes out[tid]=true on matches; zero the buffer first.
-    CHECK_CUDA(cudaMemsetAsync(dilation_out.data_handle(), 0, dirty_npix * sizeof(bool), cuda_stream));
+    CHECK_CUDA(cudaMemsetAsync(dilation_out.data_handle(), 0, dilation_out.size() * sizeof(bool), cuda_stream));
     core::span2d<bool> current_mask = emu::submdspan(mask_per_scale, i);
     morphology::binary_dilation(ctx, current_mask, fwhm_mask, structure_roi, dilation_out);
 
     // 3f. Copy dilation result back into mask_per_scale[i]
-    CHECK_CUDA(cudaMemcpyAsync(current_mask.data_handle(), dilation_out.data_handle(), dirty_npix * sizeof(bool),
-                               cudaMemcpyDeviceToDevice, cuda_stream));
+    ctx.copy(current_mask.data_handle(), dilation_out.data_handle(), dirty_npix);
   }
 
   // ---- 4. Negate to "true=masked" convention and OR external_mask into every scale slice ----
-  kernel::finalize_mask_kernel<<<CEIL_DIV(dirty_npix, 256), 256, 0, cuda_stream>>>(
+  kernel::finalize_mask_kernel<<<core::narrow<unsigned>(core::ceil_div(dirty_npix, 256)), 256, 0, cuda_stream>>>(
       mask_per_scale.data_handle(), external_mask.data_handle(), dirty_npix, n_scales);
 }
 }  // namespace fast_deconv::common

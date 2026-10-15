@@ -29,7 +29,7 @@ psf_convolution::psf_convolution(const core::exec_ctx& exec_ctx, core::span4d<co
 {
 }
 
-psf_convolution::entry psf_convolution::build(int scale, int facet)
+psf_convolution::entry psf_convolution::build(int scale, std::int64_t facet)
 {
   FD_PROFILE_SCOPE("psf_convolution/build");
   core::span3d<const float> raw = emu::submdspan(raw_psfs_, facet);
@@ -75,14 +75,14 @@ psf_convolution::entry psf_convolution::build(int scale, int facet)
   return e;
 }
 
-psf_convolution::entry psf_convolution::get(int scale, int facet)
+psf_convolution::entry psf_convolution::get(int scale, std::int64_t facet)
 {
   FD_PROFILE_SCOPE("psf_convolution/get");
   // if (weights_host_.empty()) throw std::logic_error("psf_convolution::get called before configure()");
   if (scale < 0 || scale >= n_scales_ || facet < 0 || facet >= n_facets_)
     throw std::out_of_range("psf_convolution::get: (scale, facet) out of range");
 
-  const int key = scale * n_facets_ + facet;
+  const std::int64_t key = scale * n_facets_ + facet;
   if (auto it = entries_.find(key); it != entries_.end()) {
     return it->second;
   }
@@ -95,7 +95,7 @@ psf_convolution::entry psf_convolution::get(int scale, int facet)
 void psf_convolution::prefetch_scale(int scale)
 {
   FD_PROFILE_SCOPE_FMT("psf_convolution/prefetch_scale[{}]", scale);
-  for (int f = 0; f < n_facets_; f++) get(scale, f);
+  for (std::int64_t f = 0; f < n_facets_; f++) get(scale, f);
 }
 
 void psf_convolution::prefetch_all()

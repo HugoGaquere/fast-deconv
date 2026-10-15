@@ -57,7 +57,7 @@ void bind_ddmsc(py::module_& m)
   py::class_<ddmsc::Ddmsc>(ddmsc_module, "DDMSC")
       .def(py::init<const core::host_span4d<float>&, const core::host_span2d<float>&, const core::host_span2d<bool>&,
                     const core::host_span1d<float>&, const core::host_span1d<float>&, const core::host_span2d<int>&,
-                    int, int, int, int>(),
+                    std::int64_t, std::int64_t, std::int64_t, int>(),
            py::arg("raw_psfs"), py::arg("xdes"), py::arg("scale_mask"), py::arg("scale_sigmas"), py::arg("scale_bias"),
            py::arg("map_pixel_facet"), py::arg("dirty_nrow"), py::arg("dirty_ncol"), py::arg("n_freq"),
            py::arg("exec_device") = 0,

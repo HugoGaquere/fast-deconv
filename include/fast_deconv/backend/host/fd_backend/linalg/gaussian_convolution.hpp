@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 
@@ -17,7 +18,8 @@ class gaussian_convolution_ctx {
 
   /// @p gap: zero padding in pixels per axis; wrap-free for every sigma with gaussian_reach(sigma) <= gap.
   /// Each line is padded to min(gap, gaussian_reach(sigma)), so small sigmas keep short lines.
-  gaussian_convolution_ctx(const core::exec_ctx& ctx, int batch, int nrow, int ncol, int gap);
+  gaussian_convolution_ctx(const core::exec_ctx& ctx, std::int64_t batch, std::int64_t nrow, std::int64_t ncol,
+                           std::int64_t gap);
   ~gaussian_convolution_ctx() = default;
 
   gaussian_convolution_ctx(const gaussian_convolution_ctx&) = delete;
@@ -37,17 +39,17 @@ class gaussian_convolution_ctx {
   /// Gaussian(@p sigma) convolution of @p input into @p out, for single-sigma uses.
   void convolve(core::span3d<const float> input, float sigma, core::span3d<float> out) const;
 
-  int batch() const { return batch_; }
+  std::int64_t batch() const { return batch_; }
 
  private:
   // The separable convolution of (batch, nrow, ncol) floats at @p in into @p out.
   void convolve_separable_(const float* in, float sigma, core::span3d<float> out) const;
 
   const core::exec_ctx& ctx_;
-  int batch_;
-  int nrow_;
-  int ncol_;
-  int gap_;
+  std::int64_t batch_;
+  std::int64_t nrow_;
+  std::int64_t ncol_;
+  std::int64_t gap_;
 };
 
 }  // namespace fast_deconv::linalg

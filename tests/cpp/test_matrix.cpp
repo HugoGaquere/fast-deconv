@@ -126,8 +126,9 @@ TEST_F(MatrixReductions, ComputeStatsAsyncLeavesResultOnDevice)
 
   ASSERT_EQ(acc.count, kNpix);
   EXPECT_FLOAT_EQ(acc.max_v, fdtest::masked_max(img, std::vector<uint8_t>(kNpix, 0), false));
-  const double mean = static_cast<double>(acc.sum) / acc.count;
-  const float rms = static_cast<float>(std::sqrt(std::max(acc.sum_sq / acc.count - mean * mean, 0.0)));
+  const auto count = static_cast<double>(acc.count);
+  const double mean = static_cast<double>(acc.sum) / count;
+  const float rms = static_cast<float>(std::sqrt(std::max(acc.sum_sq / count - mean * mean, 0.0)));
   const float expected = fdtest::std_all(img);
   EXPECT_NEAR(rms, expected, 1e-4f * expected);
 }

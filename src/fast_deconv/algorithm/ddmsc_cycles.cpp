@@ -30,8 +30,8 @@ inline std::string fmt_optional(const std::optional<float>& v)
   return v.has_value() ? fmt::format("{:g}", *v) : std::string{"unset"};
 }
 
-std::string format_run_banner(const params& p, std::size_t dirty_nrows, std::size_t dirty_ncols, uint32_t n_freq,
-                              uint32_t n_facets, int n_scales, int psf_nrow, int psf_ncol)
+std::string format_run_banner(const params& p, std::int64_t dirty_nrows, std::int64_t dirty_ncols, std::int64_t n_freq,
+                              std::int64_t n_facets, int n_scales, std::int64_t psf_nrow, std::int64_t psf_ncol)
 {
   constexpr const char* sep = "------------------------------------------------------------------------";
   return fmt::format(
@@ -91,7 +91,7 @@ struct run_workspace {
   // Built once, the first time the auto-mask engages.
   std::optional<core::cont3d<bool>> mask_per_scale;
 
-  run_workspace(const context& ctx, const params& p, std::size_t nrow, std::size_t ncol, uint32_t n_freq,
+  run_workspace(const context& ctx, const params& p, std::int64_t nrow, std::int64_t ncol, std::int64_t n_freq,
                 const core::span1d<const float>& weights_freq)
       : mean_residual_buf(ctx.compute_stream.alloc_mdcontainer_async<float>(nrow, ncol)),
         stats(ctx.compute_stream, nrow * ncol, p.clean_negative),
@@ -99,7 +99,7 @@ struct run_workspace {
         scale_conv(ctx.compute_stream, 1, ctx.dirty_nrow, ctx.dirty_ncol, linalg::max_gaussian_reach(ctx.scale_sigmas)),
         psf_cache(ctx.compute_stream, ctx.raw_psfs, ctx.scale_sigmas, weights_freq, p.gamma),
         all_coeffs(ctx.aux_stream.alloc_mdcontainer_async<float>(
-            static_cast<std::size_t>(p.max_iteration + p.max_clean_iteration) * ctx.xdes.extent(1))),
+            (std::int64_t{p.max_iteration} + p.max_clean_iteration) * ctx.xdes.extent(1))),
         coeffs_per_chan(ctx.aux_stream.alloc_mdcontainer_async<float>(n_freq))
   {
   }
@@ -107,7 +107,7 @@ struct run_workspace {
 
 /// Per-scale masks around every component so far, previous calls included.
 core::cont3d<bool> build_scale_mask(const context& ctx, const ddmsc_result& result,
-                                    const core::span1d<const float>& weights_freq, std::size_t nrow, std::size_t ncol)
+                                    const core::span1d<const float>& weights_freq, std::int64_t nrow, std::int64_t ncol)
 {
   FD_PROFILE_FN();
   const auto& stream_a = ctx.compute_stream;
@@ -147,8 +147,8 @@ int clean_loop(run_workspace& ws, const context& ctx, const params& p, const sca
   FD_PROFILE_FN();
   const auto& stream_a = ctx.compute_stream;
   const auto& stream_b = ctx.aux_stream;
-  const std::size_t dirty_ncols = dirty.extent(2);
-  const int n_order = ctx.xdes.extent(1);
+  const std::int64_t dirty_ncols = dirty.extent(2);
+  const std::int64_t n_order = ctx.xdes.extent(1);
   const int selected_scale_idx = selected.scale;
   const core::span2d<float> scaled_residual = selected.scaled_residual;
 
@@ -181,7 +181,7 @@ int clean_loop(run_workspace& ws, const context& ctx, const params& p, const sca
     core::span3d<const float> conv_psf = psf.conv;
     core::span2d<const float> conv2_psf = psf.conv2;
 
-    const std::size_t coeffs_offset = static_cast<std::size_t>(first_component + n_clean_iter) * n_order;
+    const std::int64_t coeffs_offset = (std::int64_t{first_component} + n_clean_iter) * n_order;
     auto spectral_coeffs = core::span1d<float>(ws.all_coeffs.data_handle() + coeffs_offset, n_order);
     multi_frequency::fit_coefficients(stream_b, dirty, jones_norm, weights_freq, ctx.xdes, peak_coords, spectral_coeffs,
                                       ws.coeffs_per_chan);
@@ -210,18 +210,18 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   FD_PROFILE_FN();
   // log::set_level(spdlog::level::debug);  // disabled for benchmarking
 
-  const int psf_nrow = ctx.raw_psfs.extent(2);
-  const int psf_ncol = ctx.raw_psfs.extent(3);
+  const std::int64_t psf_nrow = ctx.raw_psfs.extent(2);
+  const std::int64_t psf_ncol = ctx.raw_psfs.extent(3);
 
   // stream_b runs the per-channel fit/subtract on dirty, overlapping stream_a.
   const auto& stream_a = ctx.compute_stream;
   const auto& stream_b = ctx.aux_stream;
 
-  const uint32_t n_freq = dirty.extent(0);
-  const uint32_t n_facets = ctx.raw_psfs.extent(0);
-  const size_t dirty_nrows = dirty.extent(1);
-  const size_t dirty_ncols = dirty.extent(2);
-  const int n_order = ctx.xdes.extent(1);
+  const std::int64_t n_freq = dirty.extent(0);
+  const std::int64_t n_facets = ctx.raw_psfs.extent(0);
+  const std::int64_t dirty_nrows = dirty.extent(1);
+  const std::int64_t dirty_ncols = dirty.extent(2);
+  const std::int64_t n_order = ctx.xdes.extent(1);
   const int n_scales = static_cast<int>(ctx.scale_sigmas.size());
 
   FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_nrow, psf_ncol));
@@ -229,7 +229,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   FD_PROFILE_APPINFO(format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_nrow, psf_ncol));
 
   // Matches DDFacet's NBand check.
-  if (static_cast<int>(n_freq) < 2 * n_order)
+  if (n_freq < 2 * n_order)
     FD_LOG_WARN(
         "run_ddmsc: spectral fit is under-constrained (n_freq={} n_order={}); want n_freq >= 2*n_order. "
         "Coefficients are extrapolated to the degrid frequencies, where the unconstrained directions dominate.",
@@ -264,7 +264,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   FD_PROFILE_MARK("init/psf_cache");
   if (p.psf_cache_policy == psf_cache_mode::eager_all) ws.psf_cache.prefetch_all();
 
-  ddmsc_result result{static_cast<std::size_t>(p.max_iteration + p.max_clean_iteration)};
+  ddmsc_result result{core::narrow<std::size_t>(std::int64_t{p.max_iteration} + p.max_clean_iteration)};
   result.initial_flux = track_flux;
   result.initial_rms = track_rms;
   int last_selected_scale = -1;

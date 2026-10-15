@@ -227,7 +227,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
 
   const int n_components = static_cast<int>(result.peak_coords.size());
   ASSERT_EQ(result.gains.size(), result.peak_coords.size());
-  ASSERT_EQ(result.coeffs.size(), result.peak_coords.size() * result.n_order);
+  ASSERT_EQ(result.coeffs.size(), result.peak_coords.size() * core::narrow<std::size_t>(result.n_order));
 
   // Peak-flux removed from the dirty image per component: the subtraction is
   // coeff * gain * conv_psf where conv_psf is sum-normalized with peak p_s and
@@ -237,7 +237,8 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   double cleaned_flux_total = 0.0;
   std::array<int, kScales> components_per_scale{};
   for (int i = 0; i < n_components; ++i) {
-    cleaned_flux_total += static_cast<double>(p.gamma) * result.coeffs.at(i * result.n_order);
+    cleaned_flux_total +=
+        static_cast<double>(p.gamma) * result.coeffs.at(core::narrow<std::size_t>(i * result.n_order));
     components_per_scale.at(result.scales.at(i))++;
   }
 
@@ -248,11 +249,13 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   for (std::size_t s = 0; s < kSources.size(); ++s) {
     double nearest = 1e9;
     for (int i = 0; i < n_components; ++i) {
-      const double dr = result.peak_coords.at(i).first - kSources.at(s).row;
-      const double dc = result.peak_coords.at(i).second - kSources.at(s).col;
+      const auto dr = static_cast<double>(result.peak_coords.at(i).first - kSources.at(s).row);
+      const auto dc = static_cast<double>(result.peak_coords.at(i).second - kSources.at(s).col);
       const double dist = std::sqrt(dr * dr + dc * dc);
       nearest = std::min(nearest, dist);
-      if (dist <= 15.0) recovered_flux.at(s) += static_cast<double>(p.gamma) * result.coeffs.at(i * result.n_order);
+      if (dist <= 15.0)
+        recovered_flux.at(s) +=
+            static_cast<double>(p.gamma) * result.coeffs.at(core::narrow<std::size_t>(i * result.n_order));
     }
     nearest_component_px.at(s) = nearest;
   }

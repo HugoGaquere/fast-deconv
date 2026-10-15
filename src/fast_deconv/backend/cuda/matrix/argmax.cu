@@ -36,13 +36,13 @@ peak find_peak(const core::exec_ctx& ctx, core::span2d<const float> data, peak_c
   // A reduce rather than ArgMax, so the signed pixel travels with the winning criterion.
   const auto it = thrust::make_transform_iterator(thrust::counting_iterator<std::int64_t>{0},
                                                   criterion_peak{data.data_handle(), criterion});
-  const int n = static_cast<int>(data.size());
+  const std::int64_t n = data.mapping().required_span_size();
   auto d_result = ctx.alloc_ptr_async<peak>(1);
 
   std::size_t temp_bytes = 0;
   CHECK_CUDA(cub::DeviceReduce::Reduce(nullptr, temp_bytes, it, d_result.get(), n, peak_max{}, kReduceIdentity,
                                        ctx.cuda_stream));
-  auto d_temp = ctx.alloc_ptr_async<std::byte>(std::max<std::size_t>(temp_bytes, 1));
+  auto d_temp = ctx.alloc_ptr_async<std::byte>(core::narrow<std::int64_t>(std::max<std::size_t>(temp_bytes, 1)));
   CHECK_CUDA(cub::DeviceReduce::Reduce(d_temp.get(), temp_bytes, it, d_result.get(), n, peak_max{}, kReduceIdentity,
                                        ctx.cuda_stream));
 
