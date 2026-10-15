@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/matrix/peak.hpp>
 
@@ -17,7 +18,7 @@ class tiled_argmax_ctx {
  public:
   /// @param extents    image extents (nrow, ncol) every call must match.
   /// @param tile_size  square tile edge in pixels.
-  tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> extents, int tile_size);
+  tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> extents, std::int64_t tile_size);
 
   tiled_argmax_ctx(const tiled_argmax_ctx&) = delete;
   tiled_argmax_ctx& operator=(const tiled_argmax_ctx&) = delete;
@@ -31,10 +32,11 @@ class tiled_argmax_ctx {
   ///
   /// PRECONDITION: a prior run() seeded every tile, and nothing outside the
   /// footprint changed in @p data since that call.
-  peak run_incremental(core::span2d<const float> data, int peak_row, int peak_col, int foot_height, int foot_width);
+  peak run_incremental(core::span2d<const float> data, std::int64_t peak_row, std::int64_t peak_col,
+                       std::int64_t foot_height, std::int64_t foot_width);
 
   core::dims<2> extents() const { return extents_; }
-  int tile_size() const { return tile_size_; }
+  std::int64_t tile_size() const { return tile_size_; }
 
  private:
   /// Combine every cached tile down to one result and read it back.
@@ -42,10 +44,10 @@ class tiled_argmax_ctx {
 
   const core::exec_ctx& ctx_;
   core::dims<2> extents_;
-  int tile_size_;
-  int n_tiles_x_;
-  int n_tiles_y_;
-  std::size_t n_tiles_;
+  std::int64_t tile_size_;
+  std::int64_t n_tiles_x_;
+  std::int64_t n_tiles_y_;
+  std::int64_t n_tiles_;
   std::size_t final_temp_bytes_ = 0;
   core::owned_ptr<peak> d_tiles_;
   core::owned_ptr<peak> d_result_;

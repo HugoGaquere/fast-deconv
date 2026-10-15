@@ -15,7 +15,10 @@ namespace fast_deconv::test {
 template <typename T>
 class device_buffer {
  public:
-  device_buffer(const core::exec_ctx& sr, std::size_t n) : sr_(sr), n_(n), ptr_(sr.alloc_async<T>(n)) {}
+  device_buffer(const core::exec_ctx& sr, std::size_t n)
+      : sr_(sr), n_(n), ptr_(sr.alloc_async<T>(core::narrow<std::int64_t>(n)))
+  {
+  }
 
   // Upload constructor. std::vector<bool> is bit-packed, so it goes through a
   // uint8_t staging buffer; either way the copy completes before returning.
@@ -26,7 +29,7 @@ class device_buffer {
       for (std::size_t i = 0; i < host.size(); ++i) bytes.at(i) = host.at(i) ? 1 : 0;
       sr_.copy_bytes(ptr_, bytes.data(), n_ * sizeof(bool));
     } else {
-      sr_.copy(ptr_, host.data(), n_);
+      sr_.copy(ptr_, host.data(), core::narrow<std::int64_t>(n_));
     }
     sr_.wait();
   }
@@ -60,7 +63,7 @@ class device_buffer {
   void from_host(const std::vector<T>& host)
   {
     static_assert(!std::is_same_v<T, bool>, "use the upload constructor for bool buffers");
-    sr_.copy(ptr_, host.data(), host.size());
+    sr_.copy(ptr_, host.data(), std::ssize(host));
     sr_.wait();
   }
 

@@ -26,8 +26,8 @@ std::vector<float> host_subtract(const std::vector<float>& residual, int h, int 
                                  int ph, int pw, common::index2d peak, float gain, float coeff = 1.0f)
 {
   std::vector<float> out = residual;
-  const int row0 = peak.row - ph / 2;
-  const int col0 = peak.col - pw / 2;
+  const int row0 = core::narrow<int>(peak.row) - ph / 2;
+  const int col0 = core::narrow<int>(peak.col) - pw / 2;
   for (int i = 0; i < ph; ++i) {
     for (int j = 0; j < pw; ++j) {
       const int row = row0 + i, col = col0 + j;

@@ -1,6 +1,7 @@
 #pragma once
 #include <cufft.h>
 
+#include <cstdint>
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft_dims.hpp>
@@ -21,7 +22,8 @@ class gaussian_convolution_ctx {
 
   /// @p gap: zero padding in pixels per axis, P = next_fast_size(n + gap); wrap-free for every sigma with
   /// gaussian_reach(sigma) <= gap.
-  gaussian_convolution_ctx(const core::exec_ctx& ctx, int batch, int nrow, int ncol, int gap);
+  gaussian_convolution_ctx(const core::exec_ctx& ctx, std::int64_t batch, std::int64_t nrow, std::int64_t ncol,
+                           std::int64_t gap);
   ~gaussian_convolution_ctx();
 
   gaussian_convolution_ctx(const gaussian_convolution_ctx&) = delete;
@@ -42,7 +44,7 @@ class gaussian_convolution_ctx {
   /// Pad, R2C, multiply in place, C2R, crop: no spectrum kept, for single-sigma uses.
   void convolve(core::span3d<const float> input, float sigma, core::span3d<float> out) const;
 
-  int batch() const { return batch_; }
+  std::int64_t batch() const { return batch_; }
 
  private:
   void forward_(float* input, complex_type* output) const;   // R2C over the batch
@@ -50,7 +52,7 @@ class gaussian_convolution_ctx {
 
   const core::exec_ctx& ctx_;
   fft_dims dims_;
-  int batch_;
+  std::int64_t batch_;
   core::owned_ptr<float> padded_;          // batch * padded_total: forward input, then inverse output
   core::owned_ptr<complex_type> product_;  // batch * freq_total: spectrum times the Gaussian
   cufftHandle r2c_ = 0;

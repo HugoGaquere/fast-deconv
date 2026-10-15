@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <fast_deconv/core/exec_ctx.hpp>
 
 namespace fast_deconv::matrix {
@@ -12,7 +13,7 @@ struct stats_acc {
   float max_v;
   float sum;
   float sum_sq;
-  int count;
+  std::int64_t count;
 };
 
 /// Result returned to the host after a fused max + rms reduction.
@@ -30,7 +31,7 @@ struct stats_result {
 /// subsequent call.
 class stats_ctx {
  public:
-  stats_ctx(const core::exec_ctx& ctx, std::size_t n_elements, bool use_abs);
+  stats_ctx(const core::exec_ctx& ctx, std::int64_t n_elements, bool use_abs);
 
   stats_ctx(const stats_ctx&) = delete;
   stats_ctx& operator=(const stats_ctx&) = delete;
@@ -45,11 +46,11 @@ class stats_ctx {
   /// The packed accumulator left by run_async(), in backend memory.
   const stats_acc* device_state() const { return d_state_.get(); }
 
-  std::size_t size() const { return n_elements_; }
+  std::int64_t size() const { return n_elements_; }
 
  private:
   const core::exec_ctx& ctx_;
-  std::size_t n_elements_;
+  std::int64_t n_elements_;
   bool use_abs_;
   std::size_t temp_bytes_ = 0;
   core::owned_ptr<std::byte> d_temp_;

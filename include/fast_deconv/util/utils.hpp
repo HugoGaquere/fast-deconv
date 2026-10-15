@@ -5,11 +5,9 @@
 
 namespace fast_deconv::util {
 
-inline auto unravel_index_2D(std::int64_t flat_index, int ncol) -> common::index2d
+inline auto unravel_index_2D(std::int64_t flat_index, std::int64_t ncol) -> common::index2d
 {
-  const auto row = flat_index / ncol;
-  const auto col = flat_index % ncol;
-  return {static_cast<int>(row), static_cast<int>(col)};
+  return {flat_index / ncol, flat_index % ncol};
 }
 
 }  // namespace fast_deconv::util

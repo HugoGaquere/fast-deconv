@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
@@ -40,7 +41,7 @@ class psf_convolution {
   psf_convolution& operator=(psf_convolution&&) = delete;
 
   /// Entry for one (scale, facet), built on miss.
-  entry get(int scale, int facet);
+  entry get(int scale, std::int64_t facet);
 
   /// Build every facet of @p scale.
   void prefetch_scale(int scale);
@@ -53,11 +54,11 @@ class psf_convolution {
   void clear();
 
   int n_scales() const { return n_scales_; }
-  int n_facets() const { return n_facets_; }
+  std::int64_t n_facets() const { return n_facets_; }
   std::size_t n_entries() const { return entries_.size(); }
 
  private:
-  entry build(int scale, int facet);
+  entry build(int scale, std::int64_t facet);
 
   const core::exec_ctx& exec_ctx_;
   const linalg::gaussian_convolution_ctx conv_ctx_;       // batch n_freq: the per-channel conv
@@ -67,14 +68,14 @@ class psf_convolution {
   std::vector<float> sigmas_;
 
   int n_scales_;
-  int n_facets_;
-  int n_freq_;
-  int psf_nrow_;
-  int psf_ncol_;
+  std::int64_t n_facets_;
+  std::int64_t n_freq_;
+  std::int64_t psf_nrow_;
+  std::int64_t psf_ncol_;
 
   float gamma_ = 0.0f;
 
-  std::unordered_map<int, entry> entries_;  // key = scale * n_facets + facet
+  std::unordered_map<std::int64_t, entry> entries_;  // key = scale * n_facets + facet
 };
 
 }  // namespace fast_deconv::algorithm

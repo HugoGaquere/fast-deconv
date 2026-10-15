@@ -1,22 +1,26 @@
 #pragma once
+#include <concepts>
 #include <cstdint>
 #include <emu/detail/mdspan_types.hpp>
-#include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace fast_deconv::core {
 
 template <std::size_t N>
 using dims = emu::dextents<std::int64_t, N>;
 
-/// Spans index in int64, but the kernels and cuBLAS/CUB/thrust call sites still
-/// hold a plane offset in an int, so every 2D grid has to fit one.
-inline void check_plane_fits_int32(std::int64_t nrow, std::int64_t ncol, const char* what)
+/// The one narrowing conversion: counts are int64, and a third-party API (cuBLAS, cuFFT, a launch config,
+/// a size_t shape) that takes less gets its value through here, never through a bare cast.
+template <std::integral To, std::integral From>
+To narrow(From v)
 {
-  if (nrow * ncol > std::numeric_limits<std::int32_t>::max())
-    throw std::invalid_argument(std::string(what) + " plane " + std::to_string(nrow) + "x" + std::to_string(ncol) +
-                                " exceeds the int32 index limit");
+  if (!std::in_range<To>(v))
+    throw std::overflow_error("narrow: " + std::to_string(v) + " does not fit the target type");
+  return static_cast<To>(v);
 }
+
+constexpr std::int64_t ceil_div(std::int64_t a, std::int64_t b) { return (a + b - 1) / b; }
 
 }  // namespace fast_deconv::core

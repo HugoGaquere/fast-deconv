@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <emu/submdspan.hpp>
 #include <fast_deconv/common/mask.hpp>
 #include <fast_deconv/core/profiler.hpp>
@@ -27,13 +28,13 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
   assert(weights_freq.extent(0) == central_facet_psfs.extent(0));
   assert(external_mask.extent(0) == mask_per_scale.extent(1) && external_mask.extent(1) == mask_per_scale.extent(2));
 
-  const int n_scales = mask_per_scale.extent(0);
-  const int dirty_nrow = mask_per_scale.extent(1);
-  const int dirty_ncol = mask_per_scale.extent(2);
-  const int dirty_npix = dirty_nrow * dirty_ncol;
-  const int psf_nrow = central_facet_psfs.extent(1);
-  const int psf_ncol = central_facet_psfs.extent(2);
-  const int psf_npix = psf_nrow * psf_ncol;
+  const std::int64_t n_scales = mask_per_scale.extent(0);
+  const std::int64_t dirty_nrow = mask_per_scale.extent(1);
+  const std::int64_t dirty_ncol = mask_per_scale.extent(2);
+  const std::int64_t dirty_npix = mask_per_scale.mapping().stride(0);
+  const std::int64_t psf_nrow = central_facet_psfs.extent(1);
+  const std::int64_t psf_ncol = central_facet_psfs.extent(2);
+  const std::int64_t psf_npix = central_facet_psfs.mapping().stride(0);
 
   // ---- 1. Zero the output and stamp peaks ----
   std::fill_n(mask_per_scale.data_handle(), mask_per_scale.size(), false);
@@ -57,15 +58,15 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
   auto fwhm_mask = ctx.alloc_mdcontainer_async<bool>(psf_nrow, psf_ncol);
   auto dilation_out = ctx.alloc_mdcontainer_async<bool>(dirty_nrow, dirty_ncol);
 
-  for (int i = 0; i < n_scales; i++) {
+  for (std::int64_t i = 0; i < n_scales; i++) {
     // 3a. psf_mean ** G_s ** G_s, one convolution with G(sigma * sqrt(2)) since G(sigma)^2 = G(sigma * sqrt(2)).
-    conv.convolve(spectrum, scale_sigmas.at(i) * std::numbers::sqrt2_v<float>,
+    conv.convolve(spectrum, scale_sigmas.at(core::narrow<std::size_t>(i)) * std::numbers::sqrt2_v<float>,
                   core::span3d<float>(conv2_psf.data_handle(), 1, psf_nrow, psf_ncol));
 
     // 3b. FWHM threshold: bool out = (conv2_psf > max / 2)
     const float* psf_begin = conv2_psf.data_handle();
     const float threshold = *std::max_element(psf_begin, psf_begin + psf_npix) * 0.5f;
-    for (int k = 0; k < psf_npix; k++) fwhm_mask.data_handle()[k] = psf_begin[k] > threshold;
+    for (std::int64_t k = 0; k < psf_npix; k++) fwhm_mask.data_handle()[k] = psf_begin[k] > threshold;
 
     // 3c. Bounding box of FWHM, used as the structuring element's extent
     const roi structure_roi = morphology::compute_mask_roi(ctx, fwhm_mask);
@@ -78,7 +79,7 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
     bool* slice = current_mask.data_handle();
     const bool* dilated = dilation_out.data_handle();
     const bool* external = external_mask.data_handle();
-    for (int k = 0; k < dirty_npix; k++) slice[k] = !dilated[k] || external[k];
+    for (std::int64_t k = 0; k < dirty_npix; k++) slice[k] = !dilated[k] || external[k];
   }
 }
 

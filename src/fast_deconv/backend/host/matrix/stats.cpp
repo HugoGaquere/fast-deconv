@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/matrix/stats.hpp>
 #include <limits>
@@ -15,7 +16,7 @@ namespace {
 constexpr float kNoMax = -std::numeric_limits<float>::infinity();
 }  // namespace
 
-stats_ctx::stats_ctx(const core::exec_ctx& ctx, std::size_t n_elements, bool use_abs)
+stats_ctx::stats_ctx(const core::exec_ctx& ctx, std::int64_t n_elements, bool use_abs)
     : ctx_(ctx), n_elements_(n_elements), use_abs_(use_abs)
 {
   FD_PROFILE_FN();
@@ -28,7 +29,7 @@ void stats_ctx::run_async(core::span2d<float> data, core::span2d<bool> mask)
   FD_PROFILE_FN();
   assert(data.is_exhaustive() && mask.is_exhaustive());
   assert(data.extents() == mask.extents());
-  assert(data.size() == n_elements_);
+  assert(data.mapping().required_span_size() == n_elements_);
 
   const float* d = data.data_handle();
   const bool* m = mask.data_handle();
@@ -41,14 +42,14 @@ void stats_ctx::run_async(core::span2d<float> data, core::span2d<bool> mask)
   double sum_sq = 0.0;
   const bool use_abs = use_abs_;
 #pragma omp parallel for reduction(max : max_v) reduction(+ : sum, sum_sq)
-  for (std::size_t i = 0; i < n_elements_; i++) {
+  for (std::int64_t i = 0; i < n_elements_; i++) {
     const float v = d[i];
     max_v = std::max(max_v, m[i] ? kNoMax : (use_abs ? std::fabs(v) : v));
     sum += v;
     sum_sq += static_cast<double>(v) * v;
   }
 
-  d_state_[0] = {max_v, static_cast<float>(sum), static_cast<float>(sum_sq), static_cast<int>(n_elements_)};
+  d_state_[0] = {max_v, static_cast<float>(sum), static_cast<float>(sum_sq), n_elements_};
 }
 
 stats_result stats_ctx::run(core::span2d<float> data, core::span2d<bool> mask)

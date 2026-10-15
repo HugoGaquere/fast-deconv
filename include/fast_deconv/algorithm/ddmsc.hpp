@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <fast_deconv/algorithm/ddmsc_cycles.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
@@ -27,8 +28,8 @@ class Ddmsc {
  public:
   Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
         const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
-        const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
-        int dirty_ncol, int n_freq, int exec_device = 0);
+        const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet,
+        std::int64_t dirty_nrow, std::int64_t dirty_ncol, std::int64_t n_freq, int exec_device = 0);
 
   /// Run one full deconvolution session. The updated residual is written back
   /// into @p dirty (host, in/out) before returning.

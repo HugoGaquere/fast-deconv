@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <fast_deconv/algorithm/psf_convolution.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/common/convergence.hpp>
@@ -63,9 +64,9 @@ struct context {
   std::vector<float> scale_sigmas;
   core::host_span1d<float> scale_bias;
   core::host_span2d<int> map_pixel_facet;
-  int dirty_nrow;
-  int dirty_ncol;
-  int n_freq;
+  std::int64_t dirty_nrow;
+  std::int64_t dirty_ncol;
+  std::int64_t n_freq;
 
   std::vector<common::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
   std::vector<int> historical_scales;                   // scale of each historical component
@@ -74,9 +75,9 @@ struct context {
   /// The host spans must outlive the context: the host backend borrows them.
   context(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
           const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
-          const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
-          int dirty_ncol, int n_freq)
-      : resources(checked_device(exec_device, raw_psfs, dirty_nrow, dirty_ncol)),
+          const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet,
+          std::int64_t dirty_nrow, std::int64_t dirty_ncol, std::int64_t n_freq)
+      : resources(exec_device),
         compute_stream(resources.make_ctx()),
         aux_stream(resources.make_ctx()),
         raw_psfs(compute_stream.stage(raw_psfs)),
@@ -96,30 +97,22 @@ struct context {
   context& operator=(const context&) = delete;
   context(context&&) = delete;
   context& operator=(context&&) = delete;
-
- private:
-  // Runs before resources: an oversized plane throws before any device allocation.
-  static int checked_device(int exec_device, const core::host_span4d<float>& raw_psfs, int dirty_nrow, int dirty_ncol)
-  {
-    core::check_plane_fits_int32(dirty_nrow, dirty_ncol, "dirty");
-    core::check_plane_fits_int32(raw_psfs.extent(2), raw_psfs.extent(3), "psf");
-    return exec_device;
-  }
 };
 
 struct ddmsc_result {
-  std::vector<std::pair<int, int>> peak_coords;  // pair, not index2d: bound read-only to Python as list[tuple]
+  std::vector<std::pair<std::int64_t, std::int64_t>>
+      peak_coords;  // pair, not index2d: bound read-only to Python as list[tuple]
   std::vector<int> scales;
   std::vector<float> gains;
   std::vector<float> coeffs;  // row-major [component][n_order]
-  int n_order = 0;
+  std::int64_t n_order = 0;
   float initial_flux = 0.0f;  // peak flux of the mean residual on entry
   float initial_rms = 0.0f;   // rms of the mean residual on entry
-  float final_flux = 0.0f;   // peak flux of the mean residual after the last outer iteration
-  float final_rms = 0.0f;    // rms of the mean residual after the last outer iteration
-  float stop_flux = 0.0f;    // composed stop-flux threshold used for this call (max of the four limits)
-  int total_iterations = 0;  // total minor iterations consumed across all outer cycles
-  int outer_iterations = 0;  // scale selections, including the one that found no component
+  float final_flux = 0.0f;    // peak flux of the mean residual after the last outer iteration
+  float final_rms = 0.0f;     // rms of the mean residual after the last outer iteration
+  float stop_flux = 0.0f;     // composed stop-flux threshold used for this call (max of the four limits)
+  int total_iterations = 0;   // total minor iterations consumed across all outer cycles
+  int outer_iterations = 0;   // scale selections, including the one that found no component
   common::convergence_status status = common::convergence_status::running;  // why the outer loop ended
 
   /// @p capacity is the most components one call can produce.
@@ -142,13 +135,13 @@ struct ddmsc_result {
   /// One row per component; @p ctx must be the stream @p rows was written on.
   void set_coeffs(const core::exec_ctx& ctx, core::span2d<const float> rows)
   {
-    if (static_cast<std::size_t>(rows.extent(0)) != peak_coords.size())
+    if (rows.extent(0) != std::ssize(peak_coords))
       throw std::logic_error("ddmsc_result: coefficient rows do not match the components added");
 
-    n_order = static_cast<int>(rows.extent(1));
+    n_order = rows.extent(1);
     coeffs.resize(rows.size());
     if (coeffs.empty()) return;
-    ctx.copy(coeffs.data(), rows.data_handle(), coeffs.size());
+    ctx.copy(coeffs.data(), rows.data_handle(), std::ssize(coeffs));
     ctx.wait();
   }
 };

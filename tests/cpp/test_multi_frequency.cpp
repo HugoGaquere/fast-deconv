@@ -176,7 +176,8 @@ scene make_scene(std::vector<double> xdes_d, const std::vector<double>& y, commo
   sc.xdes.assign(sc.xdes_d.begin(), sc.xdes_d.end());
   sc.dirty.assign(static_cast<std::size_t>(n_freq) * kNpix, background);
   for (int f = 0; f < n_freq; ++f)
-    sc.dirty.at(f * kNpix + flat(peak.row, peak.col, kNcol)) = static_cast<float>(y.at(f));
+    sc.dirty.at(f * kNpix + flat(core::narrow<int>(peak.row), core::narrow<int>(peak.col), kNcol)) =
+        static_cast<float>(y.at(f));
   return sc;
 }
 
