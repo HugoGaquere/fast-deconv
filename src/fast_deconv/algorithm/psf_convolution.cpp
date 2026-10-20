@@ -73,33 +73,21 @@ psf_convolution::entry psf_convolution::get(int scale, std::int64_t facet)
   if (scale < 0 || scale >= n_scales_ || facet < 0 || facet >= n_facets_)
     throw std::out_of_range("psf_convolution::get: (scale, facet) out of range");
 
-  const std::int64_t key = scale * n_facets_ + facet;
-  if (auto it = entries_.find(key); it != entries_.end()) {
+  if (scale != scale_) {
+    scale_ = scale;
+    if (!entries_.empty()) {
+      exec_ctx_.wait();
+      entries_.clear();
+    }
+  }
+
+  if (auto it = entries_.find(facet); it != entries_.end()) {
     return it->second;
   }
 
   entry e = build(scale, facet);
-  entries_.emplace(key, e);
+  entries_.emplace(facet, e);
   return e;
-}
-
-void psf_convolution::prefetch_scale(int scale)
-{
-  FD_PROFILE_SCOPE_FMT("psf_convolution/prefetch_scale[{}]", scale);
-  for (std::int64_t f = 0; f < n_facets_; f++) get(scale, f);
-}
-
-void psf_convolution::prefetch_all()
-{
-  FD_PROFILE_SCOPE("psf_convolution/prefetch_all");
-  for (int s = 0; s < n_scales_; s++) prefetch_scale(s);
-}
-
-void psf_convolution::clear()
-{
-  if (entries_.empty()) return;
-  exec_ctx_.wait();
-  entries_.clear();
 }
 
 }  // namespace fast_deconv::algorithm

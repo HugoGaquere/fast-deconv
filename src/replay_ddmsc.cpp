@@ -1,7 +1,7 @@
 // Replay a DDMSC session captured from DDFacet, without launching DDFacet.
 //
 // Usage:  replay_ddmsc <dump_dir> [--device=N] [--cycle=N] [--runs=N]
-//                      [--psf-cache=lazy_pair|lazy_scale|eager_all] [--max-iter=N] [--max-clean-iter=N]
+//                      [--max-iter=N] [--max-clean-iter=N]
 //                      [--peak-factor=F] [--stall-threshold=F] [--stop-rms-factor=F] [--stop-peak-factor=F]
 //                      [--stop-sidelobe-level=F] [--divergence-factor=F] [--auto-mask=0|1] [--force-scale=S]
 //                      [--flux-threshold=F] [--stop-cycle-factor=F] [--crop=N|NROWxNCOL]
@@ -10,9 +10,6 @@
 // --runs=N replays the whole dump N times on a fresh session each time and
 // reports min/median/mean/max of the per-run total; the first cycle of a run
 // carries the one-off device setup (uploads, cuFFT plans), the same for every run.
-//
-// The cache flag overrides the fast-deconv-side knob, which the dump does not
-// carry (DDFacet never sets it); everything else comes from the dump.
 //
 // --max-iter (total minor iterations) and --max-clean-iter (clean loop length)
 // override the dump's caps; --cycle=0 --max-iter=1 --max-clean-iter=1 runs every
@@ -28,12 +25,13 @@
 //
 // --bench times a fixed amount of work on one cycle (--cycle, default 0), so
 // GPUs compare fairly. It defaults every flag above that pins a decision
-// (scale 1, peak factor 0, every stop and stall off, no auto-mask, lazy_scale
-// cache; an explicit flag still wins) and runs --outer=N outer iterations
+// (scale 1, peak factor 0, every stop and stall off, no auto-mask; an explicit
+// flag still wins) and runs --outer=N outer iterations
 // (default 200) of --max-clean-iter minor iterations each. Each of the --runs
 // repetitions also replays a 1-outer baseline on a fresh session, so
 //   per_outer_ms = (total_ms - baseline_ms) / (N - 1)
-// excludes the one-off setup (uploads, cuFFT plans, PSF builds). An untimed
+// excludes the one-off setup (uploads, cuFFT plans, the first outer's PSF builds;
+// facets first hit later are built inside the timed outers). An untimed
 // 1-outer warm-up first absorbs the process's CUDA initialisation. --csv=FILE
 // appends one row per repetition, tagged with --label and the host name.
 //
@@ -70,9 +68,6 @@ namespace core = fast_deconv::core;
 namespace algo = fast_deconv::algorithm;
 namespace ddmsc = fast_deconv::algorithm::ddmsc;
 
-// Same order as psf_cache_mode.
-static constexpr std::array<const char*, 3> cache_mode_names{"lazy_pair", "lazy_scale", "eager_all"};
-
 // A NaN scalar in the dump is an unset optional on the Python side.
 static std::optional<float> opt_finite(float v) { return std::isnan(v) ? std::nullopt : std::optional<float>(v); }
 
@@ -100,7 +95,6 @@ int main(int argc, char** argv)
   std::string dir;
   int device_id = 0;
   int only_cycle = -1;
-  std::optional<algo::psf_cache_mode> cache_policy;
   int runs = 1;
   std::optional<int> max_iter;
   std::optional<int> max_clean_iter;
@@ -163,14 +157,6 @@ int main(int argc, char** argv)
       csv_path = a.substr(6);
     } else if (a.rfind("--label=", 0) == 0) {
       label = a.substr(8);
-    } else if (a.rfind("--psf-cache=", 0) == 0) {
-      const auto* it = std::find_if(cache_mode_names.begin(), cache_mode_names.end(),
-                                    [&](const char* n) { return a.compare(12, std::string::npos, n) == 0; });
-      if (it == cache_mode_names.end()) {
-        fprintf(stderr, "Unknown --psf-cache mode: %s\n", a.c_str() + 12);
-        return 1;
-      }
-      cache_policy = static_cast<algo::psf_cache_mode>(it - cache_mode_names.begin());
     } else if (!a.empty() && a[0] != '-' && dir.empty()) {
       dir = a;
     } else {
@@ -181,13 +167,12 @@ int main(int argc, char** argv)
   }
   if (dir.empty()) {
     fprintf(stderr,
-            "Usage: %s <dump_dir> [--device=N] [--cycle=N] [--runs=N] [--psf-cache=%s|%s|%s] [--max-iter=N] "
-            "[--max-clean-iter=N]\n"
+            "Usage: %s <dump_dir> [--device=N] [--cycle=N] [--runs=N] [--max-iter=N] [--max-clean-iter=N]\n"
             "       [--peak-factor=F] [--stall-threshold=F] [--stop-rms-factor=F] [--stop-peak-factor=F]\n"
             "       [--stop-sidelobe-level=F] [--divergence-factor=F] [--auto-mask=0|1] [--force-scale=S]\n"
             "       [--flux-threshold=F] [--stop-cycle-factor=F] [--crop=N|NROWxNCOL]\n"
             "       [--bench] [--outer=N] [--csv=FILE] [--label=STR]\n",
-            argv[0], cache_mode_names[0], cache_mode_names[1], cache_mode_names[2]);
+            argv[0]);
     return 1;
   }
   if (!bench && !csv_path.empty()) {
@@ -214,7 +199,6 @@ int main(int argc, char** argv)
     stop_sidelobe_level = stop_sidelobe_level.value_or(0.f);
     divergence_factor = divergence_factor.value_or(1e30f);
     auto_mask = auto_mask.value_or(false);
-    cache_policy = cache_policy.value_or(algo::psf_cache_mode::lazy_scale);
   }
 
   auto load_init = [&](const char* name) { return npy::load_npy(dir + "/init/" + name + ".npy"); };
@@ -295,10 +279,8 @@ int main(int argc, char** argv)
   // A fresh session: the auto-mask history accumulates across cycles, so a
   // second replay on the same Ddmsc would not do the same work.
   const auto make_imager = [&] {
-    auto imager = std::make_unique<ddmsc::Ddmsc>(raw_psfs, xdes, mask, scale_sigmas, scale_bias, map_pixel_facet, nrow,
-                                                 ncol, device_id);
-    if (cache_policy) imager->set_psf_cache_policy(*cache_policy);
-    return imager;
+    return std::make_unique<ddmsc::Ddmsc>(raw_psfs, xdes, mask, scale_sigmas, scale_bias, map_pixel_facet, nrow, ncol,
+                                          device_id);
   };
 
   // The cycle's parameters as dumped, each overridden by its flag when given.
@@ -350,7 +332,6 @@ int main(int argc, char** argv)
   if (bench) {
     const std::string cdir = cycle_dir(first_cycle);
     const int clean_iter = max_clean_iter.value_or(npy::load_npy(cdir + "max_sub_iteration.npy").scalar<int>());
-    printf("  psf cache: %s\n", cache_mode_names.at(static_cast<int>(*cache_policy)));
     printf(
         "  bench: cycle %d, %d outer x %d clean iterations, %d runs, each after a 1-outer baseline (untimed warm-up "
         "first)\n",
@@ -430,7 +411,6 @@ int main(int argc, char** argv)
   std::vector<std::vector<double>> cycle_ms;  // [cycle - first_cycle][run]
   for (int run = 0; run < runs; ++run) {
     const auto imager = make_imager();
-    if (run == 0) printf("  psf cache: %s\n", cache_mode_names.at(static_cast<int>(imager->psf_cache_policy())));
 
     double total_ms = 0.0;
     for (int cycle = first_cycle;; ++cycle) {
