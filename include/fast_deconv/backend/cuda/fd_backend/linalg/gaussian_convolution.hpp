@@ -10,18 +10,28 @@
 namespace fast_deconv::linalg {
 
 /**
- * Linear (zero outside) convolution of a batch of same-sized images with the band-limited Gaussian
- * H(f) = exp(-2 pi^2 sigma^2 f^2). A caller that blurs one input with several sigmas runs forward()
- * once and convolve() per sigma. On this backend the convolution is a padded 2D FFT: the cuFFT plans
- * and the scratch are built once and run on the lane given at construction, which must outlive this.
+ * @brief Linear (zero outside) convolution of a batch of same-sized images with the band-limited Gaussian
+ *        H(f) = exp(-2 pi^2 sigma^2 f^2).
+ *
+ * A caller that blurs one input with several sigmas runs forward() once and convolve() per sigma. On this
+ * backend the convolution is a padded 2D FFT: the cuFFT plans and the scratch are built once and run on
+ * the lane given at construction, which must outlive this.
  */
 class gaussian_convolution_ctx {
  public:
   /// On this backend, the half-complex spectrum of the padded input: batch * freq_total.
   using spectrum = core::cont1d<complex_type>;
 
-  /// @p gap: zero padding in pixels per axis, P = next_fast_size(n + gap); wrap-free for every sigma with
-  /// gaussian_reach(sigma) <= gap.
+  /**
+   * @brief Builds the cuFFT plans and the scratch for one image shape.
+   *
+   * @param[in] ctx    Lane the plans and scratch live on. Must outlive this.
+   * @param[in] batch  Images per call.
+   * @param[in] nrow   Image rows.
+   * @param[in] ncol   Image columns.
+   * @param[in] gap    Zero padding in pixels per axis, P = next_fast_size(n + gap); wrap-free for every sigma
+   *                   with gaussian_reach(sigma) <= gap.
+   */
   gaussian_convolution_ctx(const core::exec_ctx& ctx, std::int64_t batch, std::int64_t nrow, std::int64_t ncol,
                            std::int64_t gap);
   ~gaussian_convolution_ctx();
@@ -34,8 +44,12 @@ class gaussian_convolution_ctx {
   /// A spectrum sized for this context, for forward().
   spectrum make_spectrum() const;
 
-  /// Pad (input at the top-left) + R2C of @p input, (batch, nrow, ncol), into @p out. @p input can change once this
-  /// returns.
+  /**
+   * @brief Pad (input at the top-left) + R2C of @p input into @p out.
+   *
+   * @param[in]  input  Images, (batch, nrow, ncol); can change once this returns.
+   * @param[out] out    Spectrum from make_spectrum().
+   */
   void forward(core::span3d<const float> input, spectrum& out) const;
 
   /// Multiply @p in by Gaussian(@p sigma), C2R, crop the top-left into @p out. @p in is left intact.

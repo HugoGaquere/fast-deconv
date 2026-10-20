@@ -7,17 +7,25 @@
 
 namespace fast_deconv::matrix {
 
-/// Caches one peak per tile of the image so that, after a clean
-/// subtraction only dirties a sub-region, the global argmax can be refreshed by
-/// recomputing the touched tiles instead of rescanning the whole image.
-///
-///   tiled_argmax_ctx tiled{ctx, mean_residual.extents(), 64};
-///   auto first = tiled.run(mean_residual);            // seeds every tile
-///   auto next  = tiled.run_incremental(mean_residual, row, col, fh, fw);
+/**
+ * @brief Caches one peak per tile of the image for incremental argmax refreshes.
+ *
+ * After a clean subtraction only dirties a sub-region, the global argmax can be refreshed by recomputing
+ * the touched tiles instead of rescanning the whole image.
+ *
+ * @code
+ *   tiled_argmax_ctx tiled{ctx, mean_residual.extents(), 64};
+ *   auto first = tiled.run(mean_residual);            // seeds every tile
+ *   auto next  = tiled.run_incremental(mean_residual, row, col, fh, fw);
+ * @endcode
+ */
 class tiled_argmax_ctx {
  public:
-  /// @param extents    image extents (nrow, ncol) every call must match.
-  /// @param tile_size  square tile edge in pixels.
+  /**
+   * @param[in] ctx        Lane the reductions run on. Must outlive this.
+   * @param[in] extents    Image extents (nrow, ncol) every call must match.
+   * @param[in] tile_size  Square tile edge in pixels.
+   */
   tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> extents, std::int64_t tile_size);
 
   tiled_argmax_ctx(const tiled_argmax_ctx&) = delete;
@@ -26,12 +34,21 @@ class tiled_argmax_ctx {
   /// Full pass: recompute every tile under @p criterion, then combine. Seeds the cache and the criterion.
   peak run(core::span2d<const float> data, peak_criterion criterion = {});
 
-  /// Incremental pass, under the criterion of the last run(): recompute only the tiles overlapping the
-  /// @p foot_height x @p foot_width rectangle centered on (@p peak_row,
-  /// @p peak_col), then re-combine against the still-valid cached tiles.
-  ///
-  /// PRECONDITION: a prior run() seeded every tile, and nothing outside the
-  /// footprint changed in @p data since that call.
+  /**
+   * @brief Incremental pass, under the criterion of the last run().
+   *
+   * Recomputes only the tiles overlapping the footprint, then re-combines against the still-valid cached
+   * tiles.
+   *
+   * @pre A prior run() seeded every tile, and nothing outside the footprint changed in @p data since that call.
+   *
+   * @param[in] data         Image, (nrow, ncol), matching extents().
+   * @param[in] peak_row     Footprint center row.
+   * @param[in] peak_col     Footprint center column.
+   * @param[in] foot_height  Footprint height in pixels.
+   * @param[in] foot_width   Footprint width in pixels.
+   * @return The refreshed global peak.
+   */
   peak run_incremental(core::span2d<const float> data, std::int64_t peak_row, std::int64_t peak_col,
                        std::int64_t foot_height, std::int64_t foot_width);
 

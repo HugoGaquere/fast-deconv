@@ -79,7 +79,6 @@ gaussian_convolution_ctx::spectrum gaussian_convolution_ctx::make_spectrum() con
   return ctx_.alloc_mdcontainer_async<float>(batch_, nrow_, ncol_);
 }
 
-// On this backend the spectrum is a copy of the input: convolve() needs no transform, only the data.
 void gaussian_convolution_ctx::forward(core::span3d<const float> input, spectrum& out) const
 {
   FD_PROFILE_FN();
@@ -128,8 +127,8 @@ void gaussian_convolution_ctx::convolve_separable_(const float* in, float sigma,
   const std::int64_t ncol = ncol_;
   // P - n >= reach: a wrapped tail crosses the zero strip, in either direction, before it can reach the image.
   const std::int64_t pad = std::min(gap_, gaussian_reach(sigma));
-  const std::int64_t row_len = next_fast_size(ncol + pad);  // padded row length
-  const std::int64_t col_len = next_fast_size(nrow + pad);  // padded column length
+  const std::int64_t row_len = next_fast_size(ncol + pad);
+  const std::int64_t col_len = next_fast_size(nrow + pad);
 
   const auto kx = gaussian_kernel(ctx_, row_len, sigma);
   const auto ky = gaussian_kernel(ctx_, col_len, sigma);

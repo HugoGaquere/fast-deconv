@@ -28,6 +28,7 @@ void compute_pseudo_inverse(const core::exec_ctx& ctx, const float* d_A, float* 
   float* const d_G = G.get();
   float* const d_Ginv = Ginv.get();
 
+  // cuBLAS sees row-major A as col-major A_cm = A^T, shape (n_cols, n_rows).
   // Step 1: G
   //   overdetermined: G = A_cm @ A_cm^T  (N, T)  -> A^T A   [n_cols, n_cols]
   //   underdetermined: G = A_cm^T @ A_cm (T, N)  -> A A^T   [n_rows,  n_rows]

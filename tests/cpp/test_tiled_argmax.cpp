@@ -28,7 +28,7 @@ class TiledArgmax : public fdtest::BackendTest {
 
     auto out = ws.run(core::span2d<float>(d.get(), h, w));
     sr.wait();
-    return out;  // ws frees its own device buffers in its destructor
+    return out;
   }
 };
 
@@ -105,7 +105,7 @@ TEST_F(TiledArgmax, WorkspaceReuseAcrossCalls)
 }
 
 // Incremental path: seed every tile with a full pass, then dirty only a footprint
-// (as a clean subtraction would) and refresh via argmax_incremental. The new peak
+// (as a clean subtraction would) and refresh via run_incremental. The new peak
 // planted inside the footprint must win; the untouched cached tiles must survive.
 TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
 {

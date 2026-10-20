@@ -105,7 +105,7 @@ struct run_workspace {
   }
 };
 
-/// Per-scale masks around every component so far, previous calls included.
+// Per-scale masks around every component so far, previous calls included.
 core::cont3d<bool> build_scale_mask(const context& ctx, const ddmsc_result& result,
                                     const core::span1d<const float>& weights_freq, std::int64_t nrow, std::int64_t ncol)
 {
@@ -139,7 +139,7 @@ void select_psf_scale(run_workspace& ws, const params& p, int scale)
   if (p.psf_cache_policy == psf_cache_mode::lazy_scale) ws.psf_cache.prefetch_scale(scale);
 }
 
-/// Returns the number of components found.
+// Returns the number of components found.
 int clean_loop(run_workspace& ws, const context& ctx, const params& p, const scale::scale_result& selected,
                core::span3d<float>& dirty, const core::span3d<const float>& jones_norm,
                const core::span1d<const float>& weights_freq, int first_component, ddmsc_result& result)
@@ -208,7 +208,6 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
                               const core::span1d<const float>& weights_freq)
 {
   FD_PROFILE_FN();
-  // log::set_level(spdlog::level::debug);  // disabled for benchmarking
 
   const std::int64_t psf_nrow = ctx.raw_psfs.extent(2);
   const std::int64_t psf_ncol = ctx.raw_psfs.extent(3);

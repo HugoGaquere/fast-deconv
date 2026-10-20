@@ -35,7 +35,6 @@ psf_convolution::entry psf_convolution::build(int scale, std::int64_t facet)
   core::span3d<const float> raw = emu::submdspan(raw_psfs_, facet);
 
   entry e;
-  // core::cont3d<float> conv;
   auto conv2_mean = exec_ctx_.alloc_mdcontainer_async<float>(psf_nrow_, psf_ncol_);
 
   if (scale == 0) {
@@ -44,11 +43,6 @@ psf_convolution::entry psf_convolution::build(int scale, std::int64_t facet)
     linalg::weighted_sum_async(exec_ctx_, raw, weights_, conv2_mean);
     e.gain = gamma_;
   } else {
-    // Previous version: every channel convolved once and twice, then the weighted mean of the twice-convolved.
-    // auto conv = exec_ctx_.alloc_mdcontainer_async<float>(n_freq_, psf_nrow_, psf_ncol_);
-    // auto conv2 = exec_ctx_.alloc_mdcontainer_async<float>(n_freq_, psf_nrow_, psf_ncol_);
-    // conv_ctx_.convolve_with_gaussian_once_and_twice(raw, sigmas_.at(scale), conv, conv2);
-    // linalg::weighted_sum_async(exec_ctx_, conv2, weights_, conv2_mean);
     const float sigma = sigmas_.at(scale);
     auto conv = exec_ctx_.alloc_mdcontainer_async<float>(n_freq_, psf_nrow_, psf_ncol_);
     {
@@ -78,7 +72,6 @@ psf_convolution::entry psf_convolution::build(int scale, std::int64_t facet)
 psf_convolution::entry psf_convolution::get(int scale, std::int64_t facet)
 {
   FD_PROFILE_SCOPE("psf_convolution/get");
-  // if (weights_host_.empty()) throw std::logic_error("psf_convolution::get called before configure()");
   if (scale < 0 || scale >= n_scales_ || facet < 0 || facet >= n_facets_)
     throw std::out_of_range("psf_convolution::get: (scale, facet) out of range");
 

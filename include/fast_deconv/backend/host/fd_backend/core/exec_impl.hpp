@@ -12,11 +12,13 @@
 
 namespace fast_deconv::core {
 
-/// Host counterpart of the cuda memory pool: whole blocks only, no splitting.
-/// A freed block goes on the free list for its exact size and is handed back on
-/// the next request for that size, never returned to the OS. The scratch sizes
-/// repeat identically every iteration, so exact-size matching hits every time
-/// and the multi-GB mmap/munmap round trip disappears with it.
+/**
+ * @brief Host counterpart of the cuda memory pool: whole blocks only, no splitting.
+ *
+ * A freed block goes on the free list for its exact size and is handed back on the next request for that
+ * size, never returned to the OS. The scratch sizes repeat identically every iteration, so exact-size
+ * matching hits every time and the multi-GB mmap/munmap round trip disappears with it.
+ */
 class block_pool {
  public:
   /// Matches the alignment device allocations give the vectorized paths.
@@ -62,8 +64,14 @@ class block_pool {
     return ptr;
   }
 
-  /// The free list is the block's only owner once it is back, so a push that
-  /// throws has to release it rather than drop it on the floor.
+  /**
+   * @brief Returns @p ptr to the free list for its size.
+   *
+   * The free list is the block's only owner once it is back, so a push that throws has to release it
+   * rather than drop it on the floor.
+   *
+   * @param[in] ptr  Block from alloc(); a pointer the pool does not track is deleted outright.
+   */
   void recycle(void* ptr) noexcept
   {
     const std::lock_guard lock(mutex_);
@@ -85,8 +93,11 @@ class block_pool {
     }
   }
 
-  /// Bytes currently allocated by user code (live working set), not the bytes
-  /// the pool holds — the same thing the cuda backend reports.
+  /**
+   * @brief Bytes currently allocated by user code (live working set).
+   *
+   * Not the bytes the pool holds — the same thing the cuda backend reports.
+   */
   std::uint64_t used_bytes() const
   {
     const std::lock_guard lock(mutex_);
@@ -109,8 +120,12 @@ class block_pool {
   std::uint64_t used_bytes_ = 0;
 };
 
-/// No device to own, but it owns the pool and hands it to every lane created
-/// from it, the same shape as the cuda backend.
+/**
+ * @brief Owns the host memory pool.
+ *
+ * No device to own, but it owns the pool and hands it to every lane created from it, the same shape as
+ * the cuda backend.
+ */
 class exec_resources_impl {
  public:
   explicit exec_resources_impl(std::uint8_t /*device*/) {}
@@ -123,13 +138,20 @@ class exec_resources_impl {
   std::uint64_t pool_used_bytes() const { return memory_pool.used_bytes(); }
   std::uint64_t pool_reserved_bytes() const { return memory_pool.reserved_bytes(); }
 
-  /// mutable so a lane built from a const resources still allocates through it,
-  /// the way the cuda lane copies its pool handle out of one.
+  /**
+   * @brief Pool every lane allocates from.
+   *
+   * mutable so a lane built from a const resources still allocates through it, the way the cuda lane
+   * copies its pool handle out of one.
+   */
   mutable block_pool memory_pool;
 };
 
-/// One execution lane on the host. Work runs inline, so wait() has nothing to
-/// wait for and allocation is a pool hit.
+/**
+ * @brief One execution lane on the host.
+ *
+ * Work runs inline, so wait() has nothing to wait for and allocation is a pool hit.
+ */
 class exec_ctx_impl {
  public:
   static constexpr std::align_val_t alignment = block_pool::alignment;

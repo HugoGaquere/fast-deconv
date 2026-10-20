@@ -26,11 +26,13 @@ class psf_convolution {
   };
 
   /**
-   * @param exec_ctx  Lane the builds run on; each build waits on it before returning. Must outlive this.
-   * @param raw_psfs  Raw PSFs, device, (n_facets, n_freq, psf_h, psf_w). Must outlive this.
-   * @param sigmas    Scale sigmas, host, (n_scales,). Copied.
-   * @param weights   Per-channel weights, device, (n_freq,). Must outlive this.
-   * @param gamma     CLEAN loop gain, folded into each entry's gain.
+   * @brief Lazy cache of the scale-convolved PSFs, built on the given lane.
+   *
+   * @param[in] exec_ctx  Lane the builds run on; each build waits on it before returning. Must outlive this.
+   * @param[in] raw_psfs  Raw PSFs, device, (n_facets, n_freq, psf_h, psf_w). Must outlive this.
+   * @param[in] sigmas    Scale sigmas, host, (n_scales,). Copied.
+   * @param[in] weights   Per-channel weights, device, (n_freq,). Must outlive this.
+   * @param[in] gamma     CLEAN loop gain, folded into each entry's gain.
    */
   psf_convolution(const core::exec_ctx& exec_ctx, core::span4d<const float> raw_psfs, std::vector<float> sigmas,
                   core::span1d<const float> weights, float gamma);
@@ -49,8 +51,12 @@ class psf_convolution {
   /// Build every (scale, facet).
   void prefetch_all();
 
-  /// Drops every entry, once the build lane has drained. The caller must first drain
-  /// any other lane still reading handed-out entries: the frees are ordered on the build lane only.
+  /**
+   * @brief Drops every entry, once the build lane has drained.
+   *
+   * The caller must first drain any other lane still reading handed-out entries: the frees are ordered on
+   * the build lane only.
+   */
   void clear();
 
   int n_scales() const { return n_scales_; }

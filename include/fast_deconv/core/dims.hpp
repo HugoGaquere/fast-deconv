@@ -11,8 +11,16 @@ namespace fast_deconv::core {
 template <std::size_t N>
 using dims = emu::dextents<std::int64_t, N>;
 
-/// The one narrowing conversion: counts are int64, and a third-party API (cuBLAS, cuFFT, a launch config,
-/// a size_t shape) that takes less gets its value through here, never through a bare cast.
+/**
+ * @brief The one narrowing conversion.
+ *
+ * Counts are int64, and a third-party API (cuBLAS, cuFFT, a launch config, a size_t shape) that takes less
+ * gets its value through here, never through a bare cast.
+ *
+ * @param[in] v  Value to convert.
+ * @return @p v as @p To.
+ * @throws std::overflow_error If @p v does not fit in @p To.
+ */
 template <std::integral To, std::integral From>
 To narrow(From v)
 {
