@@ -8,7 +8,7 @@
 
 namespace fast_deconv::test {
 
-// Owning allocation in backend memory on lane @p sr, freed (with a wait) on
+// Owning allocation in backend memory on context @p sr, freed (with a wait) on
 // destruction — an early ASSERT return cannot leak pool memory. Every transfer
 // goes through core::exec_ctx's backend-neutral primitives, so the same test
 // source compiles against the cuda and host backends.

@@ -26,9 +26,9 @@ class psf_convolution {
   };
 
   /**
-   * @brief Lazy cache of the scale-convolved PSFs, built on the given lane.
+   * @brief Lazy cache of the scale-convolved PSFs, built on the given context.
    *
-   * @param[in] exec_ctx  Lane the builds run on; each build waits on it before returning. Must outlive this.
+   * @param[in] exec_ctx  Context the builds run on; each build waits on it before returning. Must outlive this.
    * @param[in] raw_psfs  Raw PSFs, device, (n_facets, n_freq, psf_h, psf_w). Must outlive this.
    * @param[in] sigmas    Scale sigmas, host, (n_scales,). Copied.
    * @param[in] weights   Per-channel weights, device, (n_freq,). Must outlive this.
@@ -52,10 +52,10 @@ class psf_convolution {
   void prefetch_all();
 
   /**
-   * @brief Drops every entry, once the build lane has drained.
+   * @brief Drops every entry, once the build context has drained.
    *
-   * The caller must first drain any other lane still reading handed-out entries: the frees are ordered on
-   * the build lane only.
+   * The caller must first drain any other context still reading handed-out entries: the frees are ordered on
+   * the build context only.
    */
   void clear();
 

@@ -25,7 +25,7 @@ namespace fast_deconv::common {
  *
  * Output convention: true = masked, false = valid.
  *
- * @param[in]    ctx                 Execution lane (kernels run on its stream; also used for scratch allocations).
+ * @param[in]    ctx                 Execution context (work runs on it; also used for scratch allocations).
  * @param[in]    coords              Per-component peak coordinates (row, col).
  * @param[in]    scales              Per-component scale index, same length as coords.
  * @param[in]    central_facet_psfs  Central facet per-frequency PSFs, (n_freq, psf_h, psf_w).

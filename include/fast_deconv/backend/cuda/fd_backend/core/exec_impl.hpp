@@ -13,7 +13,7 @@ namespace fast_deconv::core {
 /**
  * @brief Owns the device and its memory pool.
  *
- * One per device; hands its pool to every lane created from it.
+ * One per device; hands its pool to every exec_ctx created from it.
  */
 class exec_resources_impl {
  public:
@@ -64,7 +64,7 @@ class exec_resources_impl {
 };
 
 /**
- * @brief One execution lane: a stream, its cuBLAS handle, and stream-ordered allocation from the owning pool.
+ * @brief The cuda exec_ctx: a stream, its cuBLAS handle, and stream-ordered allocation from the owning pool.
  *
  * Members are public because the kernel launches in the .cu files need the stream.
  */

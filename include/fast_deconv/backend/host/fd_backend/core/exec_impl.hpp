@@ -121,7 +121,7 @@ class block_pool {
 /**
  * @brief Owns the host memory pool.
  *
- * No device to own, but it owns the pool and hands it to every lane created from it, the same shape as
+ * No device to own, but it owns the pool and hands it to every exec_ctx created from it, the same shape as
  * the cuda backend.
  */
 class exec_resources_impl {
@@ -137,16 +137,16 @@ class exec_resources_impl {
   std::uint64_t pool_reserved_bytes() const { return memory_pool.reserved_bytes(); }
 
   /**
-   * @brief Pool every lane allocates from.
+   * @brief Pool every exec_ctx allocates from.
    *
-   * mutable so a lane built from a const resources still allocates through it, the way the cuda lane
+   * mutable so an exec_ctx built from a const resources still allocates through it, the way the cuda exec_ctx_impl
    * copies its pool handle out of one.
    */
   mutable block_pool memory_pool;
 };
 
 /**
- * @brief One execution lane on the host.
+ * @brief The host exec_ctx.
  *
  * Work runs inline, so wait() has nothing to wait for and allocation is a pool hit.
  */
