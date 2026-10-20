@@ -180,8 +180,8 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   core::host_span1d<float> bias_view(scale_bias.data(), kScales);
   core::host_span2d<int> map_view(map_pixel_facet.data(), kNrow, kNcol);
 
-  ddmsc::context ctx(/*exec_device=*/0, psfs_view, xdes_view, mask_view, sigmas_view, bias_view, map_view, kNrow, kNcol,
-                     kFreq);
+  ddmsc::context ctx(/*exec_device=*/0, psfs_view, xdes_view, mask_view, sigmas_view, bias_view, map_view, kNrow,
+                     kNcol);
 
   const ddmsc::params p{
       // Gaussian-component cleaning shrinks the residual by only ~5% of the

@@ -113,19 +113,6 @@ class exec_ctx_impl {
 
   void wait() const { CHECK_CUDA(cudaStreamSynchronize(cuda_stream)); }
 
-  /// Bytes a new allocation can draw on: the pool holds its idle bytes back from the driver, so add them.
-  std::uint64_t available_bytes() const
-  {
-    std::size_t free_bytes = 0;
-    std::size_t total_bytes = 0;
-    CHECK_CUDA(cudaMemGetInfo(&free_bytes, &total_bytes));
-    cuuint64_t reserved = 0;
-    cuuint64_t used = 0;
-    CHECK_CUDA(cudaMemPoolGetAttribute(memory_pool, cudaMemPoolAttrReservedMemCurrent, &reserved));
-    CHECK_CUDA(cudaMemPoolGetAttribute(memory_pool, cudaMemPoolAttrUsedMemCurrent, &used));
-    return free_bytes + (reserved - used);
-  }
-
   cudaStream_t cuda_stream{};
   cublasHandle_t cublas_handle{};
   std::uint8_t device{};

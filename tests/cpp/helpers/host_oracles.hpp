@@ -37,29 +37,6 @@ inline std::vector<float> gaussian2d(int nrow, int ncol, double cr, double cc, d
   return img;
 }
 
-// Zero-padded direct 2D convolution, kernel origin at (kh/2, kw/2) — the same
-// center convention as the library's FFT path. Output has the input's shape.
-inline std::vector<float> direct_convolve_2d(const std::vector<float>& img, int nrow, int ncol,
-                                             const std::vector<float>& kernel, int kh, int kw)
-{
-  std::vector<float> out(static_cast<std::size_t>(nrow) * ncol, 0.0f);
-  for (int r = 0; r < nrow; ++r) {
-    for (int c = 0; c < ncol; ++c) {
-      double acc = 0.0;
-      for (int i = 0; i < kh; ++i) {
-        for (int j = 0; j < kw; ++j) {
-          const int rr = r - (i - kh / 2);
-          const int cc = c - (j - kw / 2);
-          if (rr < 0 || rr >= nrow || cc < 0 || cc >= ncol) continue;
-          acc += static_cast<double>(kernel.at(flat(i, j, kw))) * img.at(flat(rr, cc, ncol));
-        }
-      }
-      out.at(flat(r, c, ncol)) = static_cast<float>(acc);
-    }
-  }
-  return out;
-}
-
 // out[i] = sum_f weights[f] * data[f * npix + i]
 inline std::vector<float> weighted_sum(const std::vector<float>& data, const std::vector<float>& weights,
                                        std::size_t npix)

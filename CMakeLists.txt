@@ -242,7 +242,6 @@ if(SKBUILD)
   # Plain C++: the bindings only touch the backend-agnostic public API.
   pybind11_add_module(_fast_deconv
     src/python/fast_deconv_module.cpp
-    src/python/bindings/core.cpp
     src/python/bindings/ddmsc.cpp
   )
 

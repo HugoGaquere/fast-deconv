@@ -6,6 +6,7 @@ from fast_deconv._fast_deconv import ddmsc
 
 DDMSCResult = ddmsc.DDMSCResult
 ConvergenceStatus = ddmsc.ConvergenceStatus
+PsfCacheMode = ddmsc.PsfCacheMode
 
 # Every tunable property, snapshotted per run() so the replay needs no
 # knowledge of which ones the caller changes between cycles.
@@ -76,4 +77,4 @@ class _DumpingDDMSC(ddmsc.DDMSC):
 
 DDMSC = _DumpingDDMSC if os.environ.get("FAST_DECONV_DUMP") else ddmsc.DDMSC
 
-__all__ = ["ConvergenceStatus", "DDMSC", "DDMSCResult", "ddmsc"]
+__all__ = ["ConvergenceStatus", "DDMSC", "DDMSCResult", "PsfCacheMode", "ddmsc"]

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <unistd.h>
-
 #include <cstdint>
 #include <cstring>
 #include <fast_deconv/core/profiler.hpp>
@@ -176,12 +174,6 @@ class exec_ctx_impl {
   void copy_bytes(void* dst, const void* src, std::uint64_t num_bytes) const { std::memcpy(dst, src, num_bytes); }
 
   void wait() const {}
-
-  /// Free physical pages only; reclaimable cache and the pool's free lists are excluded, so this under-reports.
-  std::uint64_t available_bytes() const
-  {
-    return static_cast<std::uint64_t>(sysconf(_SC_AVPHYS_PAGES)) * static_cast<std::uint64_t>(sysconf(_SC_PAGE_SIZE));
-  }
 
   block_pool& memory_pool;
 };

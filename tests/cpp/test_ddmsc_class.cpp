@@ -48,7 +48,7 @@ class DdmscClass : public fdtest::BackendTest {
     core::host_span2d<int> map_view(map_pixel_facet_.data(), kSize, kSize);
 
     return ddmsc::Ddmsc(psf_view, xdes_view, mask_view, sigma_view, bias_view, map_view,
-                        /*dirty_nrow=*/kSize, /*dirty_ncol=*/kSize, /*n_freq=*/kFreq);
+                        /*dirty_nrow=*/kSize, /*dirty_ncol=*/kSize);
   }
 
  private:
@@ -88,25 +88,4 @@ TEST_F(DdmscClass, SetCoeffsCopiesRows)
 
   EXPECT_EQ(result.n_order, n_order);
   EXPECT_EQ(result.coeffs, coeffs);
-}
-
-// Plane guard: the context validates its dimensions before any device allocation,
-// so this runs without a GPU. 46341^2 = 2,147,488,281 is the first square past
-// INT32_MAX; the throwing spans are never dereferenced.
-TEST(DdmscContextGuard, RejectsPlaneLargerThanInt32)
-{
-  constexpr int kBig = 46341;
-  constexpr int kSmall = 8;
-
-  core::host_span4d<float> psfs(static_cast<float*>(nullptr), 1, 1, kSmall, kSmall);
-  core::host_span4d<float> big_psfs(static_cast<float*>(nullptr), 1, 1, kBig, kBig);
-  core::host_span2d<float> xdes(static_cast<float*>(nullptr), 1, 2);
-  core::host_span2d<bool> mask(static_cast<bool*>(nullptr), kSmall, kSmall);
-  float sigma_storage[1] = {0.0f};  // context copies the sigmas, so they need real storage
-  core::host_span1d<float> sigmas(sigma_storage, 1);
-  core::host_span1d<float> bias(static_cast<float*>(nullptr), 1);
-  core::host_span2d<int> map(static_cast<int*>(nullptr), kSmall, kSmall);
-
-  EXPECT_THROW(ddmsc::context(0, psfs, xdes, mask, sigmas, bias, map, kBig, kBig, 1), std::invalid_argument);
-  EXPECT_THROW(ddmsc::context(0, big_psfs, xdes, mask, sigmas, bias, map, kSmall, kSmall, 1), std::invalid_argument);
 }

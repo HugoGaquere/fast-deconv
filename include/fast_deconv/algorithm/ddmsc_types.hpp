@@ -17,13 +17,6 @@
 
 namespace fast_deconv::algorithm::ddmsc {
 
-static constexpr int MAX_SPECTRAL_ORDER = 4;
-
-enum class auto_mask_threshold_type {
-  peak_value,
-  rms,
-};
-
 struct params {
   // outer loop params
   int max_iteration;        // total minor iterations across all scale selections
@@ -66,13 +59,12 @@ struct context {
   core::host_span2d<int> map_pixel_facet;
   std::int64_t dirty_nrow;
   std::int64_t dirty_ncol;
-  std::int64_t n_freq;
 
   std::vector<common::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
   std::vector<int> historical_scales;                   // scale of each historical component
 
   /**
-   * @brief Validates the dimensions, stages the run-constant inputs and copies the scale sigmas.
+   * @brief Stages the run-constant inputs and copies the scale sigmas.
    *
    * The host spans must outlive the context: the host backend borrows them.
    *
@@ -85,12 +77,11 @@ struct context {
    * @param[in] map_pixel_facet  Facet index of every dirty pixel, host, (dirty_nrow, dirty_ncol). Borrowed.
    * @param[in] dirty_nrow       Dirty image rows.
    * @param[in] dirty_ncol       Dirty image columns.
-   * @param[in] n_freq           Number of frequency channels.
    */
   context(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
           const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
           const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet,
-          std::int64_t dirty_nrow, std::int64_t dirty_ncol, std::int64_t n_freq)
+          std::int64_t dirty_nrow, std::int64_t dirty_ncol)
       : resources(exec_device),
         compute_stream(resources.make_ctx()),
         aux_stream(resources.make_ctx()),
@@ -101,8 +92,7 @@ struct context {
         scale_bias(scale_bias),
         map_pixel_facet(map_pixel_facet),
         dirty_nrow(dirty_nrow),
-        dirty_ncol(dirty_ncol),
-        n_freq(n_freq)
+        dirty_ncol(dirty_ncol)
   {
     compute_stream.wait();  // staging copies complete before construction returns
   }

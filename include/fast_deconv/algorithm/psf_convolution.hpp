@@ -59,8 +59,6 @@ class psf_convolution {
    */
   void clear();
 
-  int n_scales() const { return n_scales_; }
-  std::int64_t n_facets() const { return n_facets_; }
   std::size_t n_entries() const { return entries_.size(); }
 
  private:

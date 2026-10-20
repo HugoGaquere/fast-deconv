@@ -6,7 +6,7 @@ import enum
 import typing
 import numpy as np
 import numpy.typing as npt
-__all__: list[str] = ['ConvergenceStatus', 'DDMSC', 'DDMSCResult']
+__all__: list[str] = ['ConvergenceStatus', 'DDMSC', 'DDMSCResult', 'PsfCacheMode']
 class ConvergenceStatus(enum.Enum):
     running = 0
     converged = 1
@@ -14,6 +14,10 @@ class ConvergenceStatus(enum.Enum):
     max_iterations = 3
     all_scales_stalled = 4
     no_components = 5
+class PsfCacheMode(enum.Enum):
+    lazy_pair = 0
+    lazy_scale = 1
+    eager_all = 2
 class DDMSC:
     auto_mask: bool
     clean_negative: bool
@@ -28,7 +32,6 @@ class DDMSC:
         map_pixel_facet: npt.NDArray[np.int32],
         dirty_nrow: int,
         dirty_ncol: int,
-        n_freq: int,
         exec_device: int = ...,
     ) -> None:
         ...
@@ -90,6 +93,12 @@ class DDMSC:
     def peak_factor(self, arg1: typing.SupportsFloat | typing.SupportsIndex) -> None:
         ...
     @property
+    def psf_cache_policy(self) -> PsfCacheMode:
+        ...
+    @psf_cache_policy.setter
+    def psf_cache_policy(self, arg1: PsfCacheMode) -> None:
+        ...
+    @property
     def stall_threshold(self) -> float:
         ...
     @stall_threshold.setter
@@ -121,7 +130,7 @@ class DDMSC:
         ...
 class DDMSCResult:
     @property
-    def coeffs(self) -> list[list[float]]:
+    def coeffs(self) -> npt.NDArray[np.float32]:
         ...
     @property
     def final_flux(self) -> float:
