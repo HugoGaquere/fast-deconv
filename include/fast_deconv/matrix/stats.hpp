@@ -62,8 +62,6 @@ class stats_ctx {
   /// The packed accumulator left by run_async(), in backend memory.
   const stats_acc* device_state() const { return d_state_.get(); }
 
-  std::int64_t size() const { return n_elements_; }
-
  private:
   const core::exec_ctx& ctx_;
   std::int64_t n_elements_;

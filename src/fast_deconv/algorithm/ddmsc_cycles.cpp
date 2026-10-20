@@ -251,7 +251,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   const float stop_flux = limits.stop_flux;
 
   FD_LOG_INFO(
-      "run_ddmsc: initial pak_flux={:.8f} rms={:.8f} stop_flux={:.8f} "
+      "run_ddmsc: initial peak_flux={:.8f} rms={:.8f} stop_flux={:.8f} "
       "(rms_lim={:.8f} peak_lim={:.8f} sidelobe_lim={:.8f} floor={:.8f})",
       track_flux, track_rms, stop_flux, limits.rms, limits.peak, limits.sidelobe, p.flux_threshold);
 
@@ -307,7 +307,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
 
     // The residual is untouched when no component was found, so the previous stats still hold.
     if (n_clean_iter == 0) {
-      FD_LOG_INFO("ddmsc_minor_cycles: no components found, stopping");
+      FD_LOG_INFO("run_ddmsc: no components found, stopping");
       deconv_convergence.track(track_flux, track_rms, 0, selected_scale_idx);
       continue;
     }
@@ -333,7 +333,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
     track_rms = this_rms;
 
     if (deconv_convergence.is_stall(selected_scale_idx))
-      FD_LOG_INFO("ddmsc_minor_cycles: retired scale {} due to stall", selected_scale_idx);
+      FD_LOG_INFO("run_ddmsc: retired scale {} due to stall", selected_scale_idx);
   }
 
   // Closes the last iteration's frame; the loop body only opens a new one.

@@ -46,7 +46,6 @@ struct fft_dims {
     freq_ncol = padded_ncol / 2 + 1;
   }
 
-  std::int64_t input_total() const { return input_nrow * input_ncol; }
   std::int64_t padded_total() const { return padded_nrow * padded_ncol; }
   std::int64_t freq_total() const { return freq_nrow * freq_ncol; }
 };

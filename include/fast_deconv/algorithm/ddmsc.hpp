@@ -29,7 +29,7 @@ class Ddmsc {
   Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
         const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
         const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet,
-        std::int64_t dirty_nrow, std::int64_t dirty_ncol, std::int64_t n_freq, int exec_device = 0);
+        std::int64_t dirty_nrow, std::int64_t dirty_ncol, int exec_device = 0);
 
   /**
    * @brief Run one full deconvolution session.

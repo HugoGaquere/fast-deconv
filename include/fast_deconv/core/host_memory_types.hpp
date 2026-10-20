@@ -19,8 +19,6 @@ template <typename T>
 using host_span3d = h_mdspan<T, 3>;
 template <typename T>
 using host_span4d = h_mdspan<T, 4>;
-template <typename T>
-using host_span5d = h_mdspan<T, 5>;
 
 // Owning host buffers; untagged like the spans, so one converts to host_spanNd.
 template <typename T, std::size_t N>
@@ -34,7 +32,5 @@ template <typename T>
 using host_cont3d = h_mdcontainer<T, 3>;
 template <typename T>
 using host_cont4d = h_mdcontainer<T, 4>;
-template <typename T>
-using host_cont5d = h_mdcontainer<T, 5>;
 
 }  // namespace fast_deconv::core

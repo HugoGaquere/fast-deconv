@@ -114,7 +114,7 @@ int main(int argc, char** argv)
   for (int run = 0; run < runs; ++run) {
     // A fresh session per run: the auto-mask history accumulates across cycles, so
     // a second replay on the same Ddmsc would not do the same work.
-    ddmsc::Ddmsc imager(raw_psfs, xdes, mask, scale_sigmas, scale_bias, map_pixel_facet, nrow, ncol, n_freq, device_id);
+    ddmsc::Ddmsc imager(raw_psfs, xdes, mask, scale_sigmas, scale_bias, map_pixel_facet, nrow, ncol, device_id);
 
     if (cache_policy) imager.set_psf_cache_policy(*cache_policy);
     if (run == 0) printf("  psf cache: %s\n", cache_mode_names.at(static_cast<int>(imager.psf_cache_policy())));
