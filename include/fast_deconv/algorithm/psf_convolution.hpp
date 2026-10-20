@@ -11,12 +11,6 @@
 
 namespace fast_deconv::algorithm {
 
-enum class psf_cache_mode {
-  lazy_pair,   // build one (scale, facet) on first use
-  lazy_scale,  // build every facet of a scale on that scale's first use
-  eager_all,   // build every (scale, facet) up front
-};
-
 class psf_convolution {
  public:
   struct entry {
@@ -26,7 +20,7 @@ class psf_convolution {
   };
 
   /**
-   * @brief Lazy cache of the scale-convolved PSFs, built on the given context.
+   * @brief Lazy cache of the scale-convolved PSFs of one scale, built per (scale, facet) on first use.
    *
    * @param[in] exec_ctx  Context the builds run on; each build waits on it before returning. Must outlive this.
    * @param[in] raw_psfs  Raw PSFs, device, (n_facets, n_freq, psf_h, psf_w). Must outlive this.
@@ -42,22 +36,12 @@ class psf_convolution {
   psf_convolution(psf_convolution&&) = delete;
   psf_convolution& operator=(psf_convolution&&) = delete;
 
-  /// Entry for one (scale, facet), built on miss.
-  entry get(int scale, std::int64_t facet);
-
-  /// Build every facet of @p scale.
-  void prefetch_scale(int scale);
-
-  /// Build every (scale, facet).
-  void prefetch_all();
-
   /**
-   * @brief Drops every entry, once the build context has drained.
+   * @brief Entry for one (scale, facet), built on miss.
    *
-   * The caller must first drain any other context still reading handed-out entries: the frees are ordered on
-   * the build context only.
+   * A new scale frees the cached entries: sync every context still reading them first.
    */
-  void clear();
+  entry get(int scale, std::int64_t facet);
 
   std::size_t n_entries() const { return entries_.size(); }
 
@@ -78,8 +62,9 @@ class psf_convolution {
   std::int64_t psf_ncol_;
 
   float gamma_ = 0.0f;
+  int scale_ = -1;  // scale the entries belong to
 
-  std::unordered_map<std::int64_t, entry> entries_;  // key = scale * n_facets + facet
+  std::unordered_map<std::int64_t, entry> entries_;  // scale_ entries, keyed by facet
 };
 
 }  // namespace fast_deconv::algorithm

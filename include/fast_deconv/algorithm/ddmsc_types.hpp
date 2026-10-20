@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <fast_deconv/algorithm/psf_convolution.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/common/region.hpp>
@@ -42,9 +41,6 @@ struct params {
   bool force_enable_auto_mask;                    // engage masking unconditionally, bypassing thresholds
   std::optional<float> auto_mask_peak_threshold;  // engage when residual peak <= this (absolute flux)
   std::optional<float> auto_mask_rms_threshold;   // engage when residual peak <= this * running RMS
-
-  // conv-PSF cache params
-  psf_cache_mode psf_cache_policy;  // when the convolved PSFs get built
 };
 
 struct context {

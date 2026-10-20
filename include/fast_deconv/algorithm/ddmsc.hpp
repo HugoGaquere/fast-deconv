@@ -91,9 +91,6 @@ class Ddmsc {
   std::optional<float> auto_mask_rms_threshold() const { return params_.auto_mask_rms_threshold; }
   void set_auto_mask_rms_threshold(std::optional<float> v) { params_.auto_mask_rms_threshold = v; }
 
-  psf_cache_mode psf_cache_policy() const { return params_.psf_cache_policy; }
-  void set_psf_cache_policy(psf_cache_mode v) { params_.psf_cache_policy = v; }
-
  private:
   context ctx_;
   params params_;

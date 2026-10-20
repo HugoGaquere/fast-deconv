@@ -84,7 +84,6 @@ struct run_workspace {
   matrix::tiled_argmax_ctx tiled;
   const linalg::gaussian_convolution_ctx scale_conv;
   psf_convolution psf_cache;
-  int cached_scale = -1;  // scale psf_cache holds
   // Coefficient buffers live on aux_stream, which writes them.
   core::cont1d<float> all_coeffs;
   core::cont1d<float> coeffs_per_chan;
@@ -124,19 +123,6 @@ core::cont3d<bool> build_scale_mask(const context& ctx, const ddmsc_result& resu
   common::build_auto_mask(stream_a, all_coords, all_scales, central_facet_psfs, weights_freq, ctx.scale_sigmas,
                           ctx.mask, mask_per_scale);
   return mask_per_scale;
-}
-
-void select_psf_scale(run_workspace& ws, const params& p, int scale)
-{
-  FD_PROFILE_FN();
-  // One scale stays resident; stream_b, which reads the entries, was drained last iteration.
-  if (scale != ws.cached_scale && p.psf_cache_policy != psf_cache_mode::eager_all) {
-    ws.psf_cache.clear();
-    ws.cached_scale = scale;
-  }
-
-  // Other policies fill misses per facet in get().
-  if (p.psf_cache_policy == psf_cache_mode::lazy_scale) ws.psf_cache.prefetch_scale(scale);
 }
 
 // Returns the number of components found.
@@ -224,15 +210,12 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   const int n_scales = static_cast<int>(ctx.scale_sigmas.size());
 
   FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_nrow, psf_ncol));
-  // Also in the trace, so a .tracy file says what it ran on.
   FD_PROFILE_APPINFO(format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_nrow, psf_ncol));
 
   // Matches DDFacet's NBand check.
   if (n_freq < 2 * n_order)
-    FD_LOG_WARN(
-        "run_ddmsc: spectral fit is under-constrained (n_freq={} n_order={}); want n_freq >= 2*n_order. "
-        "Coefficients are extrapolated to the degrid frequencies, where the unconstrained directions dominate.",
-        n_freq, n_order);
+    FD_LOG_WARN("run_ddmsc: spectral fit is under-constrained (n_freq={} n_order={}); want n_freq >= 2*n_order.",
+                n_freq, n_order);
 
   run_workspace ws{ctx, p, dirty_nrows, dirty_ncols, n_freq, weights_freq};
 
@@ -255,13 +238,9 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
       "(rms_lim={:.8f} peak_lim={:.8f} sidelobe_lim={:.8f} floor={:.8f})",
       track_flux, track_rms, stop_flux, limits.rms, limits.peak, limits.sidelobe, p.flux_threshold);
 
-  // iteration() counts the components found.
   common::convergence deconv_convergence{p.max_iteration, stop_flux, 5, p.divergence_factor,
                                          common::scale_stall_tracker{n_scales, 5, p.scale_stall_threshold}};
   deconv_convergence.init(track_flux, track_rms);
-
-  FD_PROFILE_MARK("init/psf_cache");
-  if (p.psf_cache_policy == psf_cache_mode::eager_all) ws.psf_cache.prefetch_all();
 
   ddmsc_result result{core::narrow<std::size_t>(std::int64_t{p.max_iteration} + p.max_clean_iteration)};
   result.initial_flux = track_flux;
@@ -294,7 +273,6 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
                             : scale::select_best_scale(stream_a, ws.scale_conv, mean_residual, ctx.scale_sigmas,
                                                        ctx.scale_bias, retired, ctx.mask, p.clean_negative);
     const int selected_scale_idx = selected.scale;
-    select_psf_scale(ws, p, selected_scale_idx);
 
     const int n_clean_iter =
         clean_loop(ws, ctx, p, selected, dirty, jones_norm, weights_freq, deconv_convergence.iteration(), result);
