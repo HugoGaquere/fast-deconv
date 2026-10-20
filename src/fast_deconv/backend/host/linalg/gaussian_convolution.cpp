@@ -69,8 +69,8 @@ void convolve_block(const float* src, float* dst, std::int64_t ld, std::int64_t 
 }  // namespace
 
 gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, std::int64_t batch, std::int64_t nrow,
-                                                   std::int64_t ncol, std::int64_t gap)
-    : ctx_(ctx), batch_(batch), nrow_(nrow), ncol_(ncol), gap_(gap)
+                                                   std::int64_t ncol, const std::vector<float>&, float)
+    : ctx_(ctx), batch_(batch), nrow_(nrow), ncol_(ncol)
 {
 }
 
@@ -116,8 +116,7 @@ void gaussian_convolution_ctx::convolve(core::span3d<const float> input, float s
 // padding never exists as a plane. The row pass convolves along the buffer's contiguous axis. The column pass
 // copies kBatchLines adjacent columns, one 64 B cache line per row, into a buffer with the strip's own layout and
 // convolves along its axis 0: one column per SIMD lane, as ducc0's FFT bunches want, so nothing is transposed.
-// The padding is per sigma, from the kernel's reach, capped at gap_: beyond it the lines wrap as the CUDA
-// backend's P = next_fast_size(n + gap).
+// The padding is per sigma, from the kernel's reach.
 void gaussian_convolution_ctx::convolve_separable_(const float* in, float sigma, core::span3d<float> out) const
 {
   assert(out.is_exhaustive() && out.extent(0) == batch_);
@@ -126,7 +125,7 @@ void gaussian_convolution_ctx::convolve_separable_(const float* in, float sigma,
   const std::int64_t nrow = nrow_;
   const std::int64_t ncol = ncol_;
   // P - n >= reach: a wrapped tail crosses the zero strip, in either direction, before it can reach the image.
-  const std::int64_t pad = std::min(gap_, gaussian_reach(sigma));
+  const std::int64_t pad = gaussian_reach(sigma);
   const std::int64_t row_len = next_fast_size(ncol + pad);
   const std::int64_t col_len = next_fast_size(nrow + pad);
 

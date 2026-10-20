@@ -96,7 +96,7 @@ struct run_workspace {
       : mean_residual_buf(ctx.compute_stream.alloc_mdcontainer_async<float>(nrow, ncol)),
         stats(ctx.compute_stream, nrow * ncol, p.clean_negative),
         tiled(ctx.compute_stream, mean_residual_buf.extents(), 64),
-        scale_conv(ctx.compute_stream, 1, ctx.dirty_nrow, ctx.dirty_ncol, linalg::max_gaussian_reach(ctx.scale_sigmas)),
+        scale_conv(ctx.compute_stream, 1, ctx.dirty_nrow, ctx.dirty_ncol, ctx.scale_sigmas),
         psf_cache(ctx.compute_stream, ctx.raw_psfs, ctx.scale_sigmas, weights_freq, p.gamma),
         all_coeffs(ctx.aux_stream.alloc_mdcontainer_async<float>(
             (std::int64_t{p.max_iteration} + p.max_clean_iteration) * ctx.xdes.extent(1))),

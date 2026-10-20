@@ -71,9 +71,9 @@ void crop_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* in
 }
 
 gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, std::int64_t batch, std::int64_t nrow,
-                                                   std::int64_t ncol, std::int64_t gap)
+                                                   std::int64_t ncol, const std::vector<float>& sigmas, float factor)
     : ctx_(ctx),
-      dims_(nrow, ncol, gap),
+      dims_(nrow, ncol, max_gaussian_reach(sigmas, factor)),
       batch_(batch),
       padded_(ctx.alloc_ptr_async<float>(batch * dims_.padded_total())),
       product_(ctx.alloc_ptr_async<complex_type>(batch * dims_.freq_total()))
@@ -128,6 +128,7 @@ void gaussian_convolution_ctx::convolve(const spectrum& in, float sigma, core::s
   assert(in.mapping().required_span_size() == batch_ * dims_.freq_total());
   assert(out.is_exhaustive() && out.extent(0) == batch_);
   assert(out.extent(1) == dims_.input_nrow && out.extent(2) == dims_.input_ncol);
+  assert(gaussian_reach(sigma) <= std::min(dims_.padded_nrow - dims_.input_nrow, dims_.padded_ncol - dims_.input_ncol));
 
   // The multiply writes product_, so the caller's spectrum survives for the next sigma.
   multiply_with_gaussian(ctx_, dims_, batch_, in.data_handle(), product_.get(), sigma);
@@ -143,6 +144,7 @@ void gaussian_convolution_ctx::convolve(core::span3d<const float> input, float s
   assert(input.extent(1) == dims_.input_nrow && input.extent(2) == dims_.input_ncol);
   assert(out.is_exhaustive() && out.extent(0) == batch_);
   assert(out.extent(1) == dims_.input_nrow && out.extent(2) == dims_.input_ncol);
+  assert(gaussian_reach(sigma) <= std::min(dims_.padded_nrow - dims_.input_nrow, dims_.padded_ncol - dims_.input_ncol));
 
   pad_async(ctx_, dims_, input.data_handle(), padded_.get(), batch_);
   forward_(padded_.get(), product_.get());
