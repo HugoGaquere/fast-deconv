@@ -23,7 +23,7 @@ template <typename T>
 using owned_ptr = std::unique_ptr<T[], ctx_deleter>;
 
 /**
- * @brief One execution lane: where work runs and where its memory comes from.
+ * @brief One execution context: where work runs and where its memory comes from.
  *
  * The backend supplies the handles and the primitives below it; the typed layer here is written once and
  * shared by every backend.

@@ -15,7 +15,7 @@ namespace fast_deconv::linalg {
  * The underdetermined path is required because A^T A is then rank-deficient (rank <= n_rows in an
  * n_cols x n_cols space) and cannot be inverted.
  *
- * @param[in]  ctx       Execution lane.
+ * @param[in]  ctx       Execution context.
  * @param[in]  d_A       A, backend memory, row-major (n_rows, n_cols).
  * @param[out] d_A_pinv  A_pinv, backend memory, col-major (n_cols, n_rows), pre-allocated.
  * @param[in]  n_rows    Rows of A (frequencies in the spectral fit).

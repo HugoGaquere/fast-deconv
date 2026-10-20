@@ -6,6 +6,7 @@
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft_dims.hpp>
 #include <fd_backend/linalg/fft.hpp>
+#include <vector>
 
 namespace fast_deconv::linalg {
 
@@ -15,7 +16,7 @@ namespace fast_deconv::linalg {
  *
  * A caller that blurs one input with several sigmas runs forward() once and convolve() per sigma. On this
  * backend the convolution is a padded 2D FFT: the cuFFT plans and the scratch are built once and run on
- * the lane given at construction, which must outlive this.
+ * the context given at construction, which must outlive this.
  */
 class gaussian_convolution_ctx {
  public:
@@ -25,15 +26,17 @@ class gaussian_convolution_ctx {
   /**
    * @brief Builds the cuFFT plans and the scratch for one image shape.
    *
-   * @param[in] ctx    Lane the plans and scratch live on. Must outlive this.
+   * @param[in] ctx    Context the plans and scratch live on. Must outlive this.
    * @param[in] batch  Images per call.
    * @param[in] nrow   Image rows.
    * @param[in] ncol   Image columns.
-   * @param[in] gap    Zero padding in pixels per axis, P = next_fast_size(n + gap); wrap-free for every sigma
-   *                   with gaussian_reach(sigma) <= gap.
+   * @param[in] sigmas Gaussian sigmas convolve() will be called with, in pixels.
+   * @param[in] factor Multiplier applied to every sigma.
+   *
+   * Pads to P = next_fast_size(n + max_gaussian_reach(sigmas, factor)) per axis: wrap-free for those sigmas.
    */
   gaussian_convolution_ctx(const core::exec_ctx& ctx, std::int64_t batch, std::int64_t nrow, std::int64_t ncol,
-                           std::int64_t gap);
+                           const std::vector<float>& sigmas, float factor = 1.0f);
   ~gaussian_convolution_ctx();
 
   gaussian_convolution_ctx(const gaussian_convolution_ctx&) = delete;

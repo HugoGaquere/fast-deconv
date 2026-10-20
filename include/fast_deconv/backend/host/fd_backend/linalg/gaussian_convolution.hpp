@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
+#include <vector>
 
 namespace fast_deconv::linalg {
 
@@ -11,7 +12,7 @@ namespace fast_deconv::linalg {
  *
  * A caller that blurs one input with several sigmas runs forward() once and convolve() per sigma. On this
  * backend the convolution is separable, rows then columns, through per-thread line batches: no 2D FFT.
- * The lane given at construction must outlive this.
+ * The context given at construction must outlive this.
  */
 class gaussian_convolution_ctx {
  public:
@@ -19,17 +20,18 @@ class gaussian_convolution_ctx {
   using spectrum = core::cont3d<float>;
 
   /**
-   * @brief Records the image shape and padding; no plans to build on this backend.
+   * @brief Records the image shape; no plans to build on this backend.
    *
-   * @param[in] ctx    Lane the convolutions run on. Must outlive this.
+   * @param[in] ctx    Context the convolutions run on. Must outlive this.
    * @param[in] batch  Images per call.
    * @param[in] nrow   Image rows.
    * @param[in] ncol   Image columns.
-   * @param[in] gap    Zero padding in pixels per axis; wrap-free for every sigma with gaussian_reach(sigma) <= gap.
-   *                   Each line is padded to min(gap, gaussian_reach(sigma)), so small sigmas keep short lines.
+   * @param[in] sigmas Unused: each line is padded to gaussian_reach(sigma) of the sigma at hand, wrap-free for
+   *                   any sigma. Kept for the CUDA backend's signature.
+   * @param[in] factor Unused, as @p sigmas.
    */
   gaussian_convolution_ctx(const core::exec_ctx& ctx, std::int64_t batch, std::int64_t nrow, std::int64_t ncol,
-                           std::int64_t gap);
+                           const std::vector<float>& sigmas, float factor = 1.0f);
   ~gaussian_convolution_ctx() = default;
 
   gaussian_convolution_ctx(const gaussian_convolution_ctx&) = delete;
@@ -59,7 +61,6 @@ class gaussian_convolution_ctx {
   std::int64_t batch_;
   std::int64_t nrow_;
   std::int64_t ncol_;
-  std::int64_t gap_;
 };
 
 }  // namespace fast_deconv::linalg

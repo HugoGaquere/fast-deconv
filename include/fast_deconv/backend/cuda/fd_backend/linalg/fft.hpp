@@ -16,7 +16,7 @@ using complex_type = cufftComplex;
 /**
  * @brief Pads a batch of images to the top-left of zeroed planes.
  *
- * @param[in]  ctx      Lane the kernel runs on.
+ * @param[in]  ctx      Context the kernel runs on.
  * @param[in]  dims     Input and padded sizes.
  * @param[in]  input    n_batch images of (input_nrow, input_ncol).
  * @param[out] output   n_batch planes of (padded_nrow, padded_ncol), written entirely.

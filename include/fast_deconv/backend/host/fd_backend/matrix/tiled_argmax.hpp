@@ -17,7 +17,7 @@ namespace fast_deconv::matrix {
 class tiled_argmax_ctx {
  public:
   /**
-   * @param[in] ctx        Lane the reductions run on. Must outlive this.
+   * @param[in] ctx        Context the reductions run on. Must outlive this.
    * @param[in] extents    Image extents (nrow, ncol) every call must match.
    * @param[in] tile_size  Square tile edge in pixels.
    */

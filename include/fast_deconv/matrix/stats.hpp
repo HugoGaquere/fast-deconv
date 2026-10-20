@@ -37,7 +37,7 @@ struct stats_result {
 class stats_ctx {
  public:
   /**
-   * @param[in] ctx         Lane the reductions run on. Must outlive this.
+   * @param[in] ctx         Context the reductions run on. Must outlive this.
    * @param[in] n_elements  Pixels per image.
    * @param[in] use_abs     Take the max of |x| instead of x.
    */
@@ -56,7 +56,7 @@ class stats_ctx {
    */
   void run_async(core::span2d<float> data, core::span2d<bool> mask);
 
-  /// Async issue + D2H copy + lane sync. Returns {max, rms} on host.
+  /// Async issue + D2H copy + ctx sync. Returns {max, rms} on host.
   stats_result run(core::span2d<float> data, core::span2d<bool> mask);
 
   /// The packed accumulator left by run_async(), in backend memory.
