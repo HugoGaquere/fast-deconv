@@ -11,18 +11,18 @@ namespace fast_deconv::algorithm::ddmsc {
 
 /**
  * @brief   Stateful DDMSC deconvolution session.
- * @details Constructor builds heavy resources once: the GPU resource pool and
- *          the cuFFT plans for the scale and PSF convolutions. The static
- *          `DDMSC_ctx` (raw_psfs, xdes, scale_mask, scale_sigmas, scale_bias,
- *          map_pixel_facet) is also captured at construction.
+ * @details Constructor creates the resource pool and both streams, and captures the
+ *          run-constant `context` (raw_psfs, xdes, mask, scale_sigmas, scale_bias,
+ *          map_pixel_facet). The scale and PSF convolution plans are built per `run()`.
  *
  *          `run()` accepts only the per-call inputs that change between major
  *          cycles: the dirty image, jones normalization, and per-frequency
  *          weights. All algorithm parameters are tunable.
  *
- *          All array inputs are host views: the constructor and `run()` copy
- *          them host->device internally. `dirty` is in/out — its residual is
- *          copied back into the caller's host buffer when `run()` returns.
+ *          All array inputs are host views. raw_psfs, xdes and mask are staged at
+ *          construction, the `run()` inputs per call; scale_bias and map_pixel_facet
+ *          stay borrowed on the host. `dirty` is in/out — its residual is copied back
+ *          into the caller's host buffer when `run()` returns.
  */
 class Ddmsc {
  public:
@@ -32,11 +32,11 @@ class Ddmsc {
         std::int64_t dirty_nrow, std::int64_t dirty_ncol, int exec_device = 0);
 
   /**
-   * @brief Run one full deconvolution session.
+   * @brief Run the minor loop for one major cycle.
    *
    * @param[in,out] dirty         Dirty image, host, (n_freq, nrow, ncol); the residual is written back
    *                              before returning.
-   * @param[in]     jones_norm    Jones normalization, host.
+   * @param[in]     jones_norm    Jones normalization, host, (n_freq, nrow, ncol).
    * @param[in]     weights_freq  Per-frequency weights, host, (n_freq,).
    * @return Extracted components, entry/exit flux and RMS, and why the loop stopped.
    */

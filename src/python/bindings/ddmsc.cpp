@@ -64,7 +64,6 @@ void bind_ddmsc(py::module_& m)
            py::keep_alive<1, 2>(),  // raw_psfs
            py::keep_alive<1, 3>(),  // xdes
            py::keep_alive<1, 4>(),  // scale_mask
-           py::keep_alive<1, 5>(),  // scale_sigmas
            py::keep_alive<1, 6>(),  // scale_bias
            py::keep_alive<1, 7>())  // map_pixel_facet
       .def("run", &ddmsc::Ddmsc::run, py::arg("dirty"), py::arg("jones_norm"), py::arg("weights_freq"),
