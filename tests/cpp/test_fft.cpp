@@ -109,7 +109,7 @@ TEST_F(FftLayout, ZeroSigmaConvolutionIsIdentityAndKeepsTheSpectrum)
   for (const auto& [rows, cols] : {std::pair{8, 10}, std::pair{9, 15}, std::pair{10, 9}}) {
     for (int batch : {1, 3, 9}) {
       SCOPED_TRACE(::testing::Message() << rows << 'x' << cols << " batch=" << batch);
-      const linalg::gaussian_convolution_ctx conv(sr, batch, rows, cols, /*gap=*/5);
+      const linalg::gaussian_convolution_ctx conv(sr, batch, rows, cols, {0.0f});
       const auto count = static_cast<std::size_t>(batch) * rows * cols;
 
       std::vector<float> input(count);
@@ -129,16 +129,16 @@ TEST_F(FftLayout, ZeroSigmaConvolutionIsIdentityAndKeepsTheSpectrum)
 }
 
 // convolve, from a spectrum and in one shot, is the linear convolution (zero outside the image) with the
-// band-limited Gaussian, in every plane of a batch, on odd and even, non-square sizes. The gap is the largest
-// reach over the sigmas, so both backends are free of wrap-around: the FFT path pads the plane by it, the host
-// each line by the reach of the sigma at hand.
+// band-limited Gaussian, in every plane of a batch, on odd and even, non-square sizes. Both backends are free of
+// wrap-around: the FFT path pads the plane by the largest reach over the sigmas, the host each line by the reach
+// of the sigma at hand.
 TEST_F(FftLayout, ConvolveSpectrumMatchesLinearConvolutionOracle)
 {
   const auto sr = res().make_ctx();
   const std::vector<float> sigmas{1.5f, 2.5f, 4.0f};
   for (const auto& [rows, cols] : {std::pair{24, 40}, std::pair{33, 21}}) {
     for (int batch : {1, 3}) {
-      const linalg::gaussian_convolution_ctx conv(sr, batch, rows, cols, linalg::max_gaussian_reach(sigmas));
+      const linalg::gaussian_convolution_ctx conv(sr, batch, rows, cols, sigmas);
       const auto count = static_cast<std::size_t>(batch) * rows * cols;
 
       std::vector<float> input(count);
@@ -169,7 +169,7 @@ TEST_F(FftLayout, ConvolveSpectrumMatchesLinearConvolutionOracle)
 // psf_convolution entry against its definition, computed independently in double: conv is each channel
 // convolved once, conv2 the channel-weighted mean of each channel convolved twice. The build takes the
 // weighted mean first and convolves once with sigma * sqrt(2); this checks that shortcut. psf_convolution
-// sizes its gaps from the reach of its sigmas, so the test holds on both backends.
+// is wrap-free for its sigmas, so the test holds on both backends.
 TEST_F(FftLayout, PsfConvolutionMatchesPerChannelOracle)
 {
   const auto sr = res().make_ctx();
@@ -224,38 +224,6 @@ TEST_F(FftLayout, PsfConvolutionMatchesPerChannelOracle)
       for (int f = 0; f < n_freq; ++f) mean += weights.at(f) * at(twice, f, r, c);
       ASSERT_NEAR(conv2.at(flat(r, c, cols)), mean, 2e-5) << "conv2 r=" << r << " c=" << c;
     }
-}
-
-// With a gap below the kernel's reach the convolution wraps. Both backends must wrap like a circular
-// convolution of length next_fast_size(n + gap) per axis: CUDA through its FFT size, the host by capping
-// its line padding at the gap.
-TEST_F(FftLayout, ConvolveWithShortGapWrapsLikeCircularOracle)
-{
-  const auto sr = res().make_ctx();
-  constexpr int rows = 20, cols = 27, batch = 2, gap = 3;
-  const float sigma = 4.0f;  // reach ~23 px, far beyond the gap
-  const auto count = static_cast<std::size_t>(batch) * rows * cols;
-
-  std::vector<float> input(count);
-  for (std::size_t i = 0; i < count; ++i) input[i] = static_cast<float>((i * 37) % 101) / 101.0f - 0.5f;
-  fdtest::device_buffer<float> d_input(sr, input), d_output(sr, count);
-
-  const linalg::gaussian_convolution_ctx conv(sr, batch, rows, cols, gap);
-  conv.convolve(core::span3d<const float>(d_input.get(), batch, rows, cols), sigma,
-                core::span3d<float>(d_output.get(), batch, rows, cols));
-  const auto actual = d_output.to_host();
-
-  const auto hr = fdtest::circular_gaussian_kernel(sigma, core::narrow<int>(linalg::next_fast_size(rows + gap)));
-  const auto hc = fdtest::circular_gaussian_kernel(sigma, core::narrow<int>(linalg::next_fast_size(cols + gap)));
-  const auto expected = fdtest::separable_circular_convolve(input, batch, rows, cols, hr, hc);
-  for (std::size_t i = 0; i < count; ++i) ASSERT_NEAR(actual[i], expected[i], 2e-5f) << "index=" << i;
-
-  // The wrap must be visible, or the test would not tell the two layouts apart.
-  const auto linear = fdtest::separable_linear_convolve(
-      input, batch, rows, cols, fdtest::band_limited_gaussian_taps(sigma, std::max(rows, cols)));
-  float max_wrap = 0.0f;
-  for (std::size_t i = 0; i < count; ++i) max_wrap = std::max(max_wrap, std::abs(expected[i] - linear[i]));
-  EXPECT_GT(max_wrap, 1e-3f);
 }
 
 #ifdef FAST_DECONV_WITH_CUDA

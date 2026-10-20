@@ -48,8 +48,8 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
   auto psf_mean = ctx.alloc_mdcontainer_async<float>(psf_nrow, psf_ncol);
   linalg::weighted_sum_async(ctx, central_facet_psfs, weights_freq, psf_mean);
   // Wrap-free for every scale's sigma * sqrt(2).
-  const linalg::gaussian_convolution_ctx conv(ctx, /*batch=*/1, psf_nrow, psf_ncol,
-                                              linalg::max_gaussian_reach(scale_sigmas, std::numbers::sqrt2_v<float>));
+  const linalg::gaussian_convolution_ctx conv(ctx, /*batch=*/1, psf_nrow, psf_ncol, scale_sigmas,
+                                              std::numbers::sqrt2_v<float>);
   auto spectrum = conv.make_spectrum();
   conv.forward(core::span3d<const float>(psf_mean.data_handle(), 1, psf_nrow, psf_ncol), spectrum);
 

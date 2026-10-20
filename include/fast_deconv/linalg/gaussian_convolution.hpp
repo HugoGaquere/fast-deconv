@@ -8,8 +8,7 @@ namespace fast_deconv::linalg {
  * @brief Zero gap, in pixels, beyond which the image-domain kernel of Gaussian(@p sigma) is below float32
  *        precision (1e-7 of its peak).
  *
- * A gaussian_convolution_ctx built with gap >= gaussian_reach(sigma) gives the linear convolution for that
- * sigma.
+ * A zero gap of at least this after the image makes an FFT convolution with that sigma linear.
  *
  * @param[in] sigma  Gaussian sigma in pixels.
  * @return The gap; 0 for sigma <= 0 (the identity).
