@@ -19,7 +19,7 @@ namespace fdtest = fast_deconv::test;
 using fdtest::flat;
 
 // ============================================================================
-// next_fast_size / compute_padding — pure host
+// next_fast_size — pure host
 // ============================================================================
 
 namespace {

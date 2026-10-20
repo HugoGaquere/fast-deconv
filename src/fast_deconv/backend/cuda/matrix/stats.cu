@@ -13,9 +13,7 @@ namespace fast_deconv::matrix {
 
 namespace {
 
-/// Per-pixel transform: the mask excludes pixels from the max only. Every
-/// pixel contributes to the RMS so the noise estimate is computed over the
-/// whole image, matching DDFacet's `np.std(MeanDirty)` stop-threshold RMS.
+// Every pixel feeds the RMS, masked or not: DDFacet's np.std(MeanDirty) stop-threshold RMS.
 struct masked_stats_op {
   const float* data;
   const bool* mask;

@@ -10,8 +10,11 @@
 
 namespace fast_deconv::core {
 
-/// Owns the device and its memory pool. One per device; hands its pool to
-/// every lane created from it.
+/**
+ * @brief Owns the device and its memory pool.
+ *
+ * One per device; hands its pool to every lane created from it.
+ */
 class exec_resources_impl {
  public:
   explicit exec_resources_impl(std::uint8_t device) : device(device), memory_pool(make_memory_pool(device)) {}
@@ -60,9 +63,11 @@ class exec_resources_impl {
   }
 };
 
-/// One execution lane: a stream, its cuBLAS handle, and stream-ordered
-/// allocation from the owning pool. Members are public because the kernel
-/// launches in the .cu files need the stream.
+/**
+ * @brief One execution lane: a stream, its cuBLAS handle, and stream-ordered allocation from the owning pool.
+ *
+ * Members are public because the kernel launches in the .cu files need the stream.
+ */
 class exec_ctx_impl {
  public:
   /// Backend memory lives on the device, so stage() must really copy.

@@ -31,8 +31,15 @@ class Ddmsc {
         const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet,
         std::int64_t dirty_nrow, std::int64_t dirty_ncol, std::int64_t n_freq, int exec_device = 0);
 
-  /// Run one full deconvolution session. The updated residual is written back
-  /// into @p dirty (host, in/out) before returning.
+  /**
+   * @brief Run one full deconvolution session.
+   *
+   * @param[in,out] dirty         Dirty image, host, (n_freq, nrow, ncol); the residual is written back
+   *                              before returning.
+   * @param[in]     jones_norm    Jones normalization, host.
+   * @param[in]     weights_freq  Per-frequency weights, host, (n_freq,).
+   * @return Extracted components, entry/exit flux and RMS, and why the loop stopped.
+   */
   ddmsc_result run(core::host_span3d<float>& dirty, const core::host_span3d<const float>& jones_norm,
                    const core::host_span1d<const float>& weights_freq);
 

@@ -20,44 +20,28 @@ namespace fast_deconv::kernel {
 
 using fast_deconv::matrix::peak;
 
-// ===========================================================================
-// KERNEL 1 — per-tile argmax.   One block == one tile.
-// ===========================================================================
-// Launched with a 2D grid covering the tile rectangle you want to (re)compute.
-// For a FULL pass the launcher uses grid = (n_tiles_x, n_tiles_y) and
-// tile_x0 = tile_y0 = 0. For a future INCREMENTAL pass you would launch a
-// smaller grid over just the dirty tile rectangle and pass its origin in
-// (tile_x0, tile_y0) — the body below is written so the same code serves both.
-//
-// Each block must end by writing exactly ONE peak into
-//   d_tiles[tile_y * n_tiles_x + tile_x]
-// where (value, index) is the max over its tile and index is the flat index into
-// the FULL image (gy * image_width + gx).
+// One block per tile. The grid covers the tile rectangle to (re)compute, origin (tile_x0, tile_y0): the whole
+// grid for run(), the dirty sub-grid for run_incremental(). Each block writes its tile's peak, index into the
+// full image, to d_tiles[tile_y * n_tiles_x + tile_x].
 __global__ void tiled_argmax_reduce(const float* data, matrix::peak_criterion criterion, peak* d_tiles,
                                     std::int64_t image_width, std::int64_t image_height, std::int64_t tile_width,
                                     std::int64_t tile_height, std::int64_t n_tiles_x, std::int64_t tile_x0,
                                     std::int64_t tile_y0)
 {
-  // Identify the tile this block owns
   const std::int64_t tile_x = tile_x0 + blockIdx.x;
   const std::int64_t tile_y = tile_y0 + blockIdx.y;
-  // Locate the origin of this block
   const std::int64_t ox = tile_x * tile_width;
   const std::int64_t oy = tile_y * tile_height;
-  // Clamp the tile extent to the image
   const std::int64_t ex = min(ox + tile_width, image_width);
   const std::int64_t ey = min(oy + tile_height, image_height);
-  // Actual tile width and height
   const std::int64_t tw = ex - ox, th = ey - oy;
 
-  // Precompute col and row step
   const std::int64_t step = blockDim.x;
   const std::int64_t dcol = step % tw;
   const std::int64_t drow = step / tw;
   std::int64_t col = threadIdx.x % tw;
   std::int64_t row = threadIdx.x / tw;
 
-  // Reduce to a best per thread
   peak best{.index = 0, .value = -INFINITY};
   while (row < th) {
     const std::int64_t g = (oy + row) * image_width + (ox + col);
@@ -72,7 +56,6 @@ __global__ void tiled_argmax_reduce(const float* data, matrix::peak_criterion cr
     }
   }
 
-  // Reduce to one winner per block
   using BlockReduce = cub::BlockReduce<peak, kThreadsPerBlock>;
   __shared__ typename BlockReduce::TempStorage temp;
   peak winner = BlockReduce(temp).Reduce(best, matrix::peak_max{});
@@ -114,15 +97,8 @@ tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> exte
       ctx_.alloc_ptr_async<std::byte>(core::narrow<std::int64_t>(std::max<std::size_t>(final_temp_bytes_, 1)));
 }
 
-// Combine all cached per-tile maxima down to one global result and read it back.
-// Shared by the full and incremental entry points: both must rescan EVERY cached
-// slot, because the global winner can sit in any tile (and after a clean
-// subtraction last cycle's winner has dropped).
-//
-// A full device-wide CUB reduction (vs a single-block kernel) keeps the combine
-// parallel even when n_tiles is large (small tiles -> ~10^5 slots), which is where
-// a one-block reduce would serialize. The op is associative + commutative with a
-// deterministic tie-break, so CUB's nondeterministic block order is still exact.
+// A device-wide CUB reduce rather than one block: small tiles give ~10^5 slots, which one block would serialize.
+// The op is associative and commutative with a deterministic tie-break, so CUB's block order is still exact.
 peak tiled_argmax_ctx::final_combine()
 {
   CHECK_CUDA(cub::DeviceReduce::Reduce(d_final_temp_.get(), final_temp_bytes_, d_tiles_.get(), d_result_.get(),
@@ -135,7 +111,6 @@ peak tiled_argmax_ctx::final_combine()
   return h_result;
 }
 
-// Per-tile reduce over the whole grid, then the CUB device-wide final combine.
 peak tiled_argmax_ctx::run(core::span2d<const float> data, peak_criterion criterion)
 {
   assert(data.is_exhaustive());
@@ -154,10 +129,6 @@ peak tiled_argmax_ctx::run(core::span2d<const float> data, peak_criterion criter
   return final_combine();
 }
 
-// Recompute only the tiles the clean subtraction dirtied, then re-combine against
-// the untouched cached tiles. The per-tile kernel already supports a partial grid
-// via (tile_x0, tile_y0); here we just translate the dirtied pixel footprint into
-// that tile sub-grid.
 peak tiled_argmax_ctx::run_incremental(core::span2d<const float> data, std::int64_t peak_row, std::int64_t peak_col,
                                        std::int64_t foot_height, std::int64_t foot_width)
 {
@@ -169,8 +140,8 @@ peak tiled_argmax_ctx::run_incremental(core::span2d<const float> data, std::int6
   const std::int64_t iw = extents_.extent(1);
   const std::int64_t ih = extents_.extent(0);
 
-  // ---- Dirtied pixel rectangle: the stamp is centered on the peak, half-open
-  //      [px0, px1) x [py0, py1), clamped to the image. ----
+  // Dirtied pixel rectangle: the stamp is centered on the peak, half-open
+  // [px0, px1) x [py0, py1), clamped to the image.
   const std::int64_t px0 = std::max<std::int64_t>(peak_col - foot_width / 2, 0);
   const std::int64_t py0 = std::max<std::int64_t>(peak_row - foot_height / 2, 0);
   const std::int64_t px1 = std::min(peak_col - foot_width / 2 + foot_width, iw);
@@ -178,15 +149,14 @@ peak tiled_argmax_ctx::run_incremental(core::span2d<const float> data, std::int6
   if (px0 >= px1 || py0 >= py1)
     throw std::invalid_argument("tiled_argmax: incremental footprint lies outside the image");
 
-  // ---- Tile rectangle covering those pixels (inclusive tile indices). The last
-  //      dirtied pixel px1-1 lives in tile (px1-1)/tile_size. ----
+  // Tile rectangle covering those pixels (inclusive tile indices). The last
+  // dirtied pixel px1-1 lives in tile (px1-1)/tile_size.
   const std::int64_t tx0 = px0 / tile_size_;
   const std::int64_t ty0 = py0 / tile_size_;
   const std::int64_t tx1 = (px1 - 1) / tile_size_;
   const std::int64_t ty1 = (py1 - 1) / tile_size_;
 
-  // ---- Relaunch kernel 1 over just the dirty tile sub-grid; its origin goes in
-  //      (tile_x0, tile_y0) so each block still writes its absolute d_tiles slot. ----
+  // Origin in (tile_x0, tile_y0), so each block still writes its absolute d_tiles slot.
   const dim3 block(kThreadsPerBlock);
   const dim3 grid(core::narrow<unsigned>(tx1 - tx0 + 1), core::narrow<unsigned>(ty1 - ty0 + 1));
   kernel::tiled_argmax_reduce<<<grid, block, 0, ctx_.cuda_stream>>>(data.data_handle(), criterion_, d_tiles_.get(), iw,
@@ -194,7 +164,6 @@ peak tiled_argmax_ctx::run_incremental(core::span2d<const float> data, std::int6
                                                                     /*tile_x0=*/tx0, /*tile_y0=*/ty0);
   CHECK_CUDA(cudaGetLastError());
 
-  // ---- Final combine over ALL tiles (dirty + cached) -> single result ----
   return final_combine();
 }
 

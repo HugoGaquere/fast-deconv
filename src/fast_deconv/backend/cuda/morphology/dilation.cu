@@ -17,7 +17,6 @@ __global__ void binary_dilation(bool* data, bool* structure, common::roi structu
   const std::int64_t nrow_se = structure_roi.rmax - structure_roi.rmin;
   const std::int64_t ncol_se = structure_roi.cmax - structure_roi.cmin;
 
-  // fast path, check if data is true
   if (data[tid]) {
     out[tid] = true;
     return;

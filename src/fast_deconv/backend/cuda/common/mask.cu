@@ -136,7 +136,6 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
     core::span2d<bool> current_mask = emu::submdspan(mask_per_scale, i);
     morphology::binary_dilation(ctx, current_mask, fwhm_mask, structure_roi, dilation_out);
 
-    // 3f. Copy dilation result back into mask_per_scale[i]
     ctx.copy(current_mask.data_handle(), dilation_out.data_handle(), dirty_npix);
   }
 

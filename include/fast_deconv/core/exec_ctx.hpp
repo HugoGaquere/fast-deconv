@@ -22,9 +22,12 @@ struct ctx_deleter {
 template <typename T>
 using owned_ptr = std::unique_ptr<T[], ctx_deleter>;
 
-/// One execution lane: where work runs and where its memory comes from.
-/// The backend supplies the handles and the primitives below it; the
-/// typed layer here is written once and shared by every backend.
+/**
+ * @brief One execution lane: where work runs and where its memory comes from.
+ *
+ * The backend supplies the handles and the primitives below it; the typed layer here is written once and
+ * shared by every backend.
+ */
 class exec_ctx : public exec_ctx_impl {
  public:
   using impl = exec_ctx_impl;
@@ -64,8 +67,15 @@ class exec_ctx : public exec_ctx_impl {
     return {alloc_async<T>(n), ctx_deleter{this}};
   }
 
-  /// Copies @p src into @p dst; either side may be host or backend memory.
-  /// Async, so wait() before reading @p dst.
+  /**
+   * @brief Copies @p src into @p dst; either side may be host or backend memory.
+   *
+   * Async, so wait() before reading @p dst.
+   *
+   * @param[out] dst  Destination view, same size as @p src.
+   * @param[in]  src  Source view.
+   * @throws std::invalid_argument If the sizes differ.
+   */
   template <typename Dst, typename Src>
   void copy(const Dst& dst, const Src& src) const
   {
@@ -80,9 +90,14 @@ class exec_ctx : public exec_ctx_impl {
     this->copy_bytes(dst, src, narrow<std::size_t>(n) * sizeof(T));
   }
 
-  /// Backend-resident view of caller-owned host memory: a copy on a device
-  /// backend, a borrow when backend memory already is host memory. @p src must
-  /// outlive the returned view.
+  /**
+   * @brief Backend-resident view of caller-owned host memory.
+   *
+   * A copy on a device backend, a borrow when backend memory already is host memory.
+   *
+   * @param[in] src  Host view. Must outlive the returned view.
+   * @return A view with @p src's element type and extents, in backend memory.
+   */
   template <typename HostSpan>
   auto stage(const HostSpan& src) const
   {
@@ -100,8 +115,14 @@ class exec_ctx : public exec_ctx_impl {
     }
   }
 
-  /// Undoes stage() for an in/out buffer: a copy() where stage() copied,
-  /// nothing where it borrowed and the kernels already wrote @p host_dst.
+  /**
+   * @brief Undoes stage() for an in/out buffer.
+   *
+   * A copy() where stage() copied, nothing where it borrowed and the kernels already wrote @p host_dst.
+   *
+   * @param[in]  src       View returned by stage().
+   * @param[out] host_dst  The host buffer that was staged.
+   */
   template <typename Span>
   void unstage(const Span& src, typename Span::element_type* host_dst) const
   {

@@ -35,7 +35,6 @@ ddmsc_result Ddmsc::run(core::host_span3d<float>& dirty, const core::host_span3d
 {
   const core::exec_ctx& ctx = ctx_.compute_stream;
 
-  // Stage the per-call inputs into backend memory; a host backend borrows them.
   auto d_dirty = ctx.stage(dirty);
   auto d_jones = ctx.stage(jones_norm);
   auto d_weights = ctx.stage(weights_freq);
@@ -43,7 +42,6 @@ ddmsc_result Ddmsc::run(core::host_span3d<float>& dirty, const core::host_span3d
   core::span3d<float> dirty_view = d_dirty;
   ddmsc_result result = run_ddmsc_cycles(ctx_, params_, dirty_view, d_jones, d_weights);
 
-  // Bring the mutated residual back into the caller's host buffer (in/out).
   ctx.unstage(d_dirty, dirty.data_handle());
   ctx.wait();
   return result;

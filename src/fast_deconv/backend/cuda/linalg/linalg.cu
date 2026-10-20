@@ -47,9 +47,9 @@ void weighted_sum_async(const core::exec_ctx& ctx, const core::span3d<const floa
   CHECK_CUBLAS(cublasSgemv_64(ctx.cublas_handle, CUBLAS_OP_N,
                               n,                              // m: rows of A_cb
                               w,                              // n: cols of A_cb
-                              &alpha, A.data_handle(), lda,   // A, lda
-                              weights.data_handle(), 1,       // x, incx
-                              &beta, out.data_handle(), 1));  // y, incy
+                              &alpha, A.data_handle(), lda,
+                              weights.data_handle(), 1,
+                              &beta, out.data_handle(), 1));
 }
 
 void multiply_with_gaussian(const core::exec_ctx& ctx, const fft_dims& dims, std::int64_t n_batch,

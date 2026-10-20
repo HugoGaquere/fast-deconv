@@ -6,18 +6,28 @@
 namespace fast_deconv::linalg {
 
 /**
- * Linear (zero outside) convolution of a batch of same-sized images with the band-limited Gaussian
- * H(f) = exp(-2 pi^2 sigma^2 f^2). A caller that blurs one input with several sigmas runs forward()
- * once and convolve() per sigma. On this backend the convolution is separable, rows then columns,
- * through per-thread line batches: no 2D FFT. The lane given at construction must outlive this.
+ * @brief Linear (zero outside) convolution of a batch of same-sized images with the band-limited Gaussian
+ *        H(f) = exp(-2 pi^2 sigma^2 f^2).
+ *
+ * A caller that blurs one input with several sigmas runs forward() once and convolve() per sigma. On this
+ * backend the convolution is separable, rows then columns, through per-thread line batches: no 2D FFT.
+ * The lane given at construction must outlive this.
  */
 class gaussian_convolution_ctx {
  public:
   /// On this backend, a copy of the input: (batch, nrow, ncol).
   using spectrum = core::cont3d<float>;
 
-  /// @p gap: zero padding in pixels per axis; wrap-free for every sigma with gaussian_reach(sigma) <= gap.
-  /// Each line is padded to min(gap, gaussian_reach(sigma)), so small sigmas keep short lines.
+  /**
+   * @brief Records the image shape and padding; no plans to build on this backend.
+   *
+   * @param[in] ctx    Lane the convolutions run on. Must outlive this.
+   * @param[in] batch  Images per call.
+   * @param[in] nrow   Image rows.
+   * @param[in] ncol   Image columns.
+   * @param[in] gap    Zero padding in pixels per axis; wrap-free for every sigma with gaussian_reach(sigma) <= gap.
+   *                   Each line is padded to min(gap, gaussian_reach(sigma)), so small sigmas keep short lines.
+   */
   gaussian_convolution_ctx(const core::exec_ctx& ctx, std::int64_t batch, std::int64_t nrow, std::int64_t ncol,
                            std::int64_t gap);
   ~gaussian_convolution_ctx() = default;

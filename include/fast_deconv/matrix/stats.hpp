@@ -6,9 +6,12 @@
 
 namespace fast_deconv::matrix {
 
-/// Packed reduction state combining the four contributions needed to compute
-/// max + rms in a single sweep. Public because run_async() leaves it on
-/// backend memory for the caller to finalize.
+/**
+ * @brief Packed reduction state combining the four contributions needed to compute max + rms in a single
+ *        sweep.
+ *
+ * Public because run_async() leaves it on backend memory for the caller to finalize.
+ */
 struct stats_acc {
   float max_v;
   float sum;
@@ -22,22 +25,35 @@ struct stats_result {
   float rms;  ///< sqrt(max(E[x^2] - E[x]^2, 0)) over all pixels (mask not applied)
 };
 
-/// Reusable state for the fused max + rms reduction over a 2D image with a
-/// boolean mask. The constructor runs the temp-storage sizing query once so
-/// the minor-cycle loop only pays for the reduction itself.
-///
-/// `use_abs` is fixed at construction so the iterator type stays stable and
-/// the temp-bytes query computed in the constructor stays valid for every
-/// subsequent call.
+/**
+ * @brief Reusable state for the fused max + rms reduction over a 2D image with a boolean mask.
+ *
+ * The constructor runs the temp-storage sizing query once so the minor-cycle loop only pays for the
+ * reduction itself.
+ *
+ * `use_abs` is fixed at construction so the iterator type stays stable and the temp-bytes query computed
+ * in the constructor stays valid for every subsequent call.
+ */
 class stats_ctx {
  public:
+  /**
+   * @param[in] ctx         Lane the reductions run on. Must outlive this.
+   * @param[in] n_elements  Pixels per image.
+   * @param[in] use_abs     Take the max of |x| instead of x.
+   */
   stats_ctx(const core::exec_ctx& ctx, std::int64_t n_elements, bool use_abs);
 
   stats_ctx(const stats_ctx&) = delete;
   stats_ctx& operator=(const stats_ctx&) = delete;
 
-  /// Issue the fused reduction. No host sync; the result stays in backend
-  /// memory, reachable through device_state().
+  /**
+   * @brief Issue the fused reduction.
+   *
+   * No host sync; the result stays in backend memory, reachable through device_state().
+   *
+   * @param[in] data  Image, n_elements pixels.
+   * @param[in] mask  Same shape as @p data, true = excluded from the max (the rms ignores it).
+   */
   void run_async(core::span2d<float> data, core::span2d<bool> mask);
 
   /// Async issue + D2H copy + lane sync. Returns {max, rms} on host.

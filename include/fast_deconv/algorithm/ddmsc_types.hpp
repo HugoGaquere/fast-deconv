@@ -71,8 +71,22 @@ struct context {
   std::vector<common::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
   std::vector<int> historical_scales;                   // scale of each historical component
 
-  /// Validates the dimensions, stages the run-constant inputs and copies the scale sigmas.
-  /// The host spans must outlive the context: the host backend borrows them.
+  /**
+   * @brief Validates the dimensions, stages the run-constant inputs and copies the scale sigmas.
+   *
+   * The host spans must outlive the context: the host backend borrows them.
+   *
+   * @param[in] exec_device      Device the resources and both streams are created on.
+   * @param[in] raw_psfs         Raw PSFs, host, (n_facets, n_freq, psf_h, psf_w). Staged.
+   * @param[in] xdes             Spectral design matrix, host, (n_freq, n_order). Staged.
+   * @param[in] mask             External mask, host, (dirty_nrow, dirty_ncol), true = masked. Staged.
+   * @param[in] scale_sigmas     Gaussian sigma per scale, host, (n_scales,). Copied.
+   * @param[in] scale_bias       Per-scale weight on the peak value during scale selection, host, (n_scales,). Borrowed.
+   * @param[in] map_pixel_facet  Facet index of every dirty pixel, host, (dirty_nrow, dirty_ncol). Borrowed.
+   * @param[in] dirty_nrow       Dirty image rows.
+   * @param[in] dirty_ncol       Dirty image columns.
+   * @param[in] n_freq           Number of frequency channels.
+   */
   context(int exec_device, const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
           const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
           const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet,

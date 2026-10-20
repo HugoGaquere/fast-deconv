@@ -53,7 +53,7 @@ class convergence {
   [[nodiscard]] bool is_stall(int scale) const;
   [[nodiscard]] std::vector<int> get_all_stalled() const;
 
-  // Seeds the initial flux/rms; must be called once before any track().
+  /// Seeds the initial flux/rms; must be called once before any track().
   void init(float flux, float rms);
   void track(float flux, float rms, int subminor_count, int selected_scale);
 

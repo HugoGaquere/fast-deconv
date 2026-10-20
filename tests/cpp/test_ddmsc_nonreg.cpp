@@ -161,7 +161,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
     h_xdes.at(f * kOrder + 1) = static_cast<float>(std::log(kNu.at(f) / kNu.at(0)));
   }
 
-  // ---- Upload the per-run inputs; the context stages its static inputs itself.
+  // ---- Upload the per-run inputs.
   const auto sr = res().make_ctx();
   fdtest::device_buffer<float> d_dirty(sr, h_dirty);
   fdtest::device_buffer<float> d_jones(sr, std::vector<float>(static_cast<std::size_t>(kFreq) * kNpix, 1.0f));

@@ -15,9 +15,9 @@ namespace core = fast_deconv::core;
 namespace ddmsc = fast_deconv::algorithm::ddmsc;
 namespace fdtest = fast_deconv::test;
 
-// Minimal but real construction scene: the pool, both streams and the cuFFT
-// plans are built on the first run(), so this is a GPU fixture. All spans are
-// stored as views by the class — the backing buffers live in the fixture.
+// Minimal but real construction scene: the context builds the pool and both
+// streams and stages the static inputs at construction. It keeps views of the
+// host spans, so the backing buffers live in the fixture.
 class DdmscClass : public fdtest::BackendTest {
  protected:
   static constexpr int kFacets = 1;
@@ -108,6 +108,5 @@ TEST(DdmscContextGuard, RejectsPlaneLargerThanInt32)
   core::host_span2d<int> map(static_cast<int*>(nullptr), kSmall, kSmall);
 
   EXPECT_THROW(ddmsc::context(0, psfs, xdes, mask, sigmas, bias, map, kBig, kBig, 1), std::invalid_argument);
-  EXPECT_THROW(ddmsc::context(0, big_psfs, xdes, mask, sigmas, bias, map, kSmall, kSmall, 1),
-               std::invalid_argument);
+  EXPECT_THROW(ddmsc::context(0, big_psfs, xdes, mask, sigmas, bias, map, kSmall, kSmall, 1), std::invalid_argument);
 }
