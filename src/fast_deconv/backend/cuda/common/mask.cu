@@ -14,6 +14,7 @@
 #include <fast_deconv/morphology/dilation.hpp>
 #include <fast_deconv/morphology/roi.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
+#include <iterator>
 #include <limits>
 #include <numbers>
 #include <vector>
