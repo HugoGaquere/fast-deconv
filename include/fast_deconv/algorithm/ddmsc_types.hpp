@@ -9,6 +9,7 @@
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
+#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <utility>

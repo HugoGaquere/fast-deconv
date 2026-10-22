@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/matrix/tiled_argmax.hpp>
+#include <iterator>
 #include <stdexcept>
 
 #include "../detail/peak_reduce.hpp"
