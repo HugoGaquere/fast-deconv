@@ -19,32 +19,32 @@ namespace fast_deconv::algorithm::ddmsc {
 
 struct params {
   // outer loop params
-  int max_iteration;        // total minor iterations across all scale selections
-  float divergence_factor;  // flux growth ratio that counts as divergence
+  int max_iteration = 0;           // total minor iterations across all scale selections
+  float divergence_factor = 0.0f;  // flux growth ratio that counts as divergence
 
   // Every "rms" in this file is the standard deviation of the mean residual over all pixels (see
   // matrix::stats_result::rms), not its root mean square.
 
   // stopping criterion: stop_flux = max(flux_threshold, rms_factor*rms, peak_factor*peak, sidelobe_coeff*peak)
   // computed once per call from the initial peak/standard deviation of the mean residual
-  float flux_threshold;       // absolute floor below which to stop
-  float stop_rms_factor;      // weights the initial standard deviation in the stop-flux composition
-  float stop_peak_factor;     // weights initial peak in the stop-flux composition
-  float stop_cycle_factor;    // 0 disables the sidelobe contribution
-  float stop_sidelobe_level;  // PSF sidelobe level used in the sidelobe term
+  float flux_threshold = 0.0f;       // absolute floor below which to stop
+  float stop_rms_factor = 0.0f;      // weights the initial standard deviation in the stop-flux composition
+  float stop_peak_factor = 0.0f;     // weights initial peak in the stop-flux composition
+  float stop_cycle_factor = 0.0f;    // 0 disables the sidelobe contribution
+  float stop_sidelobe_level = 0.0f;  // PSF sidelobe level used in the sidelobe term
 
   // clean loop params
-  bool clean_negative;
-  float peak_factor;        // sub-clean threshold = peak_value * peak_factor
-  float gamma;              // CLEAN loop gain
-  int max_clean_iteration;  // sub-minor loop iterations per scale selection
+  bool clean_negative = false;
+  float peak_factor = 0.0f;     // sub-clean threshold = peak_value * peak_factor
+  float gamma = 0.0f;           // CLEAN loop gain
+  int max_clean_iteration = 0;  // sub-minor loop iterations per scale selection
 
   // scales params
   // A standard deviation change, from the previous outer iteration, below this is one stall strike for the
   // selected scale; a strike-free iteration resets its count. More than 5 consecutive strikes retire the scale.
-  float scale_stall_threshold;
-  bool enable_auto_mask;        // master switch for auto-masking
-  bool force_enable_auto_mask;  // with enable_auto_mask, engage masking immediately, bypassing thresholds
+  float scale_stall_threshold = 0.0f;
+  bool enable_auto_mask = false;        // master switch for auto-masking
+  bool force_enable_auto_mask = false;  // with enable_auto_mask, engage masking immediately, bypassing thresholds
 
   // Auto-masking engages once the residual peak drops to the threshold. The peak threshold wins when both are
   // set; with neither, the threshold is 0, so only a non-positive peak (or force_enable_auto_mask) engages it.
