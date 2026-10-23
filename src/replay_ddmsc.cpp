@@ -45,6 +45,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -90,6 +91,21 @@ static void crop_center(npy::NpyArray& arr, size_t rows, size_t cols)
   arr.shape.at(nd - 1) = cols;
 }
 
+// Parses a[begin, end) as a T; exits on an empty, partial or out-of-range value.
+template <typename T>
+static T parse_arg(const std::string& a, std::size_t begin, std::size_t end = std::string::npos)
+{
+  const char* first = a.data() + begin;
+  const char* last = a.data() + std::min(end, a.size());
+  T v{};
+  const auto [ptr, ec] = std::from_chars(first, last, v);
+  if (ec != std::errc{} || ptr != last) {
+    fprintf(stderr, "Invalid value in argument: %s\n", a.c_str());
+    std::exit(1);
+  }
+  return v;
+}
+
 int main(int argc, char** argv)
 {
   std::string dir;
@@ -116,43 +132,43 @@ int main(int argc, char** argv)
   for (int i = 1; i < argc; ++i) {
     const std::string a(argv[i]);
     if (a.rfind("--device=", 0) == 0) {
-      device_id = std::atoi(a.c_str() + 9);
+      device_id = parse_arg<int>(a, 9);
     } else if (a.rfind("--cycle=", 0) == 0) {
-      only_cycle = std::atoi(a.c_str() + 8);
+      only_cycle = parse_arg<int>(a, 8);
     } else if (a.rfind("--runs=", 0) == 0) {
-      runs = std::max(1, std::atoi(a.c_str() + 7));
+      runs = std::max(1, parse_arg<int>(a, 7));
     } else if (a.rfind("--max-iter=", 0) == 0) {
-      max_iter = std::max(1, std::atoi(a.c_str() + 11));
+      max_iter = std::max(1, parse_arg<int>(a, 11));
     } else if (a.rfind("--max-clean-iter=", 0) == 0) {
-      max_clean_iter = std::max(1, std::atoi(a.c_str() + 17));
+      max_clean_iter = std::max(1, parse_arg<int>(a, 17));
     } else if (a.rfind("--peak-factor=", 0) == 0) {
-      peak_factor = std::strtof(a.c_str() + 14, nullptr);
+      peak_factor = parse_arg<float>(a, 14);
     } else if (a.rfind("--stall-threshold=", 0) == 0) {
-      stall_threshold = std::strtof(a.c_str() + 18, nullptr);
+      stall_threshold = parse_arg<float>(a, 18);
     } else if (a.rfind("--stop-rms-factor=", 0) == 0) {
-      stop_rms_factor = std::strtof(a.c_str() + 18, nullptr);
+      stop_rms_factor = parse_arg<float>(a, 18);
     } else if (a.rfind("--stop-peak-factor=", 0) == 0) {
-      stop_peak_factor = std::strtof(a.c_str() + 19, nullptr);
+      stop_peak_factor = parse_arg<float>(a, 19);
     } else if (a.rfind("--stop-sidelobe-level=", 0) == 0) {
-      stop_sidelobe_level = std::strtof(a.c_str() + 22, nullptr);
+      stop_sidelobe_level = parse_arg<float>(a, 22);
     } else if (a.rfind("--divergence-factor=", 0) == 0) {
-      divergence_factor = std::strtof(a.c_str() + 20, nullptr);
+      divergence_factor = parse_arg<float>(a, 20);
     } else if (a.rfind("--auto-mask=", 0) == 0) {
-      auto_mask = std::atoi(a.c_str() + 12) != 0;
+      auto_mask = parse_arg<int>(a, 12) != 0;
     } else if (a.rfind("--force-scale=", 0) == 0) {
-      force_scale = std::atoi(a.c_str() + 14);
+      force_scale = parse_arg<int>(a, 14);
     } else if (a.rfind("--crop=", 0) == 0) {
-      int rows = 0, cols = 0;
-      const int n = std::sscanf(a.c_str() + 7, "%dx%d", &rows, &cols);
-      crop = std::array<int, 2>{rows, n == 2 ? cols : rows};
+      const std::size_t x = a.find('x', 7);
+      const int rows = parse_arg<int>(a, 7, x);
+      crop = std::array<int, 2>{rows, x == std::string::npos ? rows : parse_arg<int>(a, x + 1)};
     } else if (a.rfind("--flux-threshold=", 0) == 0) {
-      flux_threshold = std::strtof(a.c_str() + 17, nullptr);
+      flux_threshold = parse_arg<float>(a, 17);
     } else if (a.rfind("--stop-cycle-factor=", 0) == 0) {
-      stop_cycle_factor = std::strtof(a.c_str() + 20, nullptr);
+      stop_cycle_factor = parse_arg<float>(a, 20);
     } else if (a == "--bench") {
       bench = true;
     } else if (a.rfind("--outer=", 0) == 0) {
-      outer = std::atoi(a.c_str() + 8);
+      outer = parse_arg<int>(a, 8);
     } else if (a.rfind("--csv=", 0) == 0) {
       csv_path = a.substr(6);
     } else if (a.rfind("--label=", 0) == 0) {
