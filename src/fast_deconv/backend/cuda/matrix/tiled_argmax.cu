@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <cub/block/block_reduce.cuh>
@@ -7,7 +6,6 @@
 #include <cub/device/device_reduce.cuh>
 #include <fast_deconv/matrix/tiled_argmax.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
-#include <stdexcept>
 
 namespace {
 // Threads per block for the per-tile reduction. A block reduces its whole tile
@@ -67,16 +65,9 @@ __global__ void tiled_argmax_reduce(const float* data, matrix::peak_criterion cr
 
 namespace fast_deconv::matrix {
 
-tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> extents, std::int64_t tile_size)
-    : ctx_(ctx), extents_(extents), tile_size_(tile_size)
+tiled_argmax_impl::tiled_argmax_impl(const core::exec_ctx& ctx, const tile_grid& grid)
+    : ctx_(ctx), grid_(grid), n_tiles_(grid.n_tiles_x * grid.n_tiles_y)
 {
-  if (extents_.extent(0) <= 0 || extents_.extent(1) <= 0 || tile_size_ <= 0)
-    throw std::invalid_argument("tiled_argmax: image extents and tile_size must be > 0");
-
-  n_tiles_x_ = core::ceil_div(extents_.extent(1), tile_size_);
-  n_tiles_y_ = core::ceil_div(extents_.extent(0), tile_size_);
-  n_tiles_ = n_tiles_x_ * n_tiles_y_;
-
   d_tiles_ = ctx_.alloc_ptr<peak>(n_tiles_);
   d_result_ = ctx_.alloc_ptr<peak>(1);
 
@@ -87,9 +78,20 @@ tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> exte
   d_final_temp_ = ctx_.alloc_ptr<std::byte>(core::narrow<std::int64_t>(std::max<std::size_t>(final_temp_bytes_, 1)));
 }
 
+void tiled_argmax_impl::reduce_tiles(core::span2d<const float> data, peak_criterion criterion, tile_range range)
+{
+  // Origin in (tile_x0, tile_y0), so each block still writes its absolute d_tiles slot.
+  const dim3 block(kThreadsPerBlock);
+  const dim3 grid(core::narrow<unsigned>(range.tx1 - range.tx0 + 1), core::narrow<unsigned>(range.ty1 - range.ty0 + 1));
+  kernel::tiled_argmax_reduce<<<grid, block, 0, ctx_.cuda_stream>>>(
+      data.data_handle(), criterion, d_tiles_.get(), grid_.extents.extent(1), grid_.extents.extent(0), grid_.tile_size,
+      grid_.tile_size, grid_.n_tiles_x, range.tx0, range.ty0);
+  CHECK_CUDA(cudaGetLastError());
+}
+
 // A device-wide CUB reduce rather than one block: small tiles give ~10^5 slots, which one block would serialize.
 // The op is associative and commutative with a deterministic tie-break, so CUB's block order is still exact.
-peak tiled_argmax_ctx::final_combine()
+peak tiled_argmax_impl::combine()
 {
   CHECK_CUDA(cub::DeviceReduce::Reduce(d_final_temp_.get(), final_temp_bytes_, d_tiles_.get(), d_result_.get(),
                                        n_tiles_, peak_max{}, kPeakIdentity, ctx_.cuda_stream));
@@ -99,62 +101,6 @@ peak tiled_argmax_ctx::final_combine()
   ctx_.wait();
 
   return h_result;
-}
-
-peak tiled_argmax_ctx::run(core::span2d<const float> data, peak_criterion criterion)
-{
-  assert(data.is_exhaustive());
-  assert(data.extent(0) == extents_.extent(0) && data.extent(1) == extents_.extent(1));
-
-  const dim3 block(kThreadsPerBlock);
-  const dim3 grid(core::narrow<unsigned>(n_tiles_x_), core::narrow<unsigned>(n_tiles_y_));
-  criterion_ = criterion;
-  kernel::tiled_argmax_reduce<<<grid, block, 0, ctx_.cuda_stream>>>(data.data_handle(), criterion_, d_tiles_.get(),
-                                                                    extents_.extent(1), extents_.extent(0), tile_size_,
-                                                                    tile_size_, n_tiles_x_, /*tile_x0=*/0,
-                                                                    /*tile_y0=*/0);
-  CHECK_CUDA(cudaGetLastError());
-  seeded_ = true;
-
-  return final_combine();
-}
-
-peak tiled_argmax_ctx::run_incremental(core::span2d<const float> data, std::int64_t peak_row, std::int64_t peak_col,
-                                       std::int64_t foot_height, std::int64_t foot_width)
-{
-  assert(data.is_exhaustive());
-  assert(data.extent(0) == extents_.extent(0) && data.extent(1) == extents_.extent(1));
-
-  if (!seeded_) throw std::logic_error("tiled_argmax: run_incremental needs a prior run() to seed the tiles");
-
-  const std::int64_t iw = extents_.extent(1);
-  const std::int64_t ih = extents_.extent(0);
-
-  // Dirtied pixel rectangle: the stamp is centered on the peak, half-open
-  // [px0, px1) x [py0, py1), clamped to the image.
-  const std::int64_t px0 = std::max<std::int64_t>(peak_col - foot_width / 2, 0);
-  const std::int64_t py0 = std::max<std::int64_t>(peak_row - foot_height / 2, 0);
-  const std::int64_t px1 = std::min(peak_col - foot_width / 2 + foot_width, iw);
-  const std::int64_t py1 = std::min(peak_row - foot_height / 2 + foot_height, ih);
-  if (px0 >= px1 || py0 >= py1)
-    throw std::invalid_argument("tiled_argmax: incremental footprint lies outside the image");
-
-  // Tile rectangle covering those pixels (inclusive tile indices). The last
-  // dirtied pixel px1-1 lives in tile (px1-1)/tile_size.
-  const std::int64_t tx0 = px0 / tile_size_;
-  const std::int64_t ty0 = py0 / tile_size_;
-  const std::int64_t tx1 = (px1 - 1) / tile_size_;
-  const std::int64_t ty1 = (py1 - 1) / tile_size_;
-
-  // Origin in (tile_x0, tile_y0), so each block still writes its absolute d_tiles slot.
-  const dim3 block(kThreadsPerBlock);
-  const dim3 grid(core::narrow<unsigned>(tx1 - tx0 + 1), core::narrow<unsigned>(ty1 - ty0 + 1));
-  kernel::tiled_argmax_reduce<<<grid, block, 0, ctx_.cuda_stream>>>(data.data_handle(), criterion_, d_tiles_.get(), iw,
-                                                                    ih, tile_size_, tile_size_, n_tiles_x_,
-                                                                    /*tile_x0=*/tx0, /*tile_y0=*/ty0);
-  CHECK_CUDA(cudaGetLastError());
-
-  return final_combine();
 }
 
 }  // namespace fast_deconv::matrix
