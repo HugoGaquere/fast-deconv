@@ -44,7 +44,7 @@ struct params {
   // selected scale; a strike-free iteration resets its count. More than 5 consecutive strikes retire the scale.
   float scale_stall_threshold;
   bool enable_auto_mask;        // master switch for auto-masking
-  bool force_enable_auto_mask;  // engage masking unconditionally, bypassing thresholds
+  bool force_enable_auto_mask;  // with enable_auto_mask, engage masking immediately, bypassing thresholds
 
   // Auto-masking engages once the residual peak drops to the threshold. The peak threshold wins when both are
   // set; with neither, the threshold is 0, so only a non-positive peak (or force_enable_auto_mask) engages it.
