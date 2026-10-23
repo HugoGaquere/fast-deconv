@@ -64,7 +64,7 @@ class BuildAutoMask : public fdtest::BackendTest {
 // With a delta center_psf and sigma=0 for every scale, conv2_psf is a delta,
 // the FWHM mask is a single pixel and the dilation is the identity — so the
 // final "is-near-component" map matches the per-scale peak premask exactly.
-// After finalize_mask_kernel: mask = (!is_near_component) || external_mask.
+// After mask_outside: mask = (!is_near_component) || external_mask.
 TEST_F(BuildAutoMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
 {
   const int n_scales = 3, nrow = 4, ncol = 5;

@@ -67,8 +67,8 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
     core::span2d<bool> current_mask = emu::submdspan(mask_per_scale, i);
     morphology::binary_dilation(ctx, current_mask, fwhm_mask, structure_roi, dilation_out);
 
-    // 3e. Write back negated to "true=masked", with external_mask OR'd in
-    detail::finalize_mask(ctx, dilation_out, external_mask, current_mask);
+    // 3e. Mask everything outside the dilated neighborhoods, plus the external mask
+    detail::mask_outside(ctx, dilation_out, external_mask, current_mask);
   }
 }
 

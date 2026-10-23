@@ -14,8 +14,8 @@ void stamp_peaks(const core::exec_ctx& ctx, const std::vector<index2d>& coords, 
 /// out = in > threshold, elementwise over two planes of the same shape.
 void threshold_above(const core::exec_ctx& ctx, core::span2d<const float> in, float threshold, core::span2d<bool> out);
 
-/// slice = !dilated || external, elementwise: back to the true = masked convention.
-void finalize_mask(const core::exec_ctx& ctx, core::span2d<const bool> dilated, core::span2d<const bool> external,
-                   core::span2d<bool> slice);
+/// out = !region || external: masks every pixel outside @p region, plus the externally masked ones.
+void mask_outside(const core::exec_ctx& ctx, core::span2d<const bool> region, core::span2d<const bool> external,
+                  core::span2d<bool> out);
 
 }  // namespace fast_deconv::common::detail
