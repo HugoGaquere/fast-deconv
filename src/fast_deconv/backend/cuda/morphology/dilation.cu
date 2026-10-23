@@ -2,6 +2,7 @@
 #include <fast_deconv/morphology/dilation.hpp>
 #include <fast_deconv/morphology/roi.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
+#include <fd_backend/core/launch.cuh>
 
 namespace fast_deconv::kernel {
 
@@ -52,12 +53,10 @@ void binary_dilation(const core::exec_ctx& ctx, core::span2d<const bool> data, c
 {
   // The kernel only sets pixels, so clear the output first.
   CHECK_CUDA(cudaMemsetAsync(out.data_handle(), 0, out.size() * sizeof(bool), ctx.cuda_stream));
-  dim3 block(32, 8);
-  dim3 grid(core::narrow<unsigned>(core::ceil_div(data.extent(1), block.x)),
-            core::narrow<unsigned>(core::ceil_div(data.extent(0), block.y)), 1);
-  kernel::binary_dilation<<<grid, block, 0, ctx.cuda_stream>>>(
-      data.data_handle(), structure.data_handle(), structure_roi, out.data_handle(), data.extent(0), data.extent(1),
-      data.mapping().stride(0), structure.mapping().stride(0));
+  const core::launch_cfg cfg(data.extent(0), data.extent(1));
+  core::launch(ctx, cfg, kernel::binary_dilation, data.data_handle(), structure.data_handle(), structure_roi,
+               out.data_handle(), data.extent(0), data.extent(1), data.mapping().stride(0),
+               structure.mapping().stride(0));
 }
 
 }  // namespace fast_deconv::morphology

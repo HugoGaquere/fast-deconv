@@ -1,7 +1,7 @@
 #include <cstdint>
 #include <fast_deconv/common/detail/spectral_fit.hpp>
 #include <fast_deconv/common/multi_frequency.hpp>
-#include <fast_deconv/util/cuda_macros.hpp>
+#include <fd_backend/core/launch.cuh>
 #include <stdexcept>
 
 namespace fast_deconv::kernel {
@@ -40,11 +40,11 @@ void fit_coefficients(const core::exec_ctx& ctx, core::span3d<const float> resid
   const std::int64_t dirty_freq_stride = residual.mapping().stride(0);
   const std::int64_t dirty_peak_offset = residual.mapping()(0, peak_row, peak_col);
 
-  kernel::spectral_fit_kernel<<<1, 1, 0, ctx.cuda_stream>>>(
-      compact_coeffs_out.data_handle(), coeffs_per_chan_out.data_handle(), residual.data_handle(), xdes.data_handle(),
-      jones_norm.data_handle(), weights_freq.data_handle(), n_freq, n_order, dirty_freq_stride, dirty_peak_offset,
-      jn_freq_stride, jn_peak_offset);
-  CHECK_LAST_CUDA_ERROR();
+  const auto cfg = core::launch_cfg::custom(1, 1);
+  core::launch(ctx, cfg, kernel::spectral_fit_kernel, compact_coeffs_out.data_handle(),
+               coeffs_per_chan_out.data_handle(), residual.data_handle(), xdes.data_handle(), jones_norm.data_handle(),
+               weights_freq.data_handle(), n_freq, n_order, dirty_freq_stride, dirty_peak_offset, jn_freq_stride,
+               jn_peak_offset);
 }
 
 }  // namespace fast_deconv::multi_frequency
