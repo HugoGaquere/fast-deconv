@@ -1,10 +1,9 @@
-#include <algorithm>
 #include <cstdint>
 #include <emu/submdspan.hpp>
 #include <fast_deconv/common/gain.hpp>
 #include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
-#include <limits>
+#include <fast_deconv/matrix/argmax.hpp>
 
 namespace fast_deconv::common {
 
@@ -15,13 +14,7 @@ float gain_of(const core::exec_ctx& ctx, core::span3d<const float> psf, core::sp
               core::span2d<float> pmean, float gamma)
 {
   linalg::weighted_sum(ctx, psf, weights, pmean);
-  const float* p = pmean.data_handle();
-  const std::int64_t n = pmean.mapping().required_span_size();
-  float pmean_max = -std::numeric_limits<float>::infinity();
-#pragma omp parallel for reduction(max : pmean_max)
-  for (std::int64_t i = 0; i < n; i++) pmean_max = std::max(pmean_max, p[i]);
-
-  return gamma / pmean_max;
+  return gamma / matrix::find_peak(ctx, pmean, {}).value;
 }
 
 }  // namespace
