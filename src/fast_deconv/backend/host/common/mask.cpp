@@ -22,14 +22,14 @@ void threshold_above(const core::exec_ctx& /*ctx*/, core::span2d<const float> in
   for (std::int64_t k = 0; k < n; k++) dst[k] = src[k] > threshold;
 }
 
-void finalize_mask(const core::exec_ctx& /*ctx*/, core::span2d<const bool> dilated, core::span2d<const bool> external,
-                   core::span2d<bool> slice)
+void mask_outside(const core::exec_ctx& /*ctx*/, core::span2d<const bool> region, core::span2d<const bool> external,
+                  core::span2d<bool> out)
 {
-  const bool* d = dilated.data_handle();
+  const bool* r = region.data_handle();
   const bool* e = external.data_handle();
-  bool* s = slice.data_handle();
-  const std::int64_t n = slice.mapping().required_span_size();
-  for (std::int64_t k = 0; k < n; k++) s[k] = !d[k] || e[k];
+  bool* o = out.data_handle();
+  const std::int64_t n = out.mapping().required_span_size();
+  for (std::int64_t k = 0; k < n; k++) o[k] = !r[k] || e[k];
 }
 
 }  // namespace fast_deconv::common::detail

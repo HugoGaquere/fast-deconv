@@ -23,12 +23,12 @@ __global__ void threshold_above_kernel(const float* data, float threshold, bool*
   out[tid] = data[tid] > threshold;
 }
 
-// slice[i] = !dilated[i] || external[i]: component neighborhoods valid, external pixels masked.
-__global__ void finalize_mask_kernel(const bool* dilated, const bool* external, bool* slice, std::int64_t n)
+// out[i] = !region[i] || external[i]: pixels outside the region masked, external pixels masked.
+__global__ void mask_outside_kernel(const bool* region, const bool* external, bool* out, std::int64_t n)
 {
   const std::int64_t tid = std::int64_t{blockIdx.x} * blockDim.x + threadIdx.x;
   if (tid >= n) return;
-  slice[tid] = !dilated[tid] || external[tid];
+  out[tid] = !region[tid] || external[tid];
 }
 
 }  // namespace fast_deconv::kernel
@@ -70,13 +70,13 @@ void threshold_above(const core::exec_ctx& ctx, core::span2d<const float> in, fl
   CHECK_LAST_CUDA_ERROR();
 }
 
-void finalize_mask(const core::exec_ctx& ctx, core::span2d<const bool> dilated, core::span2d<const bool> external,
-                   core::span2d<bool> slice)
+void mask_outside(const core::exec_ctx& ctx, core::span2d<const bool> region, core::span2d<const bool> external,
+                  core::span2d<bool> out)
 {
-  const std::int64_t n = slice.mapping().required_span_size();
+  const std::int64_t n = out.mapping().required_span_size();
   const unsigned grid = core::narrow<unsigned>(core::ceil_div(n, kBlock));
-  kernel::finalize_mask_kernel<<<grid, kBlock, 0, ctx.cuda_stream>>>(dilated.data_handle(), external.data_handle(),
-                                                                     slice.data_handle(), n);
+  kernel::mask_outside_kernel<<<grid, kBlock, 0, ctx.cuda_stream>>>(region.data_handle(), external.data_handle(),
+                                                                    out.data_handle(), n);
   CHECK_LAST_CUDA_ERROR();
 }
 
