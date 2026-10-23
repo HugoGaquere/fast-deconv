@@ -36,6 +36,16 @@ struct launch_cfg {
   {
   }
 
+  // One thread per pixel over depth planes of nrow x ncol: z runs over planes, at most 65535.
+  explicit launch_cfg(std::int64_t depth, std::int64_t nrow, std::int64_t ncol,
+                      std::source_location loc = std::source_location::current())
+      : grid(narrow<unsigned>(ceil_div(ncol, kBlock2d.x)), narrow<unsigned>(ceil_div(nrow, kBlock2d.y)),
+             narrow<unsigned>(depth)),
+        block(kBlock2d),
+        loc(loc)
+  {
+  }
+
   // Any other shape. A named factory, not a constructor: launch_cfg(1, 1) would silently pick the 2D overload.
   static launch_cfg custom(dim3 grid, dim3 block, std::source_location loc = std::source_location::current())
   {
