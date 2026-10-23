@@ -1,6 +1,6 @@
-#include <algorithm>
 #include <cstdint>
 #include <fast_deconv/linalg/linalg.hpp>
+#include <fd_backend/core/launch.cuh>
 
 namespace fast_deconv::kernel {
 
@@ -22,11 +22,10 @@ __global__ void multiply_with_gaussian_kernel(const linalg::complex_type* input,
                                               std::int64_t plane, std::int64_t total, std::int64_t freq_nrow,
                                               std::int64_t freq_ncol, std::int64_t padded_ncol, float sigma, float norm)
 {
-  for (std::int64_t i = std::int64_t{blockIdx.x} * blockDim.x + threadIdx.x; i < total;
-       i += std::int64_t{blockDim.x} * gridDim.x) {
-    const float g = gaussian_at(i % plane, freq_nrow, freq_ncol, padded_ncol, sigma) * norm;
-    out[i] = {input[i].x * g, input[i].y * g};
-  }
+  const std::int64_t i = std::int64_t{blockIdx.x} * blockDim.x + threadIdx.x;
+  if (i >= total) return;
+  const float g = gaussian_at(i % plane, freq_nrow, freq_ncol, padded_ncol, sigma) * norm;
+  out[i] = {input[i].x * g, input[i].y * g};
 }
 
 }  // namespace fast_deconv::kernel
@@ -55,10 +54,9 @@ void multiply_with_gaussian(const core::exec_ctx& ctx, const fft_dims& dims, std
 {
   const std::int64_t plane = dims.freq_total();
   const std::int64_t total = plane * n_batch;
-  const auto grid = core::narrow<unsigned>(std::min<std::int64_t>(core::ceil_div(total, 256), 65535));
-  kernel::multiply_with_gaussian_kernel<<<grid, 256, 0, ctx.cuda_stream>>>(
-      input, out, plane, total, dims.freq_nrow, dims.freq_ncol, dims.padded_ncol, sigma,
-      1.0f / static_cast<float>(dims.padded_total()));
+  const core::launch_cfg cfg(total);
+  core::launch(ctx, cfg, kernel::multiply_with_gaussian_kernel, input, out, plane, total, dims.freq_nrow,
+               dims.freq_ncol, dims.padded_ncol, sigma, 1.0f / static_cast<float>(dims.padded_total()));
 }
 
 }  // namespace fast_deconv::linalg

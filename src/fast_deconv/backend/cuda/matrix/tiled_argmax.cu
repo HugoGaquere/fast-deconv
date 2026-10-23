@@ -6,6 +6,7 @@
 #include <cub/device/device_reduce.cuh>
 #include <fast_deconv/matrix/tiled_argmax.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
+#include <fd_backend/core/launch.cuh>
 
 namespace {
 // Threads per block for the per-tile reduction. A block reduces its whole tile
@@ -81,12 +82,12 @@ tiled_argmax_impl::tiled_argmax_impl(const core::exec_ctx& ctx, const tile_grid&
 void tiled_argmax_impl::reduce_tiles(core::span2d<const float> data, peak_criterion criterion, tile_range range)
 {
   // Origin in (tile_x0, tile_y0), so each block still writes its absolute d_tiles slot.
-  const dim3 block(kThreadsPerBlock);
-  const dim3 grid(core::narrow<unsigned>(range.tx1 - range.tx0 + 1), core::narrow<unsigned>(range.ty1 - range.ty0 + 1));
-  kernel::tiled_argmax_reduce<<<grid, block, 0, ctx_.cuda_stream>>>(
-      data.data_handle(), criterion, d_tiles_.get(), grid_.extents.extent(1), grid_.extents.extent(0), grid_.tile_size,
-      grid_.tile_size, grid_.n_tiles_x, range.tx0, range.ty0);
-  CHECK_CUDA(cudaGetLastError());
+  const auto cfg = core::launch_cfg::custom(
+      dim3(core::narrow<unsigned>(range.tx1 - range.tx0 + 1), core::narrow<unsigned>(range.ty1 - range.ty0 + 1)),
+      kThreadsPerBlock);
+  core::launch(ctx_, cfg, kernel::tiled_argmax_reduce, data.data_handle(), criterion, d_tiles_.get(),
+               grid_.extents.extent(1), grid_.extents.extent(0), grid_.tile_size, grid_.tile_size, grid_.n_tiles_x,
+               range.tx0, range.ty0);
 }
 
 // A device-wide CUB reduce rather than one block: small tiles give ~10^5 slots, which one block would serialize.

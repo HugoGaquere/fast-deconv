@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <fast_deconv/common/detail/mask_steps.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
+#include <fd_backend/core/launch.cuh>
 #include <iterator>
 #include <vector>
 
@@ -35,10 +36,6 @@ __global__ void mask_outside_kernel(const bool* region, const bool* external, bo
 
 namespace fast_deconv::common::detail {
 
-namespace {
-constexpr unsigned kBlock = 256;
-}  // namespace
-
 void stamp_peaks(const core::exec_ctx& ctx, const std::vector<index2d>& coords, const std::vector<int>& scales,
                  core::span3d<bool> mask_per_scale)
 {
@@ -55,29 +52,25 @@ void stamp_peaks(const core::exec_ctx& ctx, const std::vector<index2d>& coords, 
   auto d_offsets = ctx.alloc_mdcontainer<std::int64_t>(n_coords);
   ctx.copy(d_offsets.data_handle(), h_offsets.data(), n_coords);
 
-  const unsigned grid = core::narrow<unsigned>(core::ceil_div(n_coords, kBlock));
-  kernel::build_mask_per_scale_kernel<<<grid, kBlock, 0, ctx.cuda_stream>>>(d_offsets.data_handle(),
-                                                                            mask_per_scale.data_handle(), n_coords);
-  CHECK_LAST_CUDA_ERROR();
+  const core::launch_cfg cfg(n_coords);
+  core::launch(ctx, cfg, kernel::build_mask_per_scale_kernel, d_offsets.data_handle(), mask_per_scale.data_handle(),
+               n_coords);
 }
 
 void threshold_above(const core::exec_ctx& ctx, core::span2d<const float> in, float threshold, core::span2d<bool> out)
 {
   const std::int64_t n = in.mapping().required_span_size();
-  const unsigned grid = core::narrow<unsigned>(core::ceil_div(n, kBlock));
-  kernel::threshold_above_kernel<<<grid, kBlock, 0, ctx.cuda_stream>>>(in.data_handle(), threshold, out.data_handle(),
-                                                                       n);
-  CHECK_LAST_CUDA_ERROR();
+  const core::launch_cfg cfg(n);
+  core::launch(ctx, cfg, kernel::threshold_above_kernel, in.data_handle(), threshold, out.data_handle(), n);
 }
 
 void mask_outside(const core::exec_ctx& ctx, core::span2d<const bool> region, core::span2d<const bool> external,
                   core::span2d<bool> out)
 {
   const std::int64_t n = out.mapping().required_span_size();
-  const unsigned grid = core::narrow<unsigned>(core::ceil_div(n, kBlock));
-  kernel::mask_outside_kernel<<<grid, kBlock, 0, ctx.cuda_stream>>>(region.data_handle(), external.data_handle(),
-                                                                    out.data_handle(), n);
-  CHECK_LAST_CUDA_ERROR();
+  const core::launch_cfg cfg(n);
+  core::launch(ctx, cfg, kernel::mask_outside_kernel, region.data_handle(), external.data_handle(), out.data_handle(),
+               n);
 }
 
 }  // namespace fast_deconv::common::detail

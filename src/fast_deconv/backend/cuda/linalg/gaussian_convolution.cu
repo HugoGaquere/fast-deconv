@@ -8,39 +8,31 @@
 #include <fast_deconv/linalg/linalg.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
 #include <fast_deconv/util/cufft_macros.hpp>
+#include <fd_backend/core/launch.cuh>
 
 namespace fast_deconv::kernel {
 
-// Copies a batch of (nx, ny) images to the top-left of (px, py) planes; the rest is zeroed beforehand.
+// Copies a batch of (nx, ny) images to the top-left of (px, py) planes, one grid z-plane per image; the rest is
+// zeroed beforehand.
 __global__ void pad_kernel(const float* input, float* output, std::int64_t nx, std::int64_t ny, std::int64_t px,
-                           std::int64_t py, std::int64_t n_batch)
+                           std::int64_t py)
 {
   const std::int64_t row = std::int64_t{blockIdx.y} * blockDim.y + threadIdx.y;
   const std::int64_t col = std::int64_t{blockIdx.x} * blockDim.x + threadIdx.x;
+  const std::int64_t b = blockIdx.z;
   if (row >= nx || col >= ny) return;
-
-  const std::int64_t in_stride = nx * ny;
-  const std::int64_t out_stride = px * py;
-
-  const float* in = input + row * ny + col;
-  float* out = output + row * py + col;
-  for (std::int64_t b = 0; b < n_batch; b++, in += in_stride, out += out_stride) *out = *in;
+  output[(b * px + row) * py + col] = input[(b * nx + row) * ny + col];
 }
 
-// Copies the top-left (nx, ny) of a batch of (px, py) planes out.
+// Copies the top-left (nx, ny) of a batch of (px, py) planes out, one grid z-plane per image.
 __global__ void crop_kernel(const float* input, float* output, std::int64_t nx, std::int64_t ny, std::int64_t px,
-                            std::int64_t py, std::int64_t n_batch)
+                            std::int64_t py)
 {
   const std::int64_t row = std::int64_t{blockIdx.y} * blockDim.y + threadIdx.y;
   const std::int64_t col = std::int64_t{blockIdx.x} * blockDim.x + threadIdx.x;
+  const std::int64_t b = blockIdx.z;
   if (row >= nx || col >= ny) return;
-
-  const std::int64_t out_stride = nx * ny;
-  const std::int64_t in_stride = px * py;
-
-  const float* in = input + row * py + col;
-  float* out = output + row * ny + col;
-  for (std::int64_t b = 0; b < n_batch; b++, in += in_stride, out += out_stride) *out = *in;
+  output[(b * nx + row) * ny + col] = input[(b * px + row) * py + col];
 }
 
 }  // namespace fast_deconv::kernel
@@ -51,22 +43,18 @@ void pad(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, fl
 {
   CHECK_CUDA(cudaMemsetAsync(output, 0, core::narrow<std::size_t>(dims.padded_total() * n_batch) * sizeof(float),
                              ctx.cuda_stream));
-  dim3 block_dim(16, 16);
-  dim3 grid_dim(core::narrow<unsigned>(core::ceil_div(dims.input_ncol, block_dim.x)),
-                core::narrow<unsigned>(core::ceil_div(dims.input_nrow, block_dim.y)));
-  kernel::pad_kernel<<<grid_dim, block_dim, 0, ctx.cuda_stream>>>(input, output, dims.input_nrow, dims.input_ncol,
-                                                                  dims.padded_nrow, dims.padded_ncol, n_batch);
-  CHECK_LAST_CUDA_ERROR();
+  core::launch_cfg cfg(dims.input_nrow, dims.input_ncol);
+  cfg.grid.z = core::narrow<unsigned>(n_batch);
+  core::launch(ctx, cfg, kernel::pad_kernel, input, output, dims.input_nrow, dims.input_ncol, dims.padded_nrow,
+               dims.padded_ncol);
 }
 
 void crop(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output, std::int64_t n_batch)
 {
-  dim3 block_dim(16, 16);
-  dim3 grid_dim(core::narrow<unsigned>(core::ceil_div(dims.input_ncol, block_dim.x)),
-                core::narrow<unsigned>(core::ceil_div(dims.input_nrow, block_dim.y)));
-  kernel::crop_kernel<<<grid_dim, block_dim, 0, ctx.cuda_stream>>>(input, output, dims.input_nrow, dims.input_ncol,
-                                                                   dims.padded_nrow, dims.padded_ncol, n_batch);
-  CHECK_LAST_CUDA_ERROR();
+  core::launch_cfg cfg(dims.input_nrow, dims.input_ncol);
+  cfg.grid.z = core::narrow<unsigned>(n_batch);
+  core::launch(ctx, cfg, kernel::crop_kernel, input, output, dims.input_nrow, dims.input_ncol, dims.padded_nrow,
+               dims.padded_ncol);
 }
 
 gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, std::int64_t batch, std::int64_t nrow,
