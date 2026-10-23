@@ -11,7 +11,7 @@ namespace fast_deconv::scale {
 
 /// Selected scale, its residual plane and that plane's peak.
 struct scale_result {
-  int scale;                            ///< index of the selected scale
+  int scale = 0;                        ///< index of the selected scale
   core::cont2d<float> scaled_residual;  ///< residual convolved with the selected scale
   matrix::peak peak;                    ///< peak value and flat index within scaled_residual
   matrix::peak_criterion criterion;     ///< how scaled_residual was ranked; mask points into the caller's mask
