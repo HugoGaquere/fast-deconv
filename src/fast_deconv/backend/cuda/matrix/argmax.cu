@@ -24,9 +24,6 @@ struct criterion_peak {
   }
 };
 
-// -inf ties with a masked pixel, and the largest index loses that tie.
-constexpr peak kReduceIdentity{.index = INT64_MAX, .value = -INFINITY};
-
 }  // namespace
 
 peak find_peak(const core::exec_ctx& ctx, core::span2d<const float> data, peak_criterion criterion)
@@ -40,10 +37,10 @@ peak find_peak(const core::exec_ctx& ctx, core::span2d<const float> data, peak_c
   auto d_result = ctx.alloc_ptr_async<peak>(1);
 
   std::size_t temp_bytes = 0;
-  CHECK_CUDA(cub::DeviceReduce::Reduce(nullptr, temp_bytes, it, d_result.get(), n, peak_max{}, kReduceIdentity,
+  CHECK_CUDA(cub::DeviceReduce::Reduce(nullptr, temp_bytes, it, d_result.get(), n, peak_max{}, kPeakIdentity,
                                        ctx.cuda_stream));
   auto d_temp = ctx.alloc_ptr_async<std::byte>(core::narrow<std::int64_t>(std::max<std::size_t>(temp_bytes, 1)));
-  CHECK_CUDA(cub::DeviceReduce::Reduce(d_temp.get(), temp_bytes, it, d_result.get(), n, peak_max{}, kReduceIdentity,
+  CHECK_CUDA(cub::DeviceReduce::Reduce(d_temp.get(), temp_bytes, it, d_result.get(), n, peak_max{}, kPeakIdentity,
                                        ctx.cuda_stream));
 
   peak result{};

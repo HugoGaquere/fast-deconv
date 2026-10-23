@@ -13,8 +13,6 @@ namespace fast_deconv::matrix {
 
 namespace {
 
-using detail::max_by_value;
-
 // A tile scan is a few microseconds, so a handful of them already pays the fork.
 constexpr std::int64_t kMinParallelTiles = 8;
 // The combine is one compare per tile, so it needs far more of them to pay off.
@@ -31,7 +29,7 @@ tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> exte
 
   n_tiles_x_ = core::ceil_div(extents_.extent(1), tile_size_);
   n_tiles_y_ = core::ceil_div(extents_.extent(0), tile_size_);
-  tiles_.assign(core::narrow<std::size_t>(n_tiles_x_ * n_tiles_y_), detail::kPeakIdentity);
+  tiles_.assign(core::narrow<std::size_t>(n_tiles_x_ * n_tiles_y_), kPeakIdentity);
 }
 
 void tiled_argmax_ctx::reduce_tile(core::span2d<const float> data, std::int64_t tile_x, std::int64_t tile_y)
@@ -44,7 +42,7 @@ void tiled_argmax_ctx::reduce_tile(core::span2d<const float> data, std::int64_t 
   const std::int64_t col1 = std::min(col0 + tile_size_, image_ncol);
 
   const float* base = data.data_handle();
-  peak best = detail::kPeakIdentity;
+  peak best = kPeakIdentity;
   for (std::int64_t r = row0; r < row1; r++) {
     const std::int64_t row_offset = r * image_ncol;
     for (std::int64_t c = col0; c < col1; c++) {
@@ -60,10 +58,10 @@ void tiled_argmax_ctx::reduce_tile(core::span2d<const float> data, std::int64_t 
 peak tiled_argmax_ctx::final_combine() const
 {
   FD_PROFILE_FN();
-  peak result = detail::kPeakIdentity;
+  peak result = kPeakIdentity;
   const std::int64_t n_tiles = std::ssize(tiles_);
 #pragma omp parallel for reduction(peak_max : result) if (n_tiles > kMinParallelCombine)
-  for (std::int64_t i = 0; i < n_tiles; i++) result = max_by_value(result, tiles_.at(core::narrow<std::size_t>(i)));
+  for (std::int64_t i = 0; i < n_tiles; i++) result = peak_max{}(result, tiles_.at(core::narrow<std::size_t>(i)));
 
   return result;
 }
