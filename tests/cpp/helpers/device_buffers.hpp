@@ -16,7 +16,7 @@ template <typename T>
 class device_buffer {
  public:
   device_buffer(const core::exec_ctx& sr, std::size_t n)
-      : sr_(sr), n_(n), ptr_(sr.alloc_async<T>(core::narrow<std::int64_t>(n)))
+      : sr_(sr), n_(n), ptr_(sr.alloc<T>(core::narrow<std::int64_t>(n)))
   {
   }
 
@@ -36,7 +36,7 @@ class device_buffer {
 
   ~device_buffer()
   {
-    sr_.free_async(ptr_);
+    sr_.free(ptr_);
     sr_.wait();
   }
 

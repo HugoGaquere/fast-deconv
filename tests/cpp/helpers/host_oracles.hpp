@@ -63,7 +63,7 @@ inline float masked_max(const std::vector<float>& data, const std::vector<uint8_
   return best;
 }
 
-// sqrt(max(E[x^2] - E[x]^2, 0)) over ALL pixels — the matrix::stats_ctx::run
+// sqrt(max(E[x^2] - E[x]^2, 0)) over ALL pixels — the matrix::stats_ctx::max_and_rms
 // rms definition (its mask applies to the max only).
 inline float std_all(const std::vector<float>& data)
 {

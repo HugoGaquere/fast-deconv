@@ -33,8 +33,8 @@ __global__ void multiply_with_gaussian_kernel(const linalg::complex_type* input,
 
 namespace fast_deconv::linalg {
 
-void weighted_sum_async(const core::exec_ctx& ctx, core::span3d<const float> A, core::span1d<const float> weights,
-                        core::span2d<float> out)
+void weighted_sum(const core::exec_ctx& ctx, core::span3d<const float> A, core::span1d<const float> weights,
+                  core::span2d<float> out)
 {
   // _64: A holds n * w elements, which exceeds INT_MAX well before n alone does.
   const std::int64_t w = weights.extent(0);
@@ -45,11 +45,9 @@ void weighted_sum_async(const core::exec_ctx& ctx, core::span3d<const float> A, 
   const float beta = 0.0f;
 
   CHECK_CUBLAS(cublasSgemv_64(ctx.cublas_handle, CUBLAS_OP_N,
-                              n,                              // m: rows of A_cb
-                              w,                              // n: cols of A_cb
-                              &alpha, A.data_handle(), lda,
-                              weights.data_handle(), 1,
-                              &beta, out.data_handle(), 1));
+                              n,  // m: rows of A_cb
+                              w,  // n: cols of A_cb
+                              &alpha, A.data_handle(), lda, weights.data_handle(), 1, &beta, out.data_handle(), 1));
 }
 
 void multiply_with_gaussian(const core::exec_ctx& ctx, const fft_dims& dims, std::int64_t n_batch,

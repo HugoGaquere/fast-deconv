@@ -47,7 +47,7 @@ __global__ void crop_kernel(const float* input, float* output, std::int64_t nx, 
 
 namespace fast_deconv::linalg {
 
-void pad_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output, std::int64_t n_batch)
+void pad(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output, std::int64_t n_batch)
 {
   CHECK_CUDA(cudaMemsetAsync(output, 0, core::narrow<std::size_t>(dims.padded_total() * n_batch) * sizeof(float),
                              ctx.cuda_stream));
@@ -59,8 +59,7 @@ void pad_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* inp
   CHECK_LAST_CUDA_ERROR();
 }
 
-void crop_async(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output,
-                std::int64_t n_batch)
+void crop(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output, std::int64_t n_batch)
 {
   dim3 block_dim(16, 16);
   dim3 grid_dim(core::narrow<unsigned>(core::ceil_div(dims.input_ncol, block_dim.x)),
@@ -75,8 +74,8 @@ gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, st
     : ctx_(ctx),
       dims_(nrow, ncol, max_gaussian_reach(sigmas, factor)),
       batch_(batch),
-      padded_(ctx.alloc_ptr_async<float>(batch * dims_.padded_total())),
-      product_(ctx.alloc_ptr_async<complex_type>(batch * dims_.freq_total()))
+      padded_(ctx.alloc_ptr<float>(batch * dims_.padded_total())),
+      product_(ctx.alloc_ptr<complex_type>(batch * dims_.freq_total()))
 {
   // cuFFT allocates each plan's workspace itself. The 64-bit plan: batch * plane can exceed INT_MAX.
   std::array<long long, 2> fft_size{dims_.padded_nrow, dims_.padded_ncol};
@@ -108,7 +107,7 @@ void gaussian_convolution_ctx::backward_(complex_type* input, float* output) con
 
 gaussian_convolution_ctx::spectrum gaussian_convolution_ctx::make_spectrum() const
 {
-  return ctx_.alloc_mdcontainer_async<complex_type>(batch_ * dims_.freq_total());
+  return ctx_.alloc_mdcontainer<complex_type>(batch_ * dims_.freq_total());
 }
 
 void gaussian_convolution_ctx::forward(core::span3d<const float> input, spectrum& out) const
@@ -118,7 +117,7 @@ void gaussian_convolution_ctx::forward(core::span3d<const float> input, spectrum
   assert(input.extent(1) == dims_.input_nrow && input.extent(2) == dims_.input_ncol);
   assert(out.mapping().required_span_size() == batch_ * dims_.freq_total());
 
-  pad_async(ctx_, dims_, input.data_handle(), padded_.get(), batch_);
+  pad(ctx_, dims_, input.data_handle(), padded_.get(), batch_);
   forward_(padded_.get(), out.data_handle());
 }
 
@@ -133,7 +132,7 @@ void gaussian_convolution_ctx::convolve(const spectrum& in, float sigma, core::s
   // The multiply writes product_, so the caller's spectrum survives for the next sigma.
   multiply_with_gaussian(ctx_, dims_, batch_, in.data_handle(), product_.get(), sigma);
   backward_(product_.get(), padded_.get());
-  crop_async(ctx_, dims_, padded_.get(), out.data_handle(), batch_);
+  crop(ctx_, dims_, padded_.get(), out.data_handle(), batch_);
 }
 
 // The multiply runs in place on product_: no spectrum survives for another sigma.
@@ -146,11 +145,11 @@ void gaussian_convolution_ctx::convolve(core::span3d<const float> input, float s
   assert(out.extent(1) == dims_.input_nrow && out.extent(2) == dims_.input_ncol);
   assert(gaussian_reach(sigma) <= std::min(dims_.padded_nrow - dims_.input_nrow, dims_.padded_ncol - dims_.input_ncol));
 
-  pad_async(ctx_, dims_, input.data_handle(), padded_.get(), batch_);
+  pad(ctx_, dims_, input.data_handle(), padded_.get(), batch_);
   forward_(padded_.get(), product_.get());
   multiply_with_gaussian(ctx_, dims_, batch_, product_.get(), product_.get(), sigma);
   backward_(product_.get(), padded_.get());
-  crop_async(ctx_, dims_, padded_.get(), out.data_handle(), batch_);
+  crop(ctx_, dims_, padded_.get(), out.data_handle(), batch_);
 }
 
 }  // namespace fast_deconv::linalg

@@ -9,8 +9,8 @@ namespace {
 constexpr std::int64_t kMinParallelPixels = 64 * 1024;
 }  // namespace
 
-void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> residual, core::span2d<const float> psf,
-                              index2d peak_coords, float gain, matrix::peak_criterion criterion, float threshold)
+void subtract_component(const core::exec_ctx& ctx, core::span2d<float> residual, core::span2d<const float> psf,
+                        index2d peak_coords, float gain, matrix::peak_criterion criterion, float threshold)
 {
   FD_PROFILE_FN();
   auto ovr = compute_overlap_region(peak_coords, residual.extent(0), residual.extent(1), psf.extent(0), psf.extent(1));
@@ -25,8 +25,8 @@ void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> res
   }
 }
 
-void subtract_component_async(const core::exec_ctx& ctx, core::span3d<float> residual, core::span3d<const float> psf,
-                              core::span1d<const float> spectral_coeffs, index2d peak_coords, float gain)
+void subtract_component(const core::exec_ctx& ctx, core::span3d<float> residual, core::span3d<const float> psf,
+                        core::span1d<const float> spectral_coeffs, index2d peak_coords, float gain)
 {
   FD_PROFILE_FN();
   const std::int64_t n_freq = residual.extent(0);

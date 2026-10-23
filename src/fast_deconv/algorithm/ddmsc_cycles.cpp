@@ -92,14 +92,14 @@ struct run_workspace {
 
   run_workspace(const context& ctx, const params& p, std::int64_t nrow, std::int64_t ncol, std::int64_t n_freq,
                 core::span1d<const float> weights_freq)
-      : mean_residual_buf(ctx.compute_stream.alloc_mdcontainer_async<float>(nrow, ncol)),
+      : mean_residual_buf(ctx.compute_stream.alloc_mdcontainer<float>(nrow, ncol)),
         stats(ctx.compute_stream, nrow * ncol, p.clean_negative),
         tiled(ctx.compute_stream, mean_residual_buf.extents(), 64),
         scale_conv(ctx.compute_stream, 1, ctx.dirty_nrow, ctx.dirty_ncol, ctx.scale_sigmas),
         psf_cache(ctx.compute_stream, ctx.raw_psfs, ctx.scale_sigmas, weights_freq, p.gamma),
-        all_coeffs(ctx.aux_stream.alloc_mdcontainer_async<float>(
-            (std::int64_t{p.max_iteration} + p.max_clean_iteration) * ctx.xdes.extent(1))),
-        coeffs_per_chan(ctx.aux_stream.alloc_mdcontainer_async<float>(n_freq))
+        all_coeffs(ctx.aux_stream.alloc_mdcontainer<float>((std::int64_t{p.max_iteration} + p.max_clean_iteration) *
+                                                           ctx.xdes.extent(1))),
+        coeffs_per_chan(ctx.aux_stream.alloc_mdcontainer<float>(n_freq))
   {
   }
 };
@@ -110,7 +110,7 @@ core::cont3d<bool> build_scale_mask(const context& ctx, const ddmsc_result& resu
 {
   FD_PROFILE_FN();
   const auto& stream_a = ctx.compute_stream;
-  auto mask_per_scale = stream_a.alloc_mdcontainer_async<bool>(ctx.scale_sigmas.size(), nrow, ncol);
+  auto mask_per_scale = stream_a.alloc_mdcontainer<bool>(ctx.scale_sigmas.size(), nrow, ncol);
 
   const int central_facet_idx = ctx.map_pixel_facet(nrow / 2, ncol / 2);
   core::span3d<const float> central_facet_psfs = emu::submdspan(ctx.raw_psfs, central_facet_idx);
@@ -172,9 +172,9 @@ int clean_loop(run_workspace& ws, const context& ctx, const params& p, const sca
     multi_frequency::fit_coefficients(stream_b, dirty, jones_norm, weights_freq, ctx.xdes, peak_coords, spectral_coeffs,
                                       ws.coeffs_per_chan);
 
-    common::subtract_component_async(stream_b, dirty, conv_psf, ws.coeffs_per_chan, peak_coords, gain);
-    common::subtract_component_async(stream_a, scaled_residual, conv2_psf, peak_coords, peak_signed * gain,
-                                     selected.criterion, threshold);
+    common::subtract_component(stream_b, dirty, conv_psf, ws.coeffs_per_chan, peak_coords, gain);
+    common::subtract_component(stream_a, scaled_residual, conv2_psf, peak_coords, peak_signed * gain,
+                               selected.criterion, threshold);
     // Only the conv2_psf footprint changed: rescan just the touched tiles.
     const auto next = ws.tiled.run_incremental(scaled_residual, peak_coords.row, peak_coords.col, conv2_psf.extent(0),
                                                conv2_psf.extent(1));
@@ -220,9 +220,9 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
 
   FD_PROFILE_MARK("init/mean_residual");
   const core::span2d<float> mean_residual(ws.mean_residual_buf);
-  linalg::weighted_sum_async(stream_a, dirty, weights_freq, mean_residual);
+  linalg::weighted_sum(stream_a, dirty, weights_freq, mean_residual);
 
-  auto [track_flux, track_rms] = ws.stats.run(mean_residual, ctx.mask);
+  auto [track_flux, track_rms] = ws.stats.max_and_rms(mean_residual, ctx.mask);
 
   // A previous major cycle overflowed.
   if (!std::isfinite(track_flux) || !std::isfinite(track_rms))
@@ -289,10 +289,10 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
       continue;
     }
 
-    linalg::weighted_sum_async(stream_a, dirty, weights_freq, mean_residual);
+    linalg::weighted_sum(stream_a, dirty, weights_freq, mean_residual);
 
     // TODO(guards): stats use ctx.mask while the clean loop may search mask_per_scale.
-    auto [this_flux, this_rms] = ws.stats.run(mean_residual, ctx.mask);
+    auto [this_flux, this_rms] = ws.stats.max_and_rms(mean_residual, ctx.mask);
 
     deconv_convergence.track(this_flux, this_rms, n_clean_iter, selected_scale_idx);
 

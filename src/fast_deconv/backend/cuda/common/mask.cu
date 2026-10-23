@@ -85,7 +85,7 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
       h_offsets.push_back(mask_per_scale.mapping()(scales.at(i), coords.at(i).row, coords.at(i).col));
 
     const std::int64_t n_coords = std::ssize(h_offsets);
-    auto d_offsets = ctx.alloc_mdcontainer_async<std::int64_t>(n_coords);
+    auto d_offsets = ctx.alloc_mdcontainer<std::int64_t>(n_coords);
     ctx.copy(d_offsets.data_handle(), h_offsets.data(), n_coords);
 
     dim3 block(256);
@@ -96,8 +96,8 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
 
   // ---- 2. Weighted mean of the channels' PSFs, transformed once and reused by every scale ----
   // Convolution is linear: sum_f w_f (G * psf_f) = G * (sum_f w_f psf_f), so one plane instead of n_freq.
-  auto psf_mean = ctx.alloc_mdcontainer_async<float>(psf_nrow, psf_ncol);
-  linalg::weighted_sum_async(ctx, central_facet_psfs, weights_freq, psf_mean);
+  auto psf_mean = ctx.alloc_mdcontainer<float>(psf_nrow, psf_ncol);
+  linalg::weighted_sum(ctx, central_facet_psfs, weights_freq, psf_mean);
   // Wrap-free for every scale's sigma * sqrt(2).
   const linalg::gaussian_convolution_ctx conv(ctx, /*batch=*/1, psf_nrow, psf_ncol, scale_sigmas,
                                               std::numbers::sqrt2_v<float>);
@@ -105,9 +105,9 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
   conv.forward(core::span3d<const float>(psf_mean.data_handle(), 1, psf_nrow, psf_ncol), spectrum);
 
   // ---- 3. Per-scale: conv2 -> FWHM -> dilate ----
-  auto conv2_psf = ctx.alloc_mdcontainer_async<float>(psf_nrow, psf_ncol);
-  auto fwhm_mask = ctx.alloc_mdcontainer_async<bool>(psf_nrow, psf_ncol);
-  auto dilation_out = ctx.alloc_mdcontainer_async<bool>(dirty_nrow, dirty_ncol);
+  auto conv2_psf = ctx.alloc_mdcontainer<float>(psf_nrow, psf_ncol);
+  auto fwhm_mask = ctx.alloc_mdcontainer<bool>(psf_nrow, psf_ncol);
+  auto dilation_out = ctx.alloc_mdcontainer<bool>(dirty_nrow, dirty_ncol);
 
   for (std::int64_t i = 0; i < n_scales; i++) {
     // 3a. psf_mean ** G_s ** G_s, one convolution with G(sigma * sqrt(2)) since G(sigma)^2 = G(sigma * sqrt(2)).
