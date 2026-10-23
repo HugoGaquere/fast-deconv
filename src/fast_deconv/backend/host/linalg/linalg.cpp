@@ -25,8 +25,8 @@ void weighted_sum(const float* __restrict A, const float* __restrict weights, fl
 
 }  // namespace
 
-void weighted_sum_async(const core::exec_ctx& ctx, const core::span3d<const float> A,
-                        const core::span1d<const float> weights, core::span2d<float> out)
+void weighted_sum_async(const core::exec_ctx& ctx, core::span3d<const float> A, core::span1d<const float> weights,
+                        core::span2d<float> out)
 {
   FD_PROFILE_FN();
   // TODO: assert that A.extent(0) == weights.size()

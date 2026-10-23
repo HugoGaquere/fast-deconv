@@ -6,9 +6,9 @@
 
 namespace fast_deconv::morphology {
 
-common::roi compute_mask_roi(const core::exec_ctx& ctx, core::span2d<bool> data)
+common::roi compute_mask_roi(const core::exec_ctx& ctx, core::span2d<const bool> data)
 {
-  bool* data_ptr = data.data_handle();
+  const bool* data_ptr = data.data_handle();
   const std::int64_t W = data.extent(1);
   const std::int64_t n = data.mapping().required_span_size();
 

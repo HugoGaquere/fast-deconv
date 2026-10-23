@@ -32,6 +32,14 @@ class exec_ctx : public exec_ctx_impl {
  public:
   using impl = exec_ctx_impl;
 
+  /**
+   * @brief Uninitialized backend memory for @p n elements of T (bytes for void), from the pool.
+   *
+   * Stream-ordered on CUDA: usable by work enqueued on this context after the call. Release with free_async(); the
+   * typed helpers below do it on destruction.
+   *
+   * @throws std::invalid_argument If @p n <= 0.
+   */
   template <typename T = void>
   T* alloc_async(std::int64_t n) const
   {
@@ -43,6 +51,8 @@ class exec_ctx : public exec_ctx_impl {
     return static_cast<T*>(this->alloc_bytes(num_bytes));
   }
 
+  /// alloc_async() of a row-major container with extents @p exts, freed through this context when its last copy
+  /// goes.
   template <typename T, std::integral... Exts>
     requires(sizeof...(Exts) > 0)
   mdcontainer<T, sizeof...(Exts)> alloc_mdcontainer_async(Exts... exts) const
@@ -50,6 +60,7 @@ class exec_ctx : public exec_ctx_impl {
     return alloc_mdcontainer_async<T>(dims<sizeof...(Exts)>(narrow<std::int64_t>(exts)...));
   }
 
+  /// alloc_mdcontainer_async() taking the extents as one object (e.g. another view's extents()).
   template <typename T, typename Extents>
     requires requires { Extents::rank(); }
   mdcontainer<T, Extents::rank()> alloc_mdcontainer_async(const Extents& exts) const
@@ -61,6 +72,7 @@ class exec_ctx : public exec_ctx_impl {
     return mdcontainer<T, Extents::rank()>(ptr, owned_ptr<T>(ptr, ctx_deleter{this}), d);
   }
 
+  /// alloc_async() of @p n elements, freed through this context when the pointer goes.
   template <typename T>
   owned_ptr<T> alloc_ptr_async(std::int64_t n) const
   {
@@ -132,6 +144,7 @@ class exec_ctx : public exec_ctx_impl {
       copy(host_dst, src.data_handle(), narrow<std::int64_t>(src.size()));
   }
 
+  /// Returns memory from alloc_async() to the pool; stream-ordered on CUDA, after the work already enqueued here.
   template <typename T>
   void free_async(T* ptr) const
   {
@@ -149,6 +162,7 @@ class exec_resources : public exec_resources_impl {
   using impl = exec_resources_impl;
   using impl::impl;
 
+  /// A new execution context (on CUDA, its own stream) allocating from this pool. Must not outlive this.
   exec_ctx make_ctx() const { return exec_ctx(*this); }
 };
 

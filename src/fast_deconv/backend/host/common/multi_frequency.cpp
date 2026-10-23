@@ -17,9 +17,9 @@ constexpr std::int64_t kSpectralMaxOrder = 8;
 // Port of spectral_fit_kernel (backend/cuda/common/multi_frequency.cu), which is
 // already a one-thread sequential solve; see there for the derivation of the two
 // branches and why everything is done in double.
-void fit_coefficients(const core::exec_ctx& ctx, const core::span3d<float> residual,
-                      const core::span3d<const float> jones_norm, const core::span1d<const float> weights_freq,
-                      const core::span2d<float> xdes, const common::index2d peak_coords,
+void fit_coefficients(const core::exec_ctx& ctx, core::span3d<const float> residual,
+                      core::span3d<const float> jones_norm, core::span1d<const float> weights_freq,
+                      core::span2d<const float> xdes, common::index2d peak_coords,
                       core::span1d<float> compact_coeffs_out, core::span1d<float> coeffs_per_chan_out)
 {
   FD_PROFILE_FN();

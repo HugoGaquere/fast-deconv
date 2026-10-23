@@ -91,7 +91,7 @@ struct run_workspace {
   std::optional<core::cont3d<bool>> mask_per_scale;
 
   run_workspace(const context& ctx, const params& p, std::int64_t nrow, std::int64_t ncol, std::int64_t n_freq,
-                const core::span1d<const float>& weights_freq)
+                core::span1d<const float> weights_freq)
       : mean_residual_buf(ctx.compute_stream.alloc_mdcontainer_async<float>(nrow, ncol)),
         stats(ctx.compute_stream, nrow * ncol, p.clean_negative),
         tiled(ctx.compute_stream, mean_residual_buf.extents(), 64),
@@ -106,14 +106,14 @@ struct run_workspace {
 
 // Per-scale masks around every component so far, previous calls included.
 core::cont3d<bool> build_scale_mask(const context& ctx, const ddmsc_result& result,
-                                    const core::span1d<const float>& weights_freq, std::int64_t nrow, std::int64_t ncol)
+                                    core::span1d<const float> weights_freq, std::int64_t nrow, std::int64_t ncol)
 {
   FD_PROFILE_FN();
   const auto& stream_a = ctx.compute_stream;
   auto mask_per_scale = stream_a.alloc_mdcontainer_async<bool>(ctx.scale_sigmas.size(), nrow, ncol);
 
   const int central_facet_idx = ctx.map_pixel_facet(nrow / 2, ncol / 2);
-  core::span3d<float> central_facet_psfs = emu::submdspan(ctx.raw_psfs, central_facet_idx);
+  core::span3d<const float> central_facet_psfs = emu::submdspan(ctx.raw_psfs, central_facet_idx);
 
   std::vector<common::index2d> all_coords = ctx.historical_peak_coords;
   for (const auto& [r, c] : result.peak_coords) all_coords.push_back({r, c});
@@ -127,8 +127,8 @@ core::cont3d<bool> build_scale_mask(const context& ctx, const ddmsc_result& resu
 
 // Returns the number of components found.
 int clean_loop(run_workspace& ws, const context& ctx, const params& p, const scale::scale_result& selected,
-               core::span3d<float>& dirty, const core::span3d<const float>& jones_norm,
-               const core::span1d<const float>& weights_freq, int first_component, ddmsc_result& result)
+               core::span3d<float> dirty, core::span3d<const float> jones_norm, core::span1d<const float> weights_freq,
+               int first_component, ddmsc_result& result)
 {
   FD_PROFILE_FN();
   const auto& stream_a = ctx.compute_stream;
@@ -189,9 +189,8 @@ int clean_loop(run_workspace& ws, const context& ctx, const params& p, const sca
 
 }  // namespace
 
-ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>& dirty,
-                              const core::span3d<const float>& jones_norm,
-                              const core::span1d<const float>& weights_freq)
+ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float> dirty,
+                              core::span3d<const float> jones_norm, core::span1d<const float> weights_freq)
 {
   FD_PROFILE_FN();
 

@@ -7,8 +7,8 @@
 namespace fast_deconv::matrix {
 
 /**
- * @brief Packed reduction state combining the four contributions needed to compute max + rms in a single
- *        sweep.
+ * @brief Packed reduction state combining the four contributions needed to compute the max and the standard
+ *        deviation in a single sweep.
  *
  * Public because run_async() leaves it on backend memory for the caller to finalize.
  */
@@ -19,20 +19,20 @@ struct stats_acc {
   std::int64_t count;
 };
 
-/// Result returned to the host after a fused max + rms reduction.
+/// Result returned to the host after a fused max + standard deviation reduction.
 struct stats_result {
   float max;  ///< masked max (with optional abs); -inf if every pixel is masked
-  float rms;  ///< sqrt(max(E[x^2] - E[x]^2, 0)) over all pixels (mask not applied)
+  /// Standard deviation, not the root mean square: sqrt(max(E[x^2] - E[x]^2, 0)), over all pixels (mask not
+  /// applied). Named rms after the noise estimate it stands for; equal to the RMS only for a zero-mean image.
+  float rms;
 };
 
 /**
- * @brief Reusable state for the fused max + rms reduction over a 2D image with a boolean mask.
+ * @brief Reusable state for the fused max + standard deviation reduction over a 2D image with a boolean mask.
  *
- * The constructor runs the temp-storage sizing query once so the minor-cycle loop only pays for the
- * reduction itself.
- *
- * `use_abs` is fixed at construction so the iterator type stays stable and the temp-bytes query computed
- * in the constructor stays valid for every subsequent call.
+ * On the CUDA backend the constructor runs the CUB temp-storage sizing query once, so the minor-cycle loop only
+ * pays for the reduction itself; `use_abs` is fixed at construction so the iterator type, and with it that
+ * query, stays valid for every subsequent call. The host backend has no scratch to size.
  */
 class stats_ctx {
  public:
@@ -52,12 +52,12 @@ class stats_ctx {
    * No host sync; the result stays in backend memory, reachable through device_state().
    *
    * @param[in] data  Image, n_elements pixels.
-   * @param[in] mask  Same shape as @p data, true = excluded from the max (the rms ignores it).
+   * @param[in] mask  Same shape as @p data, true = excluded from the max (the standard deviation ignores it).
    */
-  void run_async(core::span2d<float> data, core::span2d<bool> mask);
+  void run_async(core::span2d<const float> data, core::span2d<const bool> mask);
 
-  /// Async issue + D2H copy + ctx sync. Returns {max, rms} on host.
-  stats_result run(core::span2d<float> data, core::span2d<bool> mask);
+  /// Async issue + D2H copy + ctx sync. Returns {max, standard deviation} on host.
+  stats_result run(core::span2d<const float> data, core::span2d<const bool> mask);
 
   /// The packed accumulator left by run_async(), in backend memory.
   const stats_acc* device_state() const { return d_state_.get(); }

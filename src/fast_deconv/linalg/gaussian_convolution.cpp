@@ -6,8 +6,7 @@
 namespace fast_deconv::linalg {
 
 // Last pixel where the image-domain kernel of exp(-2 pi^2 sigma^2 f^2), f in [-1/2, 1/2], is above
-// kReachTol of its peak: float32 precision. Closed form, an upper bound on the measured reach (within
-// 1-3 px for sigma in [0.05, 200], see gaussian_conv/padding_and_kernel_reach.ipynb):
+// kReachTol of its peak: float32 precision. Closed form, an upper bound on that reach:
 //   - the Gaussian decay: exp(-x^2 / 2 sigma^2) = tol  =>  x = sigma sqrt(2 ln(1/tol));
 //   - the cut at Nyquist (small sigma): |h(x)| ~ sigma^2 H(1/2) / x^2, against the peak
 //     h(0) = erf(pi sigma / sqrt 2) / (sigma sqrt(2 pi)).

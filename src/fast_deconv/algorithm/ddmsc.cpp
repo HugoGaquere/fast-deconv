@@ -2,9 +2,9 @@
 
 namespace fast_deconv::algorithm::ddmsc {
 
-Ddmsc::Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
-             const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
-             const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet,
+Ddmsc::Ddmsc(core::host_span4d<const float> raw_psfs, core::host_span2d<const float> xdes,
+             core::host_span2d<const bool> mask, core::host_span1d<const float> scale_sigmas,
+             core::host_span1d<const float> scale_bias, core::host_span2d<const int> map_pixel_facet,
              std::int64_t dirty_nrow, std::int64_t dirty_ncol, int exec_device)
     : ctx_(exec_device, raw_psfs, xdes, mask, scale_sigmas, scale_bias, map_pixel_facet, dirty_nrow, dirty_ncol),
       params_{
@@ -28,8 +28,8 @@ Ddmsc::Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<f
 {
 }
 
-ddmsc_result Ddmsc::run(core::host_span3d<float>& dirty, const core::host_span3d<const float>& jones_norm,
-                        const core::host_span1d<const float>& weights_freq)
+ddmsc_result Ddmsc::run(core::host_span3d<float> dirty, core::host_span3d<const float> jones_norm,
+                        core::host_span1d<const float> weights_freq)
 {
   const core::exec_ctx& ctx = ctx_.compute_stream;
 
@@ -37,8 +37,7 @@ ddmsc_result Ddmsc::run(core::host_span3d<float>& dirty, const core::host_span3d
   auto d_jones = ctx.stage(jones_norm);
   auto d_weights = ctx.stage(weights_freq);
 
-  core::span3d<float> dirty_view = d_dirty;
-  ddmsc_result result = run_ddmsc_cycles(ctx_, params_, dirty_view, d_jones, d_weights);
+  ddmsc_result result = run_ddmsc_cycles(ctx_, params_, d_dirty, d_jones, d_weights);
 
   ctx.unstage(d_dirty, dirty.data_handle());
   ctx.wait();

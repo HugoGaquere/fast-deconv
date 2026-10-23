@@ -56,8 +56,8 @@ __device__ void solve_gauss_jordan(double* m, double* rhs, std::int64_t n, std::
 // mean-residual drop as gain * peak. Those agree only if the fitted model reproduces
 // the band-weighted mean at the peak. The plain projection does so only when the
 // constant vector lies in the span of SAX, i.e. when sqrt(jones_norm) is flat across
-// bands. It is not, near the field edge, where the per-band beam can span four orders
-// of magnitude — there the unfitted mean runs away and the minor cycle diverges.
+// bands. It is not, near the field edge, where the per-band beam varies strongly
+// across bands — there the unfitted mean runs away and the minor cycle diverges.
 //
 // Exact fit (n_order >= n_freq) — fewer bands than coefficients, so SAX theta = y has
 // infinitely many solutions and G (n_order x n_order, rank n_freq) is singular. Take
@@ -73,10 +73,9 @@ __device__ void solve_gauss_jordan(double* m, double* rhs, std::int64_t n, std::
 // later evaluated at the degrid frequencies.
 //
 // Everything is done in double. G is badly conditioned wherever the per-band beam is
-// steep (cond ~ 3e5 at the edge of one L-band field, and it climbs fast with order),
-// and in float32 the solve returns a model several times larger than the data it was
-// fitting, which is itself enough to diverge the minor cycle. The systems are at most
-// SPECTRAL_MAX_ORDER square, so double costs nothing here.
+// steep, and more so as the order grows; in float32 the solve can return a model
+// larger than the data it fits, which is itself enough to diverge the minor cycle.
+// The systems are at most SPECTRAL_MAX_ORDER square, so double costs nothing here.
 //
 // One block, one thread: this is a tiny sequential solve, and the launch dominates.
 __global__ void spectral_fit_kernel(float* compact_out, float* per_chan_out, const float* dirty, const float* xdes,
@@ -168,9 +167,9 @@ __global__ void spectral_fit_kernel(float* compact_out, float* per_chan_out, con
 
 namespace fast_deconv::multi_frequency {
 
-void fit_coefficients(const core::exec_ctx& ctx, const core::span3d<float> residual,
-                      const core::span3d<const float> jones_norm, const core::span1d<const float> weights_freq,
-                      const core::span2d<float> xdes, const common::index2d peak_coords,
+void fit_coefficients(const core::exec_ctx& ctx, core::span3d<const float> residual,
+                      core::span3d<const float> jones_norm, core::span1d<const float> weights_freq,
+                      core::span2d<const float> xdes, common::index2d peak_coords,
                       core::span1d<float> compact_coeffs_out, core::span1d<float> coeffs_per_chan_out)
 {
   const std::int64_t n_freq = xdes.extent(0);

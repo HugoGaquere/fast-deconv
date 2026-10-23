@@ -35,7 +35,7 @@ core::mdcontainer<float, 1> gaussian_kernel(const core::exec_ctx& ctx, std::int6
 }
 
 // Lines per batch in both passes: two of ducc0's 8-line FFT bunches, and one 64 B cache line per strip row in the
-// column pass. Measured on Zen 3 (docs/2026-10-05, section 7, and the 2026-10-09 sweep).
+// column pass.
 constexpr std::int64_t kBatchLines = 16;
 
 // Zero-padded convolution of the h x w block at src (row stride ld) through buf: the block goes to the top-left of

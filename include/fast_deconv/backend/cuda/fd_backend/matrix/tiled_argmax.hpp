@@ -40,7 +40,8 @@ class tiled_argmax_ctx {
    * Recomputes only the tiles overlapping the footprint, then re-combines against the still-valid cached
    * tiles.
    *
-   * @pre A prior run() seeded every tile, and nothing outside the footprint changed in @p data since that call.
+   * @pre A prior run() seeded every tile, and nothing outside the footprint changed in @p data since the
+   *      previous run() or run_incremental().
    *
    * @param[in] data         Image, (nrow, ncol), matching extents().
    * @param[in] peak_row     Footprint center row.
