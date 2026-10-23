@@ -20,9 +20,9 @@ namespace fast_deconv::common {
  * @param[in]     criterion    Ranks each residual pixel; its mask indexes @p residual.
  * @param[in]     threshold    Pixels ranked below this are not touched.
  */
-void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> residual, core::span2d<const float> psf,
-                              index2d peak_coords, float gain, matrix::peak_criterion criterion = {},
-                              float threshold = -INFINITY);
+void subtract_component(const core::exec_ctx& ctx, core::span2d<float> residual, core::span2d<const float> psf,
+                        index2d peak_coords, float gain, matrix::peak_criterion criterion = {},
+                        float threshold = -INFINITY);
 
 /**
  * @brief residual[f] -= gain * spectral_coeffs[f] * psf[f] for every channel f, with each plane centered on
@@ -35,7 +35,7 @@ void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> res
  * @param[in]     peak_coords      Pixel the component is centered on.
  * @param[in]     gain             Scale applied to every channel.
  */
-void subtract_component_async(const core::exec_ctx& ctx, core::span3d<float> residual, core::span3d<const float> psf,
-                              core::span1d<const float> spectral_coeffs, index2d peak_coords, float gain);
+void subtract_component(const core::exec_ctx& ctx, core::span3d<float> residual, core::span3d<const float> psf,
+                        core::span1d<const float> spectral_coeffs, index2d peak_coords, float gain);
 
 }  // namespace fast_deconv::common

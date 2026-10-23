@@ -51,7 +51,7 @@ std::vector<bool> to_bool(const std::vector<uint8_t>& mask)
 
 class MatrixReductions : public fdtest::BackendTest {};
 
-// stats_ctx::run is deliberately asymmetric (stats.hpp): the mask excludes
+// stats_ctx::max_and_rms is deliberately asymmetric (stats.hpp): the mask excludes
 // pixels from the MAX only; the rms is over every pixel. Pin that contract.
 TEST_F(MatrixReductions, ComputeStatsMasksMaxButNotRms)
 {
@@ -69,7 +69,7 @@ TEST_F(MatrixReductions, ComputeStatsMasksMaxButNotRms)
   core::span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
 
   matrix::stats_ctx ws(sr, kNpix, /*use_abs=*/false);
-  const auto [max_v, rms_v] = ws.run(img_view, mask_view);
+  const auto [max_v, rms_v] = ws.max_and_rms(img_view, mask_view);
 
   EXPECT_FLOAT_EQ(max_v, fdtest::masked_max(img, mask, false));
   const float rms_expected = fdtest::std_all(img);  // mask ignored, planted 9.0 included
@@ -94,12 +94,12 @@ TEST_F(MatrixReductions, ComputeStatsWithAbsAndWorkspaceReuse)
   // of calls (temp bytes are queried once in the ctor).
   matrix::stats_ctx ws(sr, kNpix, /*use_abs=*/true);
 
-  const auto s1 = ws.run(img_view, mask_view);
+  const auto s1 = ws.max_and_rms(img_view, mask_view);
   EXPECT_FLOAT_EQ(s1.max, 4.0f);
   EXPECT_NEAR(s1.rms, fdtest::std_all(img1), 1e-4f * fdtest::std_all(img1));
 
   d_img.from_host(img2);
-  const auto s2 = ws.run(img_view, mask_view);
+  const auto s2 = ws.max_and_rms(img_view, mask_view);
   EXPECT_FLOAT_EQ(s2.max, 2.5f);
   EXPECT_NEAR(s2.rms, fdtest::std_all(img2), 1e-4f * fdtest::std_all(img2));
 }
@@ -118,10 +118,10 @@ TEST_F(MatrixReductions, ComputeStatsAsyncLeavesResultOnDevice)
   core::span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
 
   matrix::stats_ctx ws(sr, kNpix, /*use_abs=*/false);
-  ws.run_async(img_view, mask_view);
+  ws.reduce(img_view, mask_view);
 
   matrix::stats_acc acc{};
-  sr.copy(&acc, ws.device_state(), 1);
+  sr.copy(&acc, ws.state(), 1);
   sr.wait();
 
   ASSERT_EQ(acc.count, kNpix);

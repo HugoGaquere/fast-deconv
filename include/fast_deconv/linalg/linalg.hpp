@@ -16,7 +16,7 @@ namespace fast_deconv::linalg {
  * @param[in]  weights  Weight per plane, device, (n_planes,).
  * @param[out] out      Weighted sum, device, (nrow, ncol), written entirely.
  */
-void weighted_sum_async(const core::exec_ctx& ctx, core::span3d<const float> A, core::span1d<const float> weights,
-                        core::span2d<float> out);
+void weighted_sum(const core::exec_ctx& ctx, core::span3d<const float> A, core::span1d<const float> weights,
+                  core::span2d<float> out);
 
 }  // namespace fast_deconv::linalg

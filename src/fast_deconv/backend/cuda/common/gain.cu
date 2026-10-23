@@ -10,15 +10,15 @@ namespace fast_deconv::common {
 float compute_gain(const core::exec_ctx& ctx, core::span3d<const float> psf, core::span1d<const float> weights_freq,
                    float gamma)
 {
-  auto wmean = ctx.alloc_mdcontainer_async<float>(psf.extent(1), psf.extent(2));
+  auto wmean = ctx.alloc_mdcontainer<float>(psf.extent(1), psf.extent(2));
   const std::int64_t psf_npix = wmean.mapping().required_span_size();
-  auto d_max = ctx.alloc_ptr_async<float>(1);
+  auto d_max = ctx.alloc_ptr<float>(1);
 
   size_t temp_bytes = 0;
   cub::DeviceReduce::Max(nullptr, temp_bytes, wmean.data_handle(), d_max.get(), psf_npix, ctx.cuda_stream);
-  auto d_temp = ctx.alloc_mdcontainer_async<char>(temp_bytes);
+  auto d_temp = ctx.alloc_mdcontainer<char>(temp_bytes);
 
-  linalg::weighted_sum_async(ctx, psf, weights_freq, wmean);
+  linalg::weighted_sum(ctx, psf, weights_freq, wmean);
   cub::DeviceReduce::Max(d_temp.data_handle(), temp_bytes, wmean.data_handle(), d_max.get(), psf_npix, ctx.cuda_stream);
 
   float gain;
@@ -33,17 +33,17 @@ std::vector<float> compute_gain_batched(const core::exec_ctx& ctx, core::span4d<
 {
   const std::int64_t n_batch = psfs.extent(0);
 
-  auto wmean = ctx.alloc_mdcontainer_async<float>(psfs.extent(2), psfs.extent(3));
+  auto wmean = ctx.alloc_mdcontainer<float>(psfs.extent(2), psfs.extent(3));
   const std::int64_t psf_npix = wmean.mapping().required_span_size();
-  auto d_maxes = ctx.alloc_mdcontainer_async<float>(n_batch);
+  auto d_maxes = ctx.alloc_mdcontainer<float>(n_batch);
 
   size_t temp_bytes = 0;
   cub::DeviceReduce::Max(nullptr, temp_bytes, wmean.data_handle(), d_maxes.data_handle(), psf_npix, ctx.cuda_stream);
-  auto d_temp = ctx.alloc_mdcontainer_async<char>(temp_bytes);
+  auto d_temp = ctx.alloc_mdcontainer<char>(temp_bytes);
 
   for (std::int64_t b = 0; b < n_batch; b++) {
     const core::span3d<const float> psf = emu::submdspan(psfs, b);
-    linalg::weighted_sum_async(ctx, psf, weights_freq, wmean);
+    linalg::weighted_sum(ctx, psf, weights_freq, wmean);
     cub::DeviceReduce::Max(d_temp.data_handle(), temp_bytes, wmean.data_handle(), d_maxes.data_handle() + b, psf_npix,
                            ctx.cuda_stream);
   }

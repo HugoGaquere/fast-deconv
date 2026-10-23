@@ -10,7 +10,7 @@ namespace fast_deconv::matrix {
  * @brief Packed reduction state combining the four contributions needed to compute the max and the standard
  *        deviation in a single sweep.
  *
- * Public because run_async() leaves it on backend memory for the caller to finalize.
+ * Public because reduce() leaves it on backend memory for the caller to finalize.
  */
 struct stats_acc {
   float max_v;
@@ -49,27 +49,26 @@ class stats_ctx {
   /**
    * @brief Issue the fused reduction.
    *
-   * No host sync; the result stays in backend memory, reachable through device_state().
+   * No host sync; the result stays in backend memory, reachable through state().
    *
    * @param[in] data  Image, n_elements pixels.
    * @param[in] mask  Same shape as @p data, true = excluded from the max (the standard deviation ignores it).
    */
-  void run_async(core::span2d<const float> data, core::span2d<const bool> mask);
+  void reduce(core::span2d<const float> data, core::span2d<const bool> mask);
 
-  /// Async issue + D2H copy + ctx sync. Returns {max, standard deviation} on host.
-  stats_result run(core::span2d<const float> data, core::span2d<const bool> mask);
+  /// reduce() + D2H copy + ctx sync. Returns {max, standard deviation} on host.
+  stats_result max_and_rms(core::span2d<const float> data, core::span2d<const bool> mask);
 
-  /// The packed accumulator left by run_async(), in backend memory.
-  const stats_acc* device_state() const { return d_state_.get(); }
+  /// The packed accumulator left by reduce(), in backend memory.
+  const stats_acc* state() const { return state_.get(); }
 
  private:
   const core::exec_ctx& ctx_;
   std::int64_t n_elements_;
   bool use_abs_;
   std::size_t temp_bytes_ = 0;
-  core::owned_ptr<std::byte> d_temp_;
-  core::owned_ptr<stats_acc> d_state_;
-  stats_acc h_state_{};
+  core::owned_ptr<std::byte> temp_;
+  core::owned_ptr<stats_acc> state_;
 };
 
 }  // namespace fast_deconv::matrix

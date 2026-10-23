@@ -7,9 +7,9 @@ namespace fast_deconv::core {
 // Backend-resident memory for this build: host memory, so the generic aliases
 // are the host ones. No separate device_* family exists in a host build.
 template <typename T, std::size_t N>
-using mdspan = h_mdspan<T, N>;
+using mdspan = host_mdspan<T, N>;
 template <typename T, std::size_t N>
-using mdcontainer = h_mdcontainer<T, N>;
+using mdcontainer = host_mdcontainer<T, N>;
 
 template <typename T>
 using span1d = host_span1d<T>;

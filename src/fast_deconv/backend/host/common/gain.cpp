@@ -14,7 +14,7 @@ namespace {
 float gain_of(const core::exec_ctx& ctx, core::span3d<const float> psf, core::span1d<const float> weights,
               core::span2d<float> pmean, float gamma)
 {
-  linalg::weighted_sum_async(ctx, psf, weights, pmean);
+  linalg::weighted_sum(ctx, psf, weights, pmean);
   const float* p = pmean.data_handle();
   const std::int64_t n = pmean.mapping().required_span_size();
   float pmean_max = -std::numeric_limits<float>::infinity();
@@ -30,7 +30,7 @@ float compute_gain(const core::exec_ctx& ctx, core::span3d<const float> psf, cor
                    float gamma)
 {
   FD_PROFILE_FN();
-  auto pmean = ctx.alloc_mdcontainer_async<float>(psf.extent(1), psf.extent(2));
+  auto pmean = ctx.alloc_mdcontainer<float>(psf.extent(1), psf.extent(2));
   return gain_of(ctx, psf, weights_freq, pmean, gamma);
 }
 
@@ -40,7 +40,7 @@ std::vector<float> compute_gain_batched(const core::exec_ctx& ctx, core::span4d<
   FD_PROFILE_FN();
   const std::int64_t n_batch = psfs.extent(0);
 
-  auto pmean = ctx.alloc_mdcontainer_async<float>(psfs.extent(2), psfs.extent(3));
+  auto pmean = ctx.alloc_mdcontainer<float>(psfs.extent(2), psfs.extent(3));
   std::vector<float> gains(core::narrow<std::size_t>(n_batch));
 
   for (std::int64_t b = 0; b < n_batch; b++) {

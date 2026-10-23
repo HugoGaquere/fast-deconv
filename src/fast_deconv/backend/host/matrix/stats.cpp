@@ -20,11 +20,11 @@ stats_ctx::stats_ctx(const core::exec_ctx& ctx, std::int64_t n_elements, bool us
     : ctx_(ctx), n_elements_(n_elements), use_abs_(use_abs)
 {
   FD_PROFILE_FN();
-  // No reduction scratch to size, but device_state() must stay reachable.
-  d_state_ = ctx_.alloc_ptr_async<stats_acc>(1);
+  // No reduction scratch to size, but state() must stay reachable.
+  state_ = ctx_.alloc_ptr<stats_acc>(1);
 }
 
-void stats_ctx::run_async(core::span2d<const float> data, core::span2d<const bool> mask)
+void stats_ctx::reduce(core::span2d<const float> data, core::span2d<const bool> mask)
 {
   FD_PROFILE_FN();
   assert(data.is_exhaustive() && mask.is_exhaustive());
@@ -49,21 +49,21 @@ void stats_ctx::run_async(core::span2d<const float> data, core::span2d<const boo
     sum_sq += static_cast<double>(v) * v;
   }
 
-  d_state_[0] = {max_v, static_cast<float>(sum), static_cast<float>(sum_sq), n_elements_};
+  state_[0] = {max_v, static_cast<float>(sum), static_cast<float>(sum_sq), n_elements_};
 }
 
-stats_result stats_ctx::run(core::span2d<const float> data, core::span2d<const bool> mask)
+stats_result stats_ctx::max_and_rms(core::span2d<const float> data, core::span2d<const bool> mask)
 {
   FD_PROFILE_FN();
-  run_async(data, mask);
-  h_state_ = d_state_[0];
+  reduce(data, mask);
+  const stats_acc acc = state_[0];
 
-  if (h_state_.count == 0) return {kNoMax, 0.f};
+  if (acc.count == 0) return {kNoMax, 0.f};
 
-  const float inv_n = 1.f / static_cast<float>(h_state_.count);
-  const float mean = h_state_.sum * inv_n;
-  const float msq = h_state_.sum_sq * inv_n;
-  return {h_state_.max_v, std::sqrt(std::max(msq - mean * mean, 0.f))};
+  const float inv_n = 1.f / static_cast<float>(acc.count);
+  const float mean = acc.sum * inv_n;
+  const float msq = acc.sum_sq * inv_n;
+  return {acc.max_v, std::sqrt(std::max(msq - mean * mean, 0.f))};
 }
 
 }  // namespace fast_deconv::matrix

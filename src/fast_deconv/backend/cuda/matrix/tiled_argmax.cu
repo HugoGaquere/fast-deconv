@@ -77,15 +77,14 @@ tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> exte
   n_tiles_y_ = core::ceil_div(extents_.extent(0), tile_size_);
   n_tiles_ = n_tiles_x_ * n_tiles_y_;
 
-  d_tiles_ = ctx_.alloc_ptr_async<peak>(n_tiles_);
-  d_result_ = ctx_.alloc_ptr_async<peak>(1);
+  d_tiles_ = ctx_.alloc_ptr<peak>(n_tiles_);
+  d_result_ = ctx_.alloc_ptr<peak>(1);
 
   // Size the CUB final-combine scratch once; the query writes final_temp_bytes_
   // without touching d_tiles_/d_result_.
   CHECK_CUDA(cub::DeviceReduce::Reduce(nullptr, final_temp_bytes_, d_tiles_.get(), d_result_.get(), n_tiles_,
                                        peak_max{}, kPeakIdentity, ctx_.cuda_stream));
-  d_final_temp_ =
-      ctx_.alloc_ptr_async<std::byte>(core::narrow<std::int64_t>(std::max<std::size_t>(final_temp_bytes_, 1)));
+  d_final_temp_ = ctx_.alloc_ptr<std::byte>(core::narrow<std::int64_t>(std::max<std::size_t>(final_temp_bytes_, 1)));
 }
 
 // A device-wide CUB reduce rather than one block: small tiles give ~10^5 slots, which one block would serialize.

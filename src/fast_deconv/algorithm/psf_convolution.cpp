@@ -33,16 +33,16 @@ psf_convolution::entry psf_convolution::build(int scale, std::int64_t facet)
   core::span3d<const float> raw = emu::submdspan(raw_psfs_, facet);
 
   entry e;
-  auto conv2_mean = exec_ctx_.alloc_mdcontainer_async<float>(psf_nrow_, psf_ncol_);
+  auto conv2_mean = exec_ctx_.alloc_mdcontainer<float>(psf_nrow_, psf_ncol_);
 
   if (scale == 0) {
     // Delta kernel: conv_psf is the raw PSF itself, so alias it instead of copying.
     e.conv = core::cont3d<const float>(raw.data_handle(), emu::capsule{}, raw.extents());
-    linalg::weighted_sum_async(exec_ctx_, raw, weights_, conv2_mean);
+    linalg::weighted_sum(exec_ctx_, raw, weights_, conv2_mean);
     e.gain = gamma_;
   } else {
     const float sigma = sigmas_.at(scale);
-    auto conv = exec_ctx_.alloc_mdcontainer_async<float>(n_freq_, psf_nrow_, psf_ncol_);
+    auto conv = exec_ctx_.alloc_mdcontainer<float>(n_freq_, psf_nrow_, psf_ncol_);
     {
       FD_PROFILE_SCOPE("psf_convolution/conv");
       conv_ctx_.convolve(raw, sigma, conv);
@@ -52,8 +52,8 @@ psf_convolution::entry psf_convolution::build(int scale, std::int64_t facet)
     // sum_f w_f (G*G * psf_f) = G(sigma * sqrt(2)) * (sum_f w_f psf_f): one plane, one convolution.
     {
       FD_PROFILE_SCOPE("psf_convolution/conv2");
-      auto raw_mean = exec_ctx_.alloc_mdcontainer_async<float>(psf_nrow_, psf_ncol_);
-      linalg::weighted_sum_async(exec_ctx_, raw, weights_, raw_mean);
+      auto raw_mean = exec_ctx_.alloc_mdcontainer<float>(psf_nrow_, psf_ncol_);
+      linalg::weighted_sum(exec_ctx_, raw, weights_, raw_mean);
       mean_conv_ctx_.convolve(core::span3d<const float>(raw_mean.data_handle(), 1, psf_nrow_, psf_ncol_),
                               sigma * std::numbers::sqrt2_v<float>,
                               core::span3d<float>(conv2_mean.data_handle(), 1, psf_nrow_, psf_ncol_));

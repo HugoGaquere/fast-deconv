@@ -22,12 +22,12 @@ core::mdcontainer<float, 1> gaussian_kernel(const core::exec_ctx& ctx, std::int6
 {
   constexpr float kPiSquared = std::numbers::pi_v<float> * std::numbers::pi_v<float>;
   const std::int64_t half_n = n / 2 + 1;
-  auto half = ctx.alloc_mdcontainer_async<complex_type>(half_n);
+  auto half = ctx.alloc_mdcontainer<complex_type>(half_n);
   for (std::int64_t k = 0; k < half_n; k++) {
     const float f = static_cast<float>(k) / static_cast<float>(n);
     half.data_handle()[k] = std::exp(-2.0f * kPiSquared * f * f * sigma * sigma);
   }
-  auto kernel = ctx.alloc_mdcontainer_async<float>(n);
+  auto kernel = ctx.alloc_mdcontainer<float>(n);
   ducc0::c2r(ducc0::cfmav<complex_type>(half.data_handle(), {core::narrow<std::size_t>(half_n)}),
              ducc0::vfmav<float>(kernel.data_handle(), {core::narrow<std::size_t>(n)}), std::size_t{0}, ducc0::BACKWARD,
              1.0f / static_cast<float>(n), 1);
@@ -76,7 +76,7 @@ gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, st
 
 gaussian_convolution_ctx::spectrum gaussian_convolution_ctx::make_spectrum() const
 {
-  return ctx_.alloc_mdcontainer_async<float>(batch_, nrow_, ncol_);
+  return ctx_.alloc_mdcontainer<float>(batch_, nrow_, ncol_);
 }
 
 void gaussian_convolution_ctx::forward(core::span3d<const float> input, spectrum& out) const
@@ -136,7 +136,7 @@ void gaussian_convolution_ctx::convolve_separable_(const float* in, float sigma,
 
   float* dst = out.data_handle();
   const std::int64_t scratch_size_per_thread = kBatchLines * std::max(row_len, col_len);
-  const auto scratch = ctx_.alloc_ptr_async<float>(omp_get_max_threads() * scratch_size_per_thread);
+  const auto scratch = ctx_.alloc_ptr<float>(omp_get_max_threads() * scratch_size_per_thread);
 
   // Rows: all batch planes are one stack of batch * nrow contiguous rows.
   {

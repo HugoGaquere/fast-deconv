@@ -36,7 +36,7 @@ TEST_F(WeightedSum, MdspanOverloadOnNonSquareImage)
   core::span1d<float> w_view(d_w.get(), n_freq);
   core::span2d<float> out_view(d_out.get(), nrow, ncol);
 
-  linalg::weighted_sum_async(sr, a_view, w_view, out_view);
+  linalg::weighted_sum(sr, a_view, w_view, out_view);
   sr.wait();
 
   const auto out = d_out.to_host();

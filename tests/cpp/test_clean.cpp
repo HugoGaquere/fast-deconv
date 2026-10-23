@@ -55,7 +55,7 @@ class SubtractComponent : public fdtest::BackendTest {
     core::span2d<float> res_view(d_res.get(), kH, kW);
     core::span2d<float> psf_view(d_psf.get(), ph, pw);
 
-    common::subtract_component_async(sr, res_view, psf_view, peak, gain);
+    common::subtract_component(sr, res_view, psf_view, peak, gain);
     sr.wait();
     return d_res.to_host();
   }
@@ -128,7 +128,7 @@ TEST_F(SubtractComponent, MultiFrequencyOverloadUsesPerChannelCoeffs)
     core::span3d<float> psf_view(d_psf.get(), n_freq, ph, pw);
     core::span1d<float> coeffs_view(d_coeffs.get(), n_freq);
 
-    common::subtract_component_async(sr, res_view, psf_view, coeffs_view, peak, gain);
+    common::subtract_component(sr, res_view, psf_view, coeffs_view, peak, gain);
     sr.wait();
 
     const auto got = d_res.to_host();

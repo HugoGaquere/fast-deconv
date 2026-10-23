@@ -33,13 +33,13 @@ ddmsc_result Ddmsc::run(core::host_span3d<float> dirty, core::host_span3d<const 
 {
   const core::exec_ctx& ctx = ctx_.compute_stream;
 
-  auto d_dirty = ctx.stage(dirty);
-  auto d_jones = ctx.stage(jones_norm);
-  auto d_weights = ctx.stage(weights_freq);
+  auto staged_dirty = ctx.stage(dirty);
+  auto staged_jones = ctx.stage(jones_norm);
+  auto staged_weights = ctx.stage(weights_freq);
 
-  ddmsc_result result = run_ddmsc_cycles(ctx_, params_, d_dirty, d_jones, d_weights);
+  ddmsc_result result = run_ddmsc_cycles(ctx_, params_, staged_dirty, staged_jones, staged_weights);
 
-  ctx.unstage(d_dirty, dirty.data_handle());
+  ctx.unstage(staged_dirty, dirty.data_handle());
   ctx.wait();
   return result;
 }

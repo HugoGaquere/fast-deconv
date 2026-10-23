@@ -39,8 +39,8 @@ __global__ void subtract_component_kernel(float* residual, const float* psf, com
 
 namespace fast_deconv::common {
 
-void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> residual, core::span2d<const float> psf,
-                              index2d peak_coords, float gain, matrix::peak_criterion criterion, float threshold)
+void subtract_component(const core::exec_ctx& ctx, core::span2d<float> residual, core::span2d<const float> psf,
+                        index2d peak_coords, float gain, matrix::peak_criterion criterion, float threshold)
 {
   const auto ovr =
       compute_overlap_region(peak_coords, residual.extent(0), residual.extent(1), psf.extent(0), psf.extent(1));
@@ -52,8 +52,8 @@ void subtract_component_async(const core::exec_ctx& ctx, core::span2d<float> res
                                                                          gain, criterion, threshold);
 }
 
-void subtract_component_async(const core::exec_ctx& ctx, core::span3d<float> residual, core::span3d<const float> psf,
-                              core::span1d<const float> spectral_coeffs, index2d peak_coords, float gain)
+void subtract_component(const core::exec_ctx& ctx, core::span3d<float> residual, core::span3d<const float> psf,
+                        core::span1d<const float> spectral_coeffs, index2d peak_coords, float gain)
 {
   const auto ovr =
       compute_overlap_region(peak_coords, residual.extent(1), residual.extent(2), psf.extent(1), psf.extent(2));

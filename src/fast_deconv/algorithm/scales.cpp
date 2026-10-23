@@ -19,8 +19,8 @@ scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gau
 {
   FD_PROFILE_FN();
 
-  auto current = exec_ctx.alloc_mdcontainer_async<float>(dirty.extent(0), dirty.extent(1));
-  auto best = exec_ctx.alloc_mdcontainer_async<float>(dirty.extent(0), dirty.extent(1));
+  auto current = exec_ctx.alloc_mdcontainer<float>(dirty.extent(0), dirty.extent(1));
+  auto best = exec_ctx.alloc_mdcontainer<float>(dirty.extent(0), dirty.extent(1));
 
   // No mask means no masking; a single-plane mask is shared by every scale.
   const auto criterion_for = [&](int s) {

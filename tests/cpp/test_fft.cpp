@@ -45,7 +45,7 @@ TEST(NextFastSize, ReturnsSmallest7SmoothAtLeastN)
 }
 
 // ============================================================================
-// pad_async / crop_async: pure data movement, compared element-exact against a
+// pad / crop: pure data movement, compared element-exact against a
 // host replica of the layout.
 // ============================================================================
 
@@ -54,7 +54,7 @@ TEST(NextFastSize, ReturnsSmallest7SmoothAtLeastN)
 
 namespace {
 
-// Host oracle for pad_async: each (nx, ny) image at the top-left of a zero (px, py) plane.
+// Host oracle for pad: each (nx, ny) image at the top-left of a zero (px, py) plane.
 std::vector<float> host_pad(const std::vector<float>& in, int n_batch, int nx, int ny, int px, int py)
 {
   std::vector<float> out(static_cast<std::size_t>(n_batch) * px * py, 0.0f);
@@ -242,7 +242,7 @@ TEST_F(FftLayout, PadMatchesHostOracle)
     fdtest::device_buffer<float> d_in(sr, in);
     fdtest::device_buffer<float> d_out(sr, static_cast<std::size_t>(n_batch) * cs.px * cs.py);
 
-    linalg::pad_async(sr, explicit_dims(cs.nx, cs.ny, cs.px, cs.py), d_in.get(), d_out.get(), n_batch);
+    linalg::pad(sr, explicit_dims(cs.nx, cs.ny, cs.px, cs.py), d_in.get(), d_out.get(), n_batch);
     sr.wait();
 
     const auto out = d_out.to_host();
@@ -263,8 +263,8 @@ TEST_F(FftLayout, PadThenCropRoundTripIsIdentity)
     fdtest::device_buffer<float> d_back(sr, in.size());
 
     const auto dims = explicit_dims(cs.nx, cs.ny, cs.px, cs.py);
-    linalg::pad_async(sr, dims, d_in.get(), d_pad.get(), n_batch);
-    linalg::crop_async(sr, dims, d_pad.get(), d_back.get(), n_batch);
+    linalg::pad(sr, dims, d_in.get(), d_pad.get(), n_batch);
+    linalg::crop(sr, dims, d_pad.get(), d_back.get(), n_batch);
     sr.wait();
 
     const auto back = d_back.to_host();

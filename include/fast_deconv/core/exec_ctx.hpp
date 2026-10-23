@@ -35,15 +35,15 @@ class exec_ctx : public exec_ctx_impl {
   /**
    * @brief Uninitialized backend memory for @p n elements of T (bytes for void), from the pool.
    *
-   * Stream-ordered on CUDA: usable by work enqueued on this context after the call. Release with free_async(); the
+   * Stream-ordered on CUDA: usable by work enqueued on this context after the call. Release with free(); the
    * typed helpers below do it on destruction.
    *
    * @throws std::invalid_argument If @p n <= 0.
    */
   template <typename T = void>
-  T* alloc_async(std::int64_t n) const
+  T* alloc(std::int64_t n) const
   {
-    if (n <= 0) throw std::invalid_argument("alloc_async: n must be > 0");
+    if (n <= 0) throw std::invalid_argument("alloc: n must be > 0");
 
     std::size_t num_bytes = narrow<std::size_t>(n);
     if constexpr (!std::is_void_v<T>) num_bytes *= sizeof(T);
@@ -51,32 +51,32 @@ class exec_ctx : public exec_ctx_impl {
     return static_cast<T*>(this->alloc_bytes(num_bytes));
   }
 
-  /// alloc_async() of a row-major container with extents @p exts, freed through this context when its last copy
+  /// alloc() of a row-major container with extents @p exts, freed through this context when its last copy
   /// goes.
   template <typename T, std::integral... Exts>
     requires(sizeof...(Exts) > 0)
-  mdcontainer<T, sizeof...(Exts)> alloc_mdcontainer_async(Exts... exts) const
+  mdcontainer<T, sizeof...(Exts)> alloc_mdcontainer(Exts... exts) const
   {
-    return alloc_mdcontainer_async<T>(dims<sizeof...(Exts)>(narrow<std::int64_t>(exts)...));
+    return alloc_mdcontainer<T>(dims<sizeof...(Exts)>(narrow<std::int64_t>(exts)...));
   }
 
-  /// alloc_mdcontainer_async() taking the extents as one object (e.g. another view's extents()).
+  /// alloc_mdcontainer() taking the extents as one object (e.g. another view's extents()).
   template <typename T, typename Extents>
     requires requires { Extents::rank(); }
-  mdcontainer<T, Extents::rank()> alloc_mdcontainer_async(const Extents& exts) const
+  mdcontainer<T, Extents::rank()> alloc_mdcontainer(const Extents& exts) const
   {
     const dims<Extents::rank()> d(exts);
     std::int64_t n = 1;
     for (std::size_t i = 0; i < Extents::rank(); ++i) n *= d.extent(i);
-    T* ptr = alloc_async<T>(n);
+    T* ptr = alloc<T>(n);
     return mdcontainer<T, Extents::rank()>(ptr, owned_ptr<T>(ptr, ctx_deleter{this}), d);
   }
 
-  /// alloc_async() of @p n elements, freed through this context when the pointer goes.
+  /// alloc() of @p n elements, freed through this context when the pointer goes.
   template <typename T>
-  owned_ptr<T> alloc_ptr_async(std::int64_t n) const
+  owned_ptr<T> alloc_ptr(std::int64_t n) const
   {
-    return {alloc_async<T>(n), ctx_deleter{this}};
+    return {alloc<T>(n), ctx_deleter{this}};
   }
 
   /**
@@ -121,7 +121,7 @@ class exec_ctx : public exec_ctx_impl {
     } else {
       // The staging buffer is written, so it is allocated mutable; the view handed
       // back keeps the caller's element type, so a const input stays unwritable.
-      auto owner = alloc_mdcontainer_async<std::remove_const_t<T>>(src.extents());
+      auto owner = alloc_mdcontainer<std::remove_const_t<T>>(src.extents());
       copy(owner, src);
       return mdcontainer<T, rank>(owner.data_handle(), std::move(owner).capsule(), src.extents());
     }
@@ -144,9 +144,9 @@ class exec_ctx : public exec_ctx_impl {
       copy(host_dst, src.data_handle(), narrow<std::int64_t>(src.size()));
   }
 
-  /// Returns memory from alloc_async() to the pool; stream-ordered on CUDA, after the work already enqueued here.
+  /// Returns memory from alloc() to the pool; stream-ordered on CUDA, after the work already enqueued here.
   template <typename T>
-  void free_async(T* ptr) const
+  void free(T* ptr) const
   {
     this->free_bytes(ptr);
   }
