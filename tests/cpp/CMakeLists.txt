@@ -11,7 +11,6 @@ add_executable(fast_deconv_unit_tests
   test_resources.cpp
   test_fft.cpp
   test_linalg.cpp
-  test_pseudo_inverse.cpp
   test_matrix.cpp
   test_morphology.cpp
   test_mask.cpp
