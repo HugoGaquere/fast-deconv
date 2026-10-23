@@ -67,15 +67,6 @@ __global__ void tiled_argmax_reduce(const float* data, matrix::peak_criterion cr
 
 namespace fast_deconv::matrix {
 
-namespace {
-
-// Identity for the max-by-value reduction: -inf is the masked-pixel fill, so it
-// ties rather than wins, and the largest possible index loses that tie. Any real
-// tile overrides it.
-constexpr peak kReduceIdentity{.index = INT64_MAX, .value = -INFINITY};
-
-}  // namespace
-
 tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> extents, std::int64_t tile_size)
     : ctx_(ctx), extents_(extents), tile_size_(tile_size)
 {
@@ -92,7 +83,7 @@ tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> exte
   // Size the CUB final-combine scratch once; the query writes final_temp_bytes_
   // without touching d_tiles_/d_result_.
   CHECK_CUDA(cub::DeviceReduce::Reduce(nullptr, final_temp_bytes_, d_tiles_.get(), d_result_.get(), n_tiles_,
-                                       peak_max{}, kReduceIdentity, ctx_.cuda_stream));
+                                       peak_max{}, kPeakIdentity, ctx_.cuda_stream));
   d_final_temp_ =
       ctx_.alloc_ptr_async<std::byte>(core::narrow<std::int64_t>(std::max<std::size_t>(final_temp_bytes_, 1)));
 }
@@ -102,7 +93,7 @@ tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> exte
 peak tiled_argmax_ctx::final_combine()
 {
   CHECK_CUDA(cub::DeviceReduce::Reduce(d_final_temp_.get(), final_temp_bytes_, d_tiles_.get(), d_result_.get(),
-                                       n_tiles_, peak_max{}, kReduceIdentity, ctx_.cuda_stream));
+                                       n_tiles_, peak_max{}, kPeakIdentity, ctx_.cuda_stream));
 
   peak h_result{};
   CHECK_CUDA(cudaMemcpyAsync(&h_result, d_result_.get(), sizeof(peak), cudaMemcpyDeviceToHost, ctx_.cuda_stream));

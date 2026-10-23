@@ -23,6 +23,9 @@ struct peak_max {
   }
 };
 
+/// Identity of peak_max: -inf ties with a masked pixel, and the largest index loses that tie.
+inline constexpr peak kPeakIdentity{.index = INT64_MAX, .value = -INFINITY};
+
 /// Value a peak search ranks pixel i by: -inf where masked, |x| when absolute.
 struct peak_criterion {
   const bool* mask;  // nullptr = no mask
