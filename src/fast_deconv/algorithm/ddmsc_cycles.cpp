@@ -74,7 +74,7 @@ stop_limits compute_stop_flux(const params& p, float flux, float rms)
 std::optional<float> auto_mask_trigger(const params& p, float flux, float rms)
 {
   const float threshold = p.auto_mask_peak_threshold.value_or(p.auto_mask_rms_threshold.value_or(0.f) * rms);
-  if ((p.enable_auto_mask && flux <= threshold) || p.force_enable_auto_mask) return threshold;
+  if (p.enable_auto_mask && (p.force_enable_auto_mask || flux <= threshold)) return threshold;
   return std::nullopt;
 }
 
