@@ -173,6 +173,7 @@ add_library(fast_deconv STATIC
         src/fast_deconv/matrix/tiled_argmax.cpp
         src/fast_deconv/common/convergence.cpp
         src/fast_deconv/common/gain.cpp
+        src/fast_deconv/common/mask.cpp
         ${FAST_DECONV_BACKEND_SOURCES}
 )
 

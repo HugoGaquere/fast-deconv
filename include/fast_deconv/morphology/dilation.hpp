@@ -16,8 +16,7 @@ namespace fast_deconv::morphology {
  * @param[in]  data           Image to dilate, device, (nrow, ncol).
  * @param[in]  structure      Structuring-element plane, device.
  * @param[in]  structure_roi  Box of @p structure to use, half-open (see compute_mask_roi()).
- * @param[out] out            Dilated image, device, (nrow, ncol). Must be all false on entry: the CUDA backend
- *                            only sets pixels (the host backend clears it first). Must not alias @p data.
+ * @param[out] out            Dilated image, device, (nrow, ncol), written entirely. Must not alias @p data.
  */
 void binary_dilation(const core::exec_ctx& ctx, core::span2d<const bool> data, core::span2d<const bool> structure,
                      common::roi structure_roi, core::span2d<bool> out);
