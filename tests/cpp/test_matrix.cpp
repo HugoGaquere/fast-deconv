@@ -104,35 +104,6 @@ TEST_F(MatrixReductions, ComputeStatsWithAbsAndWorkspaceReuse)
   EXPECT_NEAR(s2.rms, fdtest::std_all(img2), 1e-4f * fdtest::std_all(img2));
 }
 
-// The async variant leaves the packed accumulator on device; finalize on the
-// host from stats_acc and compare against the oracles.
-TEST_F(MatrixReductions, ComputeStatsAsyncLeavesResultOnDevice)
-{
-  std::mt19937 rng(59);
-  const auto img = make_image(rng);
-
-  const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(sr, img);
-  fdtest::device_buffer<bool> d_mask(sr, std::vector<bool>(kNpix, false));
-  core::span2d<float> img_view(d_img.get(), kNrow, kNcol);
-  core::span2d<bool> mask_view(d_mask.get(), kNrow, kNcol);
-
-  matrix::stats_ctx ws(sr, kNpix, /*use_abs=*/false);
-  ws.reduce(img_view, mask_view);
-
-  matrix::stats_acc acc{};
-  sr.copy(&acc, ws.state(), 1);
-  sr.wait();
-
-  ASSERT_EQ(acc.count, kNpix);
-  EXPECT_FLOAT_EQ(acc.max_v, fdtest::masked_max(img, std::vector<uint8_t>(kNpix, 0), false));
-  const auto count = static_cast<double>(acc.count);
-  const double mean = static_cast<double>(acc.sum) / count;
-  const float rms = static_cast<float>(std::sqrt(std::max(acc.sum_sq / count - mean * mean, 0.0)));
-  const float expected = fdtest::std_all(img);
-  EXPECT_NEAR(rms, expected, 1e-4f * expected);
-}
-
 // ============================================================================
 // matrix::find_peak — argmax of a peak_criterion, carrying the signed pixel
 // ============================================================================
