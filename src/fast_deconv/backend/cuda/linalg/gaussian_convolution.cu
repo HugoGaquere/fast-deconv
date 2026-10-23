@@ -43,16 +43,14 @@ void pad(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, fl
 {
   CHECK_CUDA(cudaMemsetAsync(output, 0, core::narrow<std::size_t>(dims.padded_total() * n_batch) * sizeof(float),
                              ctx.cuda_stream));
-  core::launch_cfg cfg(dims.input_nrow, dims.input_ncol);
-  cfg.grid.z = core::narrow<unsigned>(n_batch);
+  const core::launch_cfg cfg(n_batch, dims.input_nrow, dims.input_ncol);
   core::launch(ctx, cfg, kernel::pad_kernel, input, output, dims.input_nrow, dims.input_ncol, dims.padded_nrow,
                dims.padded_ncol);
 }
 
 void crop(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output, std::int64_t n_batch)
 {
-  core::launch_cfg cfg(dims.input_nrow, dims.input_ncol);
-  cfg.grid.z = core::narrow<unsigned>(n_batch);
+  const core::launch_cfg cfg(n_batch, dims.input_nrow, dims.input_ncol);
   core::launch(ctx, cfg, kernel::crop_kernel, input, output, dims.input_nrow, dims.input_ncol, dims.padded_nrow,
                dims.padded_ncol);
 }

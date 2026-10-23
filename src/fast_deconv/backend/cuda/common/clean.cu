@@ -56,9 +56,7 @@ void subtract_component(const core::exec_ctx& ctx, core::span3d<float> residual,
   const auto ovr =
       compute_overlap_region(peak_coords, residual.extent(1), residual.extent(2), psf.extent(1), psf.extent(2));
 
-  // One z-plane per frequency.
-  core::launch_cfg cfg(ovr.nrow, ovr.ncol);
-  cfg.grid.z = core::narrow<unsigned>(residual.extent(0));
+  const core::launch_cfg cfg(residual.extent(0), ovr.nrow, ovr.ncol);
   core::launch(ctx, cfg, kernel::subtract_component_3d_kernel, residual.data_handle(), psf.data_handle(),
                spectral_coeffs.data_handle(), ovr, gain, residual.mapping().stride(0), psf.mapping().stride(0));
 }
