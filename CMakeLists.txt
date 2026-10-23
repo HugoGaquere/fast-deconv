@@ -171,6 +171,7 @@ add_library(fast_deconv STATIC
         src/fast_deconv/linalg/gaussian_convolution.cpp
         src/fast_deconv/matrix/stats.cpp
         src/fast_deconv/common/convergence.cpp
+        src/fast_deconv/common/gain.cpp
         ${FAST_DECONV_BACKEND_SOURCES}
 )
 
