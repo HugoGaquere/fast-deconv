@@ -107,6 +107,18 @@ CUDA builds target the GPU in the build machine (`native`) by default. To build 
 other GPUs, or on a machine without one, set `CMAKE_CUDA_ARCHITECTURES` or
 `CUDAARCHS`, e.g. `CUDAARCHS="80;90"`.
 
+### Third-party libraries
+
+- [emu](https://gitlab.obspm.fr/cosmic/tools/emu)
+- [fmt](https://github.com/fmtlib/fmt)
+- [spdlog](https://github.com/gabime/spdlog)
+- [pybind11](https://github.com/pybind/pybind11)
+- [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit)
+- [DUCC](https://gitlab.mpcdf.mpg.de/mtr/ducc)
+- [Tracy](https://github.com/wolfpld/tracy)
+- [GoogleTest](https://github.com/google/googletest)
+- [nlohmann/json](https://github.com/nlohmann/json)
+
 ## Installing the Python package
 
 scikit-build-core compiles the extension during install, and Conan fetches the C++
