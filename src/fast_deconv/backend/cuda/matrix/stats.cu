@@ -13,7 +13,7 @@ namespace fast_deconv::matrix {
 
 namespace {
 
-// Every pixel feeds the RMS, masked or not: DDFacet's np.std(MeanDirty) stop-threshold RMS.
+// Every pixel feeds the standard deviation, masked or not: DDFacet's np.std(MeanDirty) stop threshold.
 struct masked_stats_op {
   const float* data;
   const bool* mask;
@@ -63,7 +63,7 @@ stats_ctx::stats_ctx(const core::exec_ctx& ctx, std::int64_t n_elements, bool us
   d_temp_ = ctx_.alloc_ptr_async<std::byte>(core::narrow<std::int64_t>(std::max<std::size_t>(temp_bytes_, 1)));
 }
 
-void stats_ctx::run_async(core::span2d<float> data, core::span2d<bool> mask)
+void stats_ctx::run_async(core::span2d<const float> data, core::span2d<const bool> mask)
 {
   assert(data.is_exhaustive() && mask.is_exhaustive());
   assert(data.extent(0) == mask.extent(0) && data.extent(1) == mask.extent(1));
@@ -74,7 +74,7 @@ void stats_ctx::run_async(core::span2d<float> data, core::span2d<bool> mask)
                                        kIdentity, ctx_.cuda_stream));
 }
 
-stats_result stats_ctx::run(core::span2d<float> data, core::span2d<bool> mask)
+stats_result stats_ctx::run(core::span2d<const float> data, core::span2d<const bool> mask)
 {
   run_async(data, mask);
 

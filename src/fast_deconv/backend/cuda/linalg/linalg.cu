@@ -33,8 +33,8 @@ __global__ void multiply_with_gaussian_kernel(const linalg::complex_type* input,
 
 namespace fast_deconv::linalg {
 
-void weighted_sum_async(const core::exec_ctx& ctx, const core::span3d<const float> A,
-                        const core::span1d<const float> weights, core::span2d<float> out)
+void weighted_sum_async(const core::exec_ctx& ctx, core::span3d<const float> A, core::span1d<const float> weights,
+                        core::span2d<float> out)
 {
   // _64: A holds n * w elements, which exceeds INT_MAX well before n alone does.
   const std::int64_t w = weights.extent(0);

@@ -24,7 +24,7 @@ stats_ctx::stats_ctx(const core::exec_ctx& ctx, std::int64_t n_elements, bool us
   d_state_ = ctx_.alloc_ptr_async<stats_acc>(1);
 }
 
-void stats_ctx::run_async(core::span2d<float> data, core::span2d<bool> mask)
+void stats_ctx::run_async(core::span2d<const float> data, core::span2d<const bool> mask)
 {
   FD_PROFILE_FN();
   assert(data.is_exhaustive() && mask.is_exhaustive());
@@ -34,7 +34,7 @@ void stats_ctx::run_async(core::span2d<float> data, core::span2d<bool> mask)
   const float* d = data.data_handle();
   const bool* m = mask.data_handle();
 
-  // The mask excludes pixels from the max only; every pixel feeds the RMS, so
+  // The mask excludes pixels from the max only; every pixel feeds the standard deviation, so
   // the noise estimate covers the whole image. Sums accumulate in double: a
   // sequential float sum drifts where the device tree reduction does not.
   float max_v = kNoMax;
@@ -52,7 +52,7 @@ void stats_ctx::run_async(core::span2d<float> data, core::span2d<bool> mask)
   d_state_[0] = {max_v, static_cast<float>(sum), static_cast<float>(sum_sq), n_elements_};
 }
 
-stats_result stats_ctx::run(core::span2d<float> data, core::span2d<bool> mask)
+stats_result stats_ctx::run(core::span2d<const float> data, core::span2d<const bool> mask)
 {
   FD_PROFILE_FN();
   run_async(data, mask);

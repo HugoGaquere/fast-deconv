@@ -7,8 +7,8 @@
 
 namespace fast_deconv::common {
 
-float compute_gain(const core::exec_ctx& ctx, const core::span3d<const float>& psf,
-                   const core::span1d<const float>& weights_freq, float gamma)
+float compute_gain(const core::exec_ctx& ctx, core::span3d<const float> psf, core::span1d<const float> weights_freq,
+                   float gamma)
 {
   auto wmean = ctx.alloc_mdcontainer_async<float>(psf.extent(1), psf.extent(2));
   const std::int64_t psf_npix = wmean.mapping().required_span_size();
@@ -28,8 +28,8 @@ float compute_gain(const core::exec_ctx& ctx, const core::span3d<const float>& p
   return gamma / gain;
 }
 
-std::vector<float> compute_gain_batched(const core::exec_ctx& ctx, const core::span4d<const float>& psfs,
-                                        const core::span1d<const float>& weights_freq, float gamma)
+std::vector<float> compute_gain_batched(const core::exec_ctx& ctx, core::span4d<const float> psfs,
+                                        core::span1d<const float> weights_freq, float gamma)
 {
   const std::int64_t n_batch = psfs.extent(0);
 

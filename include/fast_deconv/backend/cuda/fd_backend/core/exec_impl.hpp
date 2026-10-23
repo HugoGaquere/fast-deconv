@@ -49,14 +49,14 @@ class exec_resources_impl {
   static cudaMemPool_t make_memory_pool(std::uint8_t device)
   {
     cudaMemPoolProps pool_props = {};
-    pool_props.allocType = cudaMemAllocationTypePinned;    // page-locked GPU memory
+    pool_props.allocType = cudaMemAllocationTypePinned;    // non-migratable device memory
     pool_props.handleTypes = cudaMemHandleTypeNone;        // no inter-process sharing
     pool_props.location.type = cudaMemLocationTypeDevice;  // memory lives on the GPU
     pool_props.location.id = device;                       // GPU to allocate on
     cudaMemPool_t pool{};
     CHECK_CUDA(cudaMemPoolCreate(&pool, &pool_props));
 
-    // configure memory pool to never release back to os
+    // Never release freed blocks back to the driver: they stay in the pool for reuse.
     std::uint64_t threshold = UINT64_MAX;
     CHECK_CUDA(cudaMemPoolSetAttribute(pool, cudaMemPoolAttrReleaseThreshold, &threshold));
     return pool;

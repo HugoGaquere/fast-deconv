@@ -5,7 +5,7 @@
 
 namespace fast_deconv::morphology {
 
-common::roi compute_mask_roi(const core::exec_ctx& ctx, core::span2d<bool> data)
+common::roi compute_mask_roi(const core::exec_ctx& ctx, core::span2d<const bool> data)
 {
   FD_PROFILE_FN();
   common::roi result{INT64_MAX, 0, INT64_MAX, 0};

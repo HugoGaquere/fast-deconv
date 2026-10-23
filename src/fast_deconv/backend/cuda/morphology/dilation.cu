@@ -4,8 +4,9 @@
 
 namespace fast_deconv::kernel {
 
-__global__ void binary_dilation(bool* data, bool* structure, common::roi structure_roi, bool* out, std::int64_t nrow,
-                                std::int64_t ncol, std::int64_t data_stride, std::int64_t structure_stride)
+__global__ void binary_dilation(const bool* data, const bool* structure, common::roi structure_roi, bool* out,
+                                std::int64_t nrow, std::int64_t ncol, std::int64_t data_stride,
+                                std::int64_t structure_stride)
 {
   const std::int64_t tix = std::int64_t{blockIdx.x} * blockDim.x + threadIdx.x;
   const std::int64_t tiy = std::int64_t{blockIdx.y} * blockDim.y + threadIdx.y;
@@ -45,7 +46,7 @@ __global__ void binary_dilation(bool* data, bool* structure, common::roi structu
 
 namespace fast_deconv::morphology {
 
-void binary_dilation(const core::exec_ctx& ctx, core::span2d<bool> data, core::span2d<bool> structure,
+void binary_dilation(const core::exec_ctx& ctx, core::span2d<const bool> data, core::span2d<const bool> structure,
                      common::roi structure_roi, core::span2d<bool> out)
 {
   dim3 block(32, 8);
