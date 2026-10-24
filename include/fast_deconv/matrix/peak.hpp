@@ -8,8 +8,8 @@ namespace fast_deconv::matrix {
 
 /// Value and flat row-major index of an image maximum.
 struct peak {
-  std::int64_t index;
-  float value;                // what the search ranked by: the peak_criterion result, |x| when absolute
+  std::int64_t index = 0;
+  float value = 0.0f;         // what the search ranked by: the peak_criterion result, |x| when absolute
   float signed_value = 0.0f;  // the pixel itself, sign kept;
 };
 
@@ -23,10 +23,13 @@ struct peak_max {
   }
 };
 
+/// Identity of peak_max: -inf ties with a masked pixel, and the largest index loses that tie.
+inline constexpr peak kPeakIdentity{.index = INT64_MAX, .value = -INFINITY};
+
 /// Value a peak search ranks pixel i by: -inf where masked, |x| when absolute.
 struct peak_criterion {
-  const bool* mask;  // nullptr = no mask
-  bool absolute;
+  const bool* mask = nullptr;  // nullptr = no mask
+  bool absolute = false;
 
   FD_HOST_DEVICE float operator()(float x, std::int64_t i) const
   {

@@ -1,13 +1,11 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <fast_deconv/matrix/tiled_argmax.hpp>
+#include <memory>
 #include <random>
-#include <utility>
 #include <vector>
 
 #include "helpers/backend_test.hpp"
-#include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
 
@@ -17,138 +15,64 @@ namespace fdtest = fast_deconv::test;
 
 using fdtest::flat;
 
-class TiledArgmax : public fdtest::BackendTest {
- protected:
-  // Upload @p img, run a full pass over a fresh ctx, free, return result.
-  matrix::peak run_once(const core::exec_ctx& sr, const std::vector<float>& img, int w, int h, int tile)
-  {
-    fdtest::device_buffer<float> d(sr, img);
+// 32-px tiles over 200 px: a 7x7 grid whose last row and column of tiles are partial, [192, 200).
+constexpr int kSide = 200;
+constexpr int kTile = 32;
 
-    matrix::tiled_argmax_ctx ws{sr, core::dims<2>(h, w), tile};
+class TiledArgmax : public fdtest::BackendTest {};
 
-    auto out = ws.run(core::span2d<float>(d.get(), h, w));
-    sr.wait();
-    return out;  // ws frees its own device buffers in its destructor
-  }
-};
-
-// Unique global peak planted in a far, ragged corner tile. Checks BOTH value
-// and index across many tiles + a partial edge tile.
-TEST_F(TiledArgmax, UniquePeakIndexAcrossTiles)
+// The unique max of an all-negative image, in the partial corner tile. Catches a running max initialised to
+// 0 instead of -inf, and edge tiles that drop pixels.
+TEST_F(TiledArgmax, FindsTheMaxOfAllNegativeDataInThePartialCornerTile)
 {
-  const int w = 200, h = 200;  // 32-tiles -> 7x7 grid, last tiles are 8 wide/tall
   std::mt19937 rng(7);
-  std::vector<float> img(w * h);
-  fdtest::fill_uniform(rng, img, 0.0f, 1.0f);
-
-  const int pr = 177, pc = 183;    // inside the ragged bottom-right region
-  img.at(flat(pr, pc, w)) = 9.0f;  // strictly above everything in [0,1)
-
-  const auto sr = res().make_ctx();
-
-  auto [idx, val, signed_val] = run_once(sr, img, w, h, 32);
-  EXPECT_FLOAT_EQ(val, 9.0f);
-  EXPECT_EQ(idx, flat(pr, pc, w));
-}
-
-// All-negative image. Catches the classic bug of initialising the running max
-// to 0.0f / data[0] instead of -inf: a buggy kernel reports 0 at a bogus
-// index here. The planted -0.5 is the unique (least-negative) maximum.
-TEST_F(TiledArgmax, AllNegativeInitialisesToNegInf)
-{
-  const int w = 96, h = 96;
-  std::mt19937 rng(99);
-  std::vector<float> img(w * h);
+  std::vector<float> img(kSide * kSide);
   fdtest::fill_uniform(rng, img, -2.0f, -1.0f);
-
-  const int pr = 70, pc = 11;
-  img.at(flat(pr, pc, w)) = -0.5f;  // unique max, still negative
+  const int peak = flat(197, 195, kSide);
+  img.at(peak) = -0.5f;
 
   const auto sr = res().make_ctx();
+  matrix::tiled_argmax_ctx argmax{sr, core::dims<2>(kSide, kSide), kTile};
 
-  auto [idx, val, signed_val] = run_once(sr, img, w, h, 32);
-  EXPECT_FLOAT_EQ(val, -0.5f);
-  EXPECT_EQ(idx, flat(pr, pc, w));
+  const auto p = argmax.run(sr.stage(core::host_span2d<const float>(img.data(), kSide, kSide)));
+  EXPECT_EQ(p.index, peak);
+  EXPECT_FLOAT_EQ(p.value, -0.5f);
 }
 
-// Reuse one ctx across two calls, mimicking
-// the clean loop: peak moves between cycles, the second full pass must find it.
-// (The incremental dirty-footprint path is covered by IncrementalRefreshesDirtyFootprint.)
-TEST_F(TiledArgmax, WorkspaceReuseAcrossCalls)
+// The clean loop's sequence: run() seeds every tile under the scale's criterion, then after each subtraction
+// run_incremental() rescans only the tiles under the PSF footprint, with the same criterion, and combines
+// them with the cached maxima of the others. The footprint here is at the bottom-right corner, so it is
+// clipped to the image and ends in the partial tiles.
+TEST_F(TiledArgmax, IncrementalRefreshKeepsTheCriterionAndTheCachedTiles)
 {
-  const int w = 64, h = 64;
-  const auto sr = res().make_ctx();
-
-  fdtest::device_buffer<float> d(sr, static_cast<std::size_t>(w) * h);
-  matrix::tiled_argmax_ctx ws{sr, core::dims<2>(h, w), 32};
-  const core::span2d<float> view(d.get(), h, w);
-
-  // Cycle 1: peak A.
-  std::vector<float> img(w * h, 0.0f);
-  const int ar = 10, ac = 12;
-  img.at(flat(ar, ac, w)) = 5.0f;
-  d.from_host(img);
-  auto [i1, v1, signed_v1] = ws.run(view);
-  sr.wait();
-  EXPECT_FLOAT_EQ(v1, 5.0f);
-  EXPECT_EQ(i1, flat(ar, ac, w));
-
-  // Cycle 2: clear A, plant a larger peak B elsewhere; reuse the same ctx.
-  img.at(flat(ar, ac, w)) = 0.0f;
-  const int br = 55, bc = 60;
-  img.at(flat(br, bc, w)) = 7.0f;
-  d.from_host(img);
-  auto [i2, v2, signed_v2] = ws.run(view);
-  sr.wait();
-  EXPECT_FLOAT_EQ(v2, 7.0f);
-  EXPECT_EQ(i2, flat(br, bc, w));
-}
-
-// Incremental path: seed every tile with a full pass, then dirty only a footprint
-// (as a clean subtraction would) and refresh via argmax_incremental. The new peak
-// planted inside the footprint must win; the untouched cached tiles must survive.
-TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
-{
-  const int w = 200, h = 200;  // 32-tiles -> 7x7 grid (ragged edges)
-  std::mt19937 rng(2024);
-  std::vector<float> img(w * h);
-  fdtest::fill_uniform(rng, img, 0.0f, 1.0f);  // background in [0,1)
-
-  // Initial global peak A, away from where we'll clean.
-  const int ar = 30, ac = 40;
-  img.at(flat(ar, ac, w)) = 5.0f;
+  std::vector<float> img(kSide * kSide, 0.0f);
+  const auto mask = std::make_unique<bool[]>(kSide * kSide);
+  const int a = flat(60, 170, kSide);        // far from the footprint
+  const int b = flat(196, 198, kSide);       // inside it
+  const int masked = flat(170, 180, kSide);  // inside it, masked
+  mask[masked] = true;
+  img.at(a) = -4.0f;
 
   const auto sr = res().make_ctx();
+  const auto d_mask = sr.stage(core::host_span2d<const bool>(mask.get(), kSide, kSide));
+  const auto stage_img = [&] { return sr.stage(core::host_span2d<const float>(img.data(), kSide, kSide)); };
+  matrix::tiled_argmax_ctx argmax{sr, core::dims<2>(kSide, kSide), kTile};
+  const auto refresh = [&] { return argmax.run_incremental(stage_img(), /*peak_row=*/190, /*peak_col=*/195, 64, 64); };
 
-  fdtest::device_buffer<float> d(sr, img);
+  // Seed: with abs, A wins by magnitude and keeps its sign.
+  const auto p0 = argmax.run(stage_img(), {.mask = d_mask.data_handle(), .absolute = true});
+  EXPECT_EQ(p0.index, a);
+  EXPECT_FLOAT_EQ(p0.signed_value, -4.0f);
 
-  matrix::tiled_argmax_ctx ws{sr, core::dims<2>(h, w), 32};
-  const core::span2d<float> view(d.get(), h, w);
+  // Inside the footprint, a bigger masked pixel and a bigger negative B: only B may win.
+  img.at(masked) = 20.0f;
+  img.at(b) = -6.0f;
+  const auto p1 = refresh();
+  EXPECT_EQ(p1.index, b);
+  EXPECT_FLOAT_EQ(p1.value, 6.0f);
+  EXPECT_FLOAT_EQ(p1.signed_value, -6.0f);
 
-  // Full pass seeds all tiles; global max is A.
-  auto [i0, v0, signed_v0] = ws.run(view);
-  sr.wait();
-  EXPECT_FLOAT_EQ(v0, 5.0f);
-  EXPECT_EQ(i0, flat(ar, ac, w));
-
-  // "Clean" a footprint centered at (pr, pc): plant a bigger peak B inside it and
-  // push only those pixels to the device (everything else is unchanged).
-  const int pr = 120, pc = 110, foot = 64;  // footprint [88,152) x [78,142)
-  const int br = 125, bc = 118;             // inside the footprint
-  img.at(flat(br, bc, w)) = 7.0f;
-  sr.copy(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), 1);
-
-  auto [i1, v1, signed_v1] = ws.run_incremental(view, pr, pc, foot, foot);
-  sr.wait();
-  EXPECT_FLOAT_EQ(v1, 7.0f);
-  EXPECT_EQ(i1, flat(br, bc, w));
-
-  // A sat in an untouched tile: its cached maximum must still be combined in. Drop
-  // B back below A and refresh the same footprint; A must re-emerge as the winner.
-  img.at(flat(br, bc, w)) = 0.0f;
-  sr.copy(d.get() + flat(br, bc, w), &img.at(flat(br, bc, w)), 1);
-  auto [i2, v2, signed_v2] = ws.run_incremental(view, pr, pc, foot, foot);
-  sr.wait();
-  EXPECT_FLOAT_EQ(v2, 5.0f);
-  EXPECT_EQ(i2, flat(ar, ac, w));
+  // B drops below A: A's tile was not rescanned, so its cached maximum must win again.
+  img.at(b) = 0.0f;
+  EXPECT_EQ(refresh().index, a);
 }

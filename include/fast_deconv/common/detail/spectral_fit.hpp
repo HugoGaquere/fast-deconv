@@ -1,0 +1,185 @@
+#pragma once
+
+#include <cmath>
+#include <cstdint>
+#include <fast_deconv/core/macro.hpp>
+
+// The spectral fit, written once for the host backend and the CUDA kernel (one thread, sequential).
+namespace fast_deconv::multi_frequency::detail {
+
+// Largest spectral order the solve keeps in local storage. The order is the
+// number of frequency basis functions, which is a handful in practice.
+inline constexpr std::int64_t kSpectralMaxOrder = 8;
+
+/// Gauss-Jordan with partial pivoting. Solves m (n x n) against nrhs right-hand sides held row-major in rhs
+/// (n x nrhs); both are overwritten, rhs with the solutions. Returns false on a singular m: partial pivoting
+/// already picked the largest magnitude, so a zero pivot means the whole column is zero.
+FD_HOST_DEVICE inline bool solve_gauss_jordan(double* m, double* rhs, std::int64_t n, std::int64_t nrhs)
+{
+  for (std::int64_t col = 0; col < n; ++col) {
+    std::int64_t piv = col;
+    for (std::int64_t r = col + 1; r < n; ++r)
+      if (fabs(m[r * n + col]) > fabs(m[piv * n + col])) piv = r;
+    for (std::int64_t c = 0; c < n; ++c) {
+      const double t = m[col * n + c];
+      m[col * n + c] = m[piv * n + c];
+      m[piv * n + c] = t;
+    }
+    for (std::int64_t k = 0; k < nrhs; ++k) {
+      const double t = rhs[col * nrhs + k];
+      rhs[col * nrhs + k] = rhs[piv * nrhs + k];
+      rhs[piv * nrhs + k] = t;
+    }
+
+    const double d = m[col * n + col];
+    if (d == 0.0) return false;
+    for (std::int64_t c = 0; c < n; ++c) m[col * n + c] /= d;
+    for (std::int64_t k = 0; k < nrhs; ++k) rhs[col * nrhs + k] /= d;
+
+    for (std::int64_t r = 0; r < n; ++r) {
+      if (r == col) continue;
+      const double factor = m[r * n + col];
+      for (std::int64_t c = 0; c < n; ++c) m[r * n + c] -= factor * m[col * n + c];
+      for (std::int64_t k = 0; k < nrhs; ++k) rhs[r * nrhs + k] -= factor * rhs[col * nrhs + k];
+    }
+  }
+  return true;
+}
+
+// Solve the weighted spectral fit at one pixel. SAX[f,o] = sqrt(jones_norm[f]) * xdes[f,o]
+// maps intrinsic coefficients theta to the apparent per-band flux; the branch taken
+// depends on whether the bands can determine theta.
+//
+// Overdetermined (n_freq > n_order) — a genuine least-squares fit, solved under the
+// band-weighted-mean constraint  w . per_chan == w . y:
+//
+//   G      = SAX^T W SAX,  theta = G^-1 SAX^T W y,  z = G^-1 SAX^T w
+//   lambda = (w.y - w.(SAX theta)) / (w.(SAX z))
+//   theta' = theta + lambda * z
+//
+// The minor cycle subtracts gain * per_chan from the residual cube and books the
+// mean-residual drop as gain * peak. Those agree only if the fitted model reproduces
+// the band-weighted mean at the peak. The plain projection does so only when the
+// constant vector lies in the span of SAX, i.e. when sqrt(jones_norm) is flat across
+// bands. It is not, near the field edge, where the per-band beam varies strongly
+// across bands — there the unfitted mean runs away and the minor cycle diverges.
+//
+// Exact fit (n_order >= n_freq) — fewer bands than coefficients, so SAX theta = y has
+// infinitely many solutions and G (n_order x n_order, rank n_freq) is singular. Take
+// the minimum-norm one instead, as DDFacet's ClassFrequencyMachine does:
+//
+//   H = SAX SAX^T  (n_freq x n_freq),  theta = SAX^T H^-1 y
+//
+// The weights cancel exactly here, and the constraint is skipped rather than merely
+// evaluating to zero: the fit interpolates every band, so w . per_chan == w . y holds
+// identically and lambda's denominator would be formed on the rank-deficient part.
+// Without this branch the solve inverts a singular G, and the null-space component it
+// invents is invisible in per_chan but corrupts the reported coefficients, which are
+// later evaluated at the degrid frequencies.
+//
+// Everything is done in double. G is badly conditioned wherever the per-band beam is
+// steep, and more so as the order grows; in float32 the solve can return a model
+// larger than the data it fits, which is itself enough to diverge the minor cycle.
+// The systems are at most kSpectralMaxOrder square, so double costs nothing here.
+//
+// xdes is (n_freq, n_order) row-major; weights, compact_out (n_order) and per_chan_out (n_freq) are contiguous.
+// Band f of the residual and of jones_norm is read at f * *_freq_stride + *_peak_offset. Returns false, with
+// both outputs set to NaN, when the system is singular.
+FD_HOST_DEVICE inline bool spectral_fit(float* compact_out, float* per_chan_out, const float* residual,
+                                        const float* xdes, const float* jones_norm, const float* weights,
+                                        std::int64_t n_freq, std::int64_t n_order, std::int64_t residual_freq_stride,
+                                        std::int64_t residual_peak_offset, std::int64_t jn_freq_stride,
+                                        std::int64_t jn_peak_offset)
+{
+  auto sqrt_jn = [&](std::int64_t f) {
+    return sqrt(static_cast<double>(jones_norm[f * jn_freq_stride + jn_peak_offset]));
+  };
+  auto y_at = [&](std::int64_t f) {
+    return static_cast<double>(residual[f * residual_freq_stride + residual_peak_offset]);
+  };
+
+  double theta[kSpectralMaxOrder] = {};
+
+  // Fills theta; false when the system is singular.
+  auto solve_theta = [&]() -> bool {
+    double m[kSpectralMaxOrder * kSpectralMaxOrder] = {};
+    double rhs[kSpectralMaxOrder * 2] = {};
+
+    if (n_order >= n_freq) {
+      // H = SAX SAX^T, rhs = y. n_freq <= n_order <= kSpectralMaxOrder, so both fit.
+      for (std::int64_t a = 0; a < n_freq; ++a) {
+        const double sja = sqrt_jn(a);
+        for (std::int64_t b = 0; b < n_freq; ++b) {
+          const double sjb = sqrt_jn(b);
+          double acc = 0.0;
+          for (std::int64_t o = 0; o < n_order; ++o) acc += xdes[a * n_order + o] * sja * xdes[b * n_order + o] * sjb;
+          m[a * n_freq + b] = acc;
+        }
+        rhs[a] = y_at(a);
+      }
+      if (!solve_gauss_jordan(m, rhs, n_freq, 1)) return false;
+
+      // theta = SAX^T u
+      for (std::int64_t o = 0; o < n_order; ++o) {
+        double acc = 0.0;
+        for (std::int64_t f = 0; f < n_freq; ++f) acc += xdes[f * n_order + o] * sqrt_jn(f) * rhs[f];
+        theta[o] = acc;
+      }
+    } else {
+      // Normal equations, augmented with the constraint right-hand side:
+      //   rhs[:, 0] = SAX^T W y      rhs[:, 1] = SAX^T w
+      for (std::int64_t f = 0; f < n_freq; ++f) {
+        const double sj = sqrt_jn(f);
+        const double wf = weights[f];
+        const double yf = y_at(f);
+        for (std::int64_t i = 0; i < n_order; ++i) {
+          const double swi = xdes[f * n_order + i] * sj * wf;
+          for (std::int64_t j = 0; j < n_order; ++j) m[i * n_order + j] += swi * xdes[f * n_order + j] * sj;
+          rhs[i * 2] += swi * yf;
+          rhs[i * 2 + 1] += swi;
+        }
+      }
+      if (!solve_gauss_jordan(m, rhs, n_order, 2)) return false;
+
+      // lambda from the three band-weighted sums, then apply the correction.
+      double mean_data = 0.0;
+      double mean_model = 0.0;
+      double denom = 0.0;
+      for (std::int64_t f = 0; f < n_freq; ++f) {
+        const double sj = sqrt_jn(f);
+        double pc = 0.0;
+        double u = 0.0;
+        for (std::int64_t o = 0; o < n_order; ++o) {
+          const double sax = xdes[f * n_order + o] * sj;
+          pc += sax * rhs[o * 2];
+          u += sax * rhs[o * 2 + 1];
+        }
+        mean_data += weights[f] * y_at(f);
+        mean_model += weights[f] * pc;
+        denom += weights[f] * u;
+      }
+      // denom == cos^2(1, span(SAX)) in the w metric, positive definite by construction.
+      const double lambda = (mean_data - mean_model) / denom;
+
+      for (std::int64_t o = 0; o < n_order; ++o) theta[o] = rhs[o * 2] + lambda * rhs[o * 2 + 1];
+    }
+    return true;
+  };
+
+  if (!solve_theta()) {
+    for (std::int64_t o = 0; o < n_order; ++o) compact_out[o] = NAN;
+    for (std::int64_t f = 0; f < n_freq; ++f) per_chan_out[f] = NAN;
+    return false;
+  }
+
+  for (std::int64_t o = 0; o < n_order; ++o) compact_out[o] = static_cast<float>(theta[o]);
+  for (std::int64_t f = 0; f < n_freq; ++f) {
+    const double sj = sqrt_jn(f);
+    double acc = 0.0;
+    for (std::int64_t o = 0; o < n_order; ++o) acc += xdes[f * n_order + o] * sj * theta[o];
+    per_chan_out[f] = static_cast<float>(acc);
+  }
+  return true;
+}
+
+}  // namespace fast_deconv::multi_frequency::detail

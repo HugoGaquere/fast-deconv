@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <fast_deconv/algorithm/ddmsc_cycles.hpp>
 #include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/algorithm/scales.hpp>
@@ -10,30 +11,58 @@ namespace fast_deconv::algorithm::ddmsc {
 
 /**
  * @brief   Stateful DDMSC deconvolution session.
- * @details Constructor builds heavy resources once: the GPU resource pool and
- *          the cuFFT plans for the scale and PSF convolutions. The static
- *          `DDMSC_ctx` (raw_psfs, xdes, scale_mask, scale_sigmas, scale_bias,
- *          map_pixel_facet) is also captured at construction.
+ * @details Constructor creates the resource pool and both streams, and captures the
+ *          run-constant `context` (raw_psfs, xdes, mask, scale_sigmas, scale_bias,
+ *          map_pixel_facet). The scale and PSF convolution plans are built per `run()`.
  *
  *          `run()` accepts only the per-call inputs that change between major
  *          cycles: the dirty image, jones normalization, and per-frequency
  *          weights. All algorithm parameters are tunable.
  *
- *          All array inputs are host views: the constructor and `run()` copy
- *          them host->device internally. `dirty` is in/out — its residual is
- *          copied back into the caller's host buffer when `run()` returns.
+ *          All array inputs are host views. raw_psfs, xdes and mask are staged at
+ *          construction, the `run()` inputs per call; scale_sigmas is copied; scale_bias
+ *          and map_pixel_facet stay borrowed on the host. `dirty` is in/out — its residual
+ *          is copied back into the caller's host buffer when `run()` returns.
  */
 class Ddmsc {
  public:
-  Ddmsc(const core::host_span4d<float>& raw_psfs, const core::host_span2d<float>& xdes,
-        const core::host_span2d<bool>& mask, const core::host_span1d<float>& scale_sigmas,
-        const core::host_span1d<float>& scale_bias, const core::host_span2d<int>& map_pixel_facet, int dirty_nrow,
-        int dirty_ncol, int n_freq, int exec_device = 0);
+  /**
+   * @brief Builds the context (see context::context) and sets every algorithm parameter to its default.
+   *
+   * Staging borrows on the host backend, so there the staged inputs must outlive this too.
+   *
+   * @param[in] raw_psfs         Raw PSFs, host, (n_facets, n_freq, psf_h, psf_w). Staged.
+   * @param[in] xdes             Spectral design matrix, host, (n_freq, n_order). Staged.
+   * @param[in] mask             External mask, host, (dirty_nrow, dirty_ncol), true = masked. Staged.
+   * @param[in] scale_sigmas     Gaussian sigma per scale, host, (n_scales,). Copied.
+   * @param[in] scale_bias       Per-scale weight on the peak value during scale selection, host, (n_scales,).
+   *                             Borrowed: must outlive this.
+   * @param[in] map_pixel_facet  Facet index of every dirty pixel, host, (dirty_nrow, dirty_ncol). Borrowed: must
+   *                             outlive this.
+   * @param[in] dirty_nrow       Dirty image rows.
+   * @param[in] dirty_ncol       Dirty image columns.
+   * @param[in] exec_device      Device the resources and streams are created on.
+   */
+  Ddmsc(core::host_span4d<const float> raw_psfs, core::host_span2d<const float> xdes,
+        core::host_span2d<const bool> mask, core::host_span1d<const float> scale_sigmas,
+        core::host_span1d<const float> scale_bias, core::host_span2d<const int> map_pixel_facet,
+        std::int64_t dirty_nrow, std::int64_t dirty_ncol, int exec_device = 0);
 
-  /// Run one full deconvolution session. The updated residual is written back
-  /// into @p dirty (host, in/out) before returning.
-  ddmsc_result run(core::host_span3d<float>& dirty, const core::host_span3d<const float>& jones_norm,
-                   const core::host_span1d<const float>& weights_freq);
+  /**
+   * @brief Run the minor loop for one major cycle.
+   *
+   * @param[in,out] dirty         Dirty image, host, (n_freq, nrow, ncol); the residual is written back
+   *                              before returning.
+   * @param[in]     jones_norm    Jones normalization, host, (n_freq, nrow, ncol).
+   * @param[in]     weights_freq  Per-frequency weights, host, (n_freq,).
+   * @return Extracted components, entry/exit flux and standard deviation, and why the loop stopped.
+   */
+  ddmsc_result run(core::host_span3d<float> dirty, core::host_span3d<const float> jones_norm,
+                   core::host_span1d<const float> weights_freq);
+
+  // Getters and setters of the algorithm parameters, applied from the next run(). Each maps to the params field of
+  // the same name (max_sub_iteration -> max_clean_iteration, stall_threshold -> scale_stall_threshold,
+  // auto_mask -> enable_auto_mask, force_auto_mask -> force_enable_auto_mask); see params for their meaning.
 
   bool clean_negative() const { return params_.clean_negative; }
   void set_clean_negative(bool v) { params_.clean_negative = v; }
@@ -82,9 +111,6 @@ class Ddmsc {
 
   std::optional<float> auto_mask_rms_threshold() const { return params_.auto_mask_rms_threshold; }
   void set_auto_mask_rms_threshold(std::optional<float> v) { params_.auto_mask_rms_threshold = v; }
-
-  psf_cache_mode psf_cache_policy() const { return params_.psf_cache_policy; }
-  void set_psf_cache_policy(psf_cache_mode v) { params_.psf_cache_policy = v; }
 
  private:
   context ctx_;

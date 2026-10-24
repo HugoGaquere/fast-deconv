@@ -70,3 +70,6 @@ mutagen.yml.lock
 # Local Tracy captures and notes
 *.tracy
 todo.md
+
+# Apptainer definitions (local build recipes)
+*.def

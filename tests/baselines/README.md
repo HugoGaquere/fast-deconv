@@ -8,6 +8,6 @@ loosen them silently.
 Regenerate after an intentional algorithmic change:
 
 ```bash
-FAST_DECONV_UPDATE_BASELINE=1 ctest --test-dir build/Release -L NONREG
+FAST_DECONV_UPDATE_BASELINE=1 ctest --test-dir build/release-backend_cuda -L NONREG
 git diff tests/baselines/ddmsc_synthetic.json   # review, then commit
 ```

@@ -169,7 +169,11 @@ add_library(fast_deconv STATIC
         src/fast_deconv/algorithm/psf_convolution.cpp
         src/fast_deconv/algorithm/scales.cpp
         src/fast_deconv/linalg/gaussian_convolution.cpp
+        src/fast_deconv/matrix/stats.cpp
+        src/fast_deconv/matrix/tiled_argmax.cpp
         src/fast_deconv/common/convergence.cpp
+        src/fast_deconv/common/gain.cpp
+        src/fast_deconv/common/mask.cpp
         ${FAST_DECONV_BACKEND_SOURCES}
 )
 
@@ -242,7 +246,6 @@ if(SKBUILD)
   # Plain C++: the bindings only touch the backend-agnostic public API.
   pybind11_add_module(_fast_deconv
     src/python/fast_deconv_module.cpp
-    src/python/bindings/core.cpp
     src/python/bindings/ddmsc.cpp
   )
 

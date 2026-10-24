@@ -9,9 +9,10 @@ namespace fast_deconv::algorithm::ddmsc {
 /**
  * @brief   Run the full minor-cycle loop: repeated scale selection with stall/divergence checks.
  * @details Allocates mean_residual internally and computes it from the dirty image at each
- *          iteration. PSFs are convolved on-the-fly for each selected scale.
+ *          iteration. Each (scale, facet) PSF is convolved on first use; only the selected scale stays cached.
  *
- * @param[in,out] ctx          DDMSC context (resources, FFT plans, raw PSFs, mask, biases, etc.).
+ * @param[in,out] ctx          DDMSC context (resources, streams, raw PSFs, mask, scales, facet map); this run's
+ *                             components are appended to its history.
  * @param[in]     p            Algorithm parameters.
  * @param[in,out] dirty        Multi-frequency dirty image (n_freq, nrow, ncol).
  * @param[in]     jones_norm   Jones normalization.
@@ -19,8 +20,7 @@ namespace fast_deconv::algorithm::ddmsc {
  *
  * @return ddmsc_result with all extracted components, final flux, and iteration count.
  */
-ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>& dirty,
-                              const core::span3d<const float>& jones_norm,
-                              const core::span1d<const float>& weights_freq);
+ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float> dirty,
+                              core::span3d<const float> jones_norm, core::span1d<const float> weights_freq);
 
 }  // namespace fast_deconv::algorithm::ddmsc

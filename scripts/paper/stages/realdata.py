@@ -18,12 +18,12 @@ from pathlib import Path
 
 from harness import Ctx, SkipStage, read_csv_rows, run_cmd, to_num, write_json
 
-_INITIAL_FLUX_RE = re.compile(r"initial pak_flux=([-\d.eE+]+)")
+_INITIAL_FLUX_RE = re.compile(r"initial peak_flux=([-\d.eE+]+)")
 
 
 def _initial_fluxes(out) -> list[float]:
     """Per-cycle initial peak flux parsed, in cycle order, from the realdata run
-    log -- example_ddmsc logs one 'initial pak_flux=' line per cycle but does not
+    log -- example_ddmsc logs one 'initial peak_flux=' line per cycle but does not
     write it to the CSV. Empty when the log is absent."""
     log = Path(out).parent / "logs" / "realdata_run.log"
     if not log.exists():
@@ -81,7 +81,7 @@ def analyze(rows: list[dict], out) -> dict:
     ax.set_ylabel("minor-cycle wall time [s]")
     # iteration counts are already on the bar labels, so use the second axis for
     # the residual peak after each cycle. Anchor it at a leading "start" point --
-    # the dirty-image peak before any cleaning (first cycle's initial pak_flux from
+    # the dirty-image peak before any cleaning (first cycle's initial peak_flux from
     # the run log) -- to show where convergence came down from. Log-scaled for the
     # wide range between the start peak and the residuals.
     initial = _initial_fluxes(out)

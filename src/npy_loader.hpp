@@ -13,7 +13,7 @@ namespace npy {
 
 /**
  * Simple .npy file loader for test data.
- * Supports: float32, int32, bool, complex64
+ * Supports: float32, float64, int32, int64, bool, complex64
  * The data is read fully into memory at load time.
  */
 struct NpyArray {
@@ -84,19 +84,16 @@ inline NpyArray load_npy(const std::string& path)
     throw std::runtime_error("Cannot open file: " + path);
   }
 
-  // Read magic number
   char magic[6];
   file.read(magic, 6);
   if (magic[0] != '\x93' || std::string(magic + 1, 5) != "NUMPY") {
     throw std::runtime_error("Invalid .npy magic number");
   }
 
-  // Read version
   uint8_t major, minor;
   file.read(reinterpret_cast<char*>(&major), 1);
   file.read(reinterpret_cast<char*>(&minor), 1);
 
-  // Read header length
   uint32_t header_len;
   if (major == 1) {
     uint16_t len16;
@@ -106,13 +103,11 @@ inline NpyArray load_npy(const std::string& path)
     file.read(reinterpret_cast<char*>(&header_len), 4);
   }
 
-  // Read header
   std::string header(header_len, '\0');
   file.read(&header[0], header_len);
 
   NpyArray arr;
 
-  // Parse dtype
   auto descr_pos = header.find("'descr':");
   if (descr_pos != std::string::npos) {
     auto quote1 = header.find('\'', descr_pos + 8);
@@ -120,10 +115,8 @@ inline NpyArray load_npy(const std::string& path)
     arr.dtype = header.substr(quote1 + 1, quote2 - quote1 - 1);
   }
 
-  // Parse fortran_order
   arr.fortran_order = header.find("'fortran_order': True") != std::string::npos;
 
-  // Parse shape
   auto shape_pos = header.find("'shape':");
   if (shape_pos != std::string::npos) {
     auto paren1 = header.find('(', shape_pos);
@@ -148,7 +141,6 @@ inline NpyArray load_npy(const std::string& path)
     arr.shape.push_back(1);
   }
 
-  // Determine element size
   size_t elem_size = 0;
   if (arr.dtype.find("f8") != std::string::npos) {
     elem_size = sizeof(double);
@@ -166,7 +158,6 @@ inline NpyArray load_npy(const std::string& path)
     throw std::runtime_error("Unsupported dtype: " + arr.dtype);
   }
 
-  // Read data
   const size_t total_bytes = arr.size() * elem_size;
   arr.data = std::make_unique_for_overwrite<std::byte[]>(total_bytes);
   file.read(reinterpret_cast<char*>(arr.data.get()), static_cast<std::streamsize>(total_bytes));
