@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "helpers/backend_test.hpp"
-#include "helpers/device_buffers.hpp"
 
 namespace core = fast_deconv::core;
 namespace linalg = fast_deconv::linalg;
@@ -23,14 +22,16 @@ TEST_F(WeightedSum, SumsTheChannelsWithTheirWeights)
   std::vector<float> a(n_freq * npix);
   for (int f = 0; f < n_freq; ++f)
     for (int i = 0; i < npix; ++i) a.at(f * npix + i) = static_cast<float>((f + 1) * (i + 1));
+  std::vector<float> out(npix);
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_a(sr, a), d_weights(sr, weights), d_out(sr, npix);
+  const auto d_a = sr.stage(core::host_span3d<const float>(a.data(), n_freq, nrow, ncol));
+  const auto d_weights = sr.stage(core::host_span1d<const float>(weights.data(), n_freq));
+  auto d_out = sr.stage(core::host_span2d<float>(out.data(), nrow, ncol));
 
-  linalg::weighted_sum(sr, core::span3d<const float>(d_a.get(), n_freq, nrow, ncol),
-                       core::span1d<const float>(d_weights.get(), n_freq),
-                       core::span2d<float>(d_out.get(), nrow, ncol));
+  linalg::weighted_sum(sr, d_a, d_weights, d_out);
+  sr.unstage(d_out, out.data());
+  sr.wait();
 
-  const auto out = d_out.to_host();
   for (int i = 0; i < npix; ++i) EXPECT_NEAR(out.at(i), 2.7f * (i + 1), 1e-4f) << "pixel " << i;
 }

@@ -1,13 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <cstdint>
 #include <fast_deconv/common/mask.hpp>
 #include <fast_deconv/core/memory_types.hpp>
+#include <memory>
 #include <vector>
 
 #include "helpers/backend_test.hpp"
-#include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
 
 namespace core = fast_deconv::core;
@@ -19,24 +18,27 @@ using fdtest::flat;
 // build_auto_mask output: (n_scales, nrow, ncol), 1 = masked, 0 = valid.
 class BuildAutoMask : public fdtest::BackendTest {
  protected:
-  // Single-channel run with a square PSF. The output starts as garbage (0xff), so a pixel the function
-  // forgets to write cannot pass for either 0 or 1.
-  std::vector<uint8_t> run(const std::vector<common::index2d>& coords, const std::vector<int>& scales,
-                           const std::vector<float>& psf, int psf_size, const std::vector<float>& sigmas,
-                           const std::vector<bool>& external, int nrow, int ncol)
+  // Single-channel run with a square PSF. The output starts all masked, as left by an earlier cycle, so a
+  // valid pixel the function forgets to write shows up.
+  std::vector<int> run(const std::vector<common::index2d>& coords, const std::vector<int>& scales,
+                       const std::vector<float>& psf, int psf_size, const std::vector<float>& sigmas,
+                       const bool* external, int nrow, int ncol)
   {
-    const auto sr = res().make_ctx();
-    const int n_scales = static_cast<int>(sigmas.size());
-    fdtest::device_buffer<bool> d_mask(sr, static_cast<std::size_t>(n_scales) * nrow * ncol);
-    d_mask.fill_bytes(0xff);
-    fdtest::device_buffer<float> d_psf(sr, psf), d_weights(sr, std::vector<float>{1.0f});
-    fdtest::device_buffer<bool> d_external(sr, external);
+    const int n_scales = static_cast<int>(sigmas.size()), n = n_scales * nrow * ncol;
+    const auto mask = std::make_unique<bool[]>(n);
+    std::fill_n(mask.get(), n, true);
+    const std::vector<float> weights = {1.0f};
 
-    common::build_auto_mask(sr, coords, scales, core::span3d<const float>(d_psf.get(), 1, psf_size, psf_size),
-                            core::span1d<const float>(d_weights.get(), 1), sigmas,
-                            core::span2d<const bool>(d_external.get(), nrow, ncol),
-                            core::span3d<bool>(d_mask.get(), n_scales, nrow, ncol));
-    return d_mask.to_host();
+    const auto sr = res().make_ctx();
+    const auto d_psf = sr.stage(core::host_span3d<const float>(psf.data(), 1, psf_size, psf_size));
+    const auto d_weights = sr.stage(core::host_span1d<const float>(weights.data(), 1));
+    const auto d_external = sr.stage(core::host_span2d<const bool>(external, nrow, ncol));
+    auto d_mask = sr.stage(core::host_span3d<bool>(mask.get(), n_scales, nrow, ncol));
+
+    common::build_auto_mask(sr, coords, scales, d_psf, d_weights, sigmas, d_external, d_mask);
+    sr.unstage(d_mask, mask.get());
+    sr.wait();
+    return {mask.get(), mask.get() + n};
   }
 };
 
@@ -47,11 +49,12 @@ TEST_F(BuildAutoMask, DeltaPsfLeavesOnlyEachScalesPeaksValid)
   const int nrow = 4, ncol = 5, plane = nrow * ncol;
   std::vector<float> psf(8 * 8, 0.0f);
   psf.at(flat(4, 4, 8)) = 1.0f;  // the FFT center of an 8x8 plane
+  const auto no_external = std::make_unique<bool[]>(plane);
 
   const auto mask = run({{0, 0}, {1, 2}, {3, 4}}, /*scales=*/{0, 2, 1}, psf, 8, /*sigmas=*/{0.0f, 0.0f, 0.0f},
-                        std::vector<bool>(plane, false), nrow, ncol);
+                        no_external.get(), nrow, ncol);
 
-  std::vector<uint8_t> expected(3 * plane, 1);
+  std::vector<int> expected(3 * plane, 1);
   expected.at(0 * plane + flat(0, 0, ncol)) = 0;
   expected.at(2 * plane + flat(1, 2, ncol)) = 0;
   expected.at(1 * plane + flat(3, 4, ncol)) = 0;
@@ -64,11 +67,11 @@ TEST_F(BuildAutoMask, DeltaPsfLeavesOnlyEachScalesPeaksValid)
 TEST_F(BuildAutoMask, GaussianPsfValidatesTheFwhmNeighborhood)
 {
   const int n = 16, plane = n * n;
-  std::vector<bool> external(plane, false);
-  external.at(flat(8, 9, n)) = true;
+  const auto external = std::make_unique<bool[]>(plane);
+  external[flat(8, 9, n)] = true;
 
-  const auto mask =
-      run({{8, 8}}, /*scales=*/{1}, fdtest::gaussian2d(n, n, 8, 8, 1.5), n, /*sigmas=*/{0.0f, 1.0f}, external, n, n);
+  const auto mask = run({{8, 8}}, /*scales=*/{1}, fdtest::gaussian2d(n, n, 8, 8, 1.5), n, /*sigmas=*/{0.0f, 1.0f},
+                        external.get(), n, n);
   const auto scale1 = [&](int r, int c) { return mask.at(plane + flat(r, c, n)); };
 
   EXPECT_EQ(scale1(8, 8), 0);  // the component

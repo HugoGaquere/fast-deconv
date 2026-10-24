@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "helpers/backend_test.hpp"
-#include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
 
 namespace core = fast_deconv::core;
@@ -33,10 +32,10 @@ TEST_F(ComputeGainBatched, IsGammaOverThePeakOfTheWeightedMeanPsf)
   at(1, 2, 7, 7) = 4.0f;
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_psfs(sr, psfs), d_weights(sr, weights);
+  const auto d_psfs = sr.stage(core::host_span4d<const float>(psfs.data(), n_facets, n_freq, n, n));
+  const auto d_weights = sr.stage(core::host_span1d<const float>(weights.data(), n_freq));
 
-  const auto gains = common::compute_gain_batched(sr, core::span4d<const float>(d_psfs.get(), n_facets, n_freq, n, n),
-                                                  core::span1d<const float>(d_weights.get(), n_freq), /*gamma=*/0.1f);
+  const auto gains = common::compute_gain_batched(sr, d_psfs, d_weights, /*gamma=*/0.1f);
 
   ASSERT_EQ(gains.size(), 2u);
   EXPECT_FLOAT_EQ(gains.at(0), 0.1f / 1.0f);

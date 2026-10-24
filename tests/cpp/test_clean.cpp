@@ -2,11 +2,11 @@
 
 #include <fast_deconv/common/clean.hpp>
 #include <fast_deconv/core/memory_types.hpp>
+#include <memory>
 #include <random>
 #include <vector>
 
 #include "helpers/backend_test.hpp"
-#include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
 
@@ -56,15 +56,17 @@ TEST_F(SubtractComponent, SubtractsPsfAroundPeakClippedAtBorders)
   for (const int n : {5, 8}) {
     std::vector<float> psf(n * n);
     fdtest::fill_uniform(rng, psf, 0.0f, 1.0f);
+    const auto d_psf = sr.stage(core::host_span2d<const float>(psf.data(), n, n));
 
     for (const auto& peak : {common::index2d{8, 10}, {0, 0}, {0, kW - 1}, {kH - 1, 0}, {kH - 1, kW - 1}}) {
       SCOPED_TRACE(::testing::Message() << n << "x" << n << " psf, peak (" << peak.row << ", " << peak.col << ")");
-      fdtest::device_buffer<float> d_res(sr, residual), d_psf(sr, psf);
+      std::vector<float> got = residual;
+      auto d_res = sr.stage(core::host_span2d<float>(got.data(), kH, kW));
 
-      common::subtract_component(sr, core::span2d<float>(d_res.get(), kH, kW),
-                                 core::span2d<const float>(d_psf.get(), n, n), peak, 0.5f);
+      common::subtract_component(sr, d_res, d_psf, peak, 0.5f);
+      sr.unstage(d_res, got.data());
+      sr.wait();
 
-      const auto got = d_res.to_host();
       const auto expected = host_subtract(residual, psf, n, n, peak, 0.5f);
       for (int i = 0; i < kH * kW; ++i) ASSERT_FLOAT_EQ(got.at(i), expected.at(i)) << "index " << i;
     }
@@ -76,25 +78,28 @@ TEST_F(SubtractComponent, SubtractsPsfAroundPeakClippedAtBorders)
 TEST_F(SubtractComponent, SkipsMaskedPixelsAndPixelsBelowThreshold)
 {
   std::vector<float> residual(kH * kW, 1.0f);
-  std::vector<bool> mask(kH * kW, false);
+  const auto mask = std::make_unique<bool[]>(kH * kW);
   const int small = flat(7, 9, kW), negative = flat(8, 11, kW), masked = flat(9, 10, kW);
   residual.at(small) = 0.2f;
   residual.at(negative) = -0.8f;
-  mask.at(masked) = true;
+  mask[masked] = true;
+  const std::vector<float> psf(5 * 5, 1.0f);
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_res(sr, residual), d_psf(sr, std::vector<float>(5 * 5, 1.0f));
-  fdtest::device_buffer<bool> d_mask(sr, mask);
+  auto d_res = sr.stage(core::host_span2d<float>(residual.data(), kH, kW));
+  const auto d_psf = sr.stage(core::host_span2d<const float>(psf.data(), 5, 5));
+  const auto d_mask = sr.stage(core::host_span2d<const bool>(mask.get(), kH, kW));
 
-  common::subtract_component(sr, core::span2d<float>(d_res.get(), kH, kW), core::span2d<const float>(d_psf.get(), 5, 5),
-                             {8, 10}, /*gain=*/0.5f, {.mask = d_mask.get(), .absolute = true}, /*threshold=*/0.5f);
+  common::subtract_component(sr, d_res, d_psf, {8, 10}, /*gain=*/0.5f, {.mask = d_mask.data_handle(), .absolute = true},
+                             /*threshold=*/0.5f);
+  sr.unstage(d_res, residual.data());
+  sr.wait();
 
-  const auto got = d_res.to_host();
-  EXPECT_FLOAT_EQ(got.at(flat(8, 10, kW)), 0.5f);  // in the window: 1 - 0.5
-  EXPECT_FLOAT_EQ(got.at(small), 0.2f);            // |0.2| < 0.5: untouched
-  EXPECT_FLOAT_EQ(got.at(negative), -1.3f);        // |-0.8| >= 0.5: subtracted
-  EXPECT_FLOAT_EQ(got.at(masked), 1.0f);           // masked: untouched
-  EXPECT_FLOAT_EQ(got.at(flat(0, 0, kW)), 1.0f);   // outside the window
+  EXPECT_FLOAT_EQ(residual.at(flat(8, 10, kW)), 0.5f);  // in the window: 1 - 0.5
+  EXPECT_FLOAT_EQ(residual.at(small), 0.2f);            // |0.2| < 0.5: untouched
+  EXPECT_FLOAT_EQ(residual.at(negative), -1.3f);        // |-0.8| >= 0.5: subtracted
+  EXPECT_FLOAT_EQ(residual.at(masked), 1.0f);           // masked: untouched
+  EXPECT_FLOAT_EQ(residual.at(flat(0, 0, kW)), 1.0f);   // outside the window
 }
 
 // Every channel subtracts its own PSF scaled by gain * its spectral coefficient.
@@ -107,16 +112,19 @@ TEST_F(SubtractComponent, MultiFrequencyScalesEachChannelByItsCoeff)
   fdtest::fill_uniform(rng, psf, 0.0f, 1.0f);
   const std::vector<float> coeffs = {1.0f, -0.5f, 0.25f};
   const float gain = 0.4f;
+
   const auto sr = res().make_ctx();
+  const auto d_psf = sr.stage(core::host_span3d<const float>(psf.data(), n_freq, n, n));
+  const auto d_coeffs = sr.stage(core::host_span1d<const float>(coeffs.data(), n_freq));
 
   for (const auto& peak : {common::index2d{8, 10}, {kH - 1, kW - 1}}) {
-    fdtest::device_buffer<float> d_res(sr, residual), d_psf(sr, psf), d_coeffs(sr, coeffs);
+    std::vector<float> got = residual;
+    auto d_res = sr.stage(core::host_span3d<float>(got.data(), n_freq, kH, kW));
 
-    common::subtract_component(sr, core::span3d<float>(d_res.get(), n_freq, kH, kW),
-                               core::span3d<const float>(d_psf.get(), n_freq, n, n),
-                               core::span1d<const float>(d_coeffs.get(), n_freq), peak, gain);
+    common::subtract_component(sr, d_res, d_psf, d_coeffs, peak, gain);
+    sr.unstage(d_res, got.data());
+    sr.wait();
 
-    const auto got = d_res.to_host();
     for (int f = 0; f < n_freq; ++f) {
       SCOPED_TRACE(::testing::Message() << "channel " << f << ", peak (" << peak.row << ", " << peak.col << ")");
       const auto expected =

@@ -1,15 +1,16 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/matrix/argmax.hpp>
 #include <fast_deconv/matrix/stats.hpp>
+#include <memory>
 #include <optional>
 #include <random>
 #include <vector>
 
 #include "helpers/backend_test.hpp"
-#include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
 
@@ -32,15 +33,24 @@ class MaxAndRms : public fdtest::BackendTest {
  protected:
   // Zero image with a masked 9, an unmasked 3 and an unmasked -4.
   std::vector<float> img = std::vector<float>(kNpix, 0.0f);
-  std::vector<bool> mask = std::vector<bool>(kNpix, false);
+  std::unique_ptr<bool[]> mask = std::make_unique<bool[]>(kNpix);
   const int masked = flat(10, 40, kNcol), positive = flat(20, 5, kNcol), negative = flat(2, 3, kNcol);
 
   void SetUp() override
   {
     img.at(masked) = 9.0f;
-    mask.at(masked) = true;
+    mask[masked] = true;
     img.at(positive) = 3.0f;
     img.at(negative) = -4.0f;
+  }
+
+  auto stage_img(const core::exec_ctx& sr) const
+  {
+    return sr.stage(core::host_span2d<const float>(img.data(), kNrow, kNcol));
+  }
+  auto stage_mask(const core::exec_ctx& sr) const
+  {
+    return sr.stage(core::host_span2d<const bool>(mask.get(), kNrow, kNcol));
   }
 };
 
@@ -49,31 +59,23 @@ class MaxAndRms : public fdtest::BackendTest {
 TEST_F(MaxAndRms, MaskHidesPixelsFromTheMaxOnly)
 {
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(sr, img);
-  fdtest::device_buffer<bool> d_mask(sr, mask);
-  const core::span2d<const float> img_view(d_img.get(), kNrow, kNcol);
-  const core::span2d<const bool> mask_view(d_mask.get(), kNrow, kNcol);
+  const auto d_mask = stage_mask(sr);
   matrix::stats_ctx stats(sr, kNpix, /*use_abs=*/false);
 
-  const auto [max, rms] = stats.max_and_rms(img_view, mask_view);
+  const auto [max, rms] = stats.max_and_rms(stage_img(sr), d_mask);
   EXPECT_FLOAT_EQ(max, 3.0f);
   EXPECT_NEAR(rms, fdtest::std_all(img), 1e-4f * fdtest::std_all(img));
 
   img.at(positive) = 5.0f;
-  d_img.from_host(img);
-  EXPECT_FLOAT_EQ(stats.max_and_rms(img_view, mask_view).max, 5.0f);
+  EXPECT_FLOAT_EQ(stats.max_and_rms(stage_img(sr), d_mask).max, 5.0f);
 }
 
 TEST_F(MaxAndRms, UseAbsRanksByMagnitude)
 {
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_img(sr, img);
-  fdtest::device_buffer<bool> d_mask(sr, mask);
   matrix::stats_ctx stats(sr, kNpix, /*use_abs=*/true);
 
-  const auto s = stats.max_and_rms(core::span2d<const float>(d_img.get(), kNrow, kNcol),
-                                   core::span2d<const bool>(d_mask.get(), kNrow, kNcol));
-  EXPECT_FLOAT_EQ(s.max, 4.0f);
+  EXPECT_FLOAT_EQ(stats.max_and_rms(stage_img(sr), stage_mask(sr)).max, 4.0f);
 }
 
 // ============================================================================
@@ -82,15 +84,13 @@ TEST_F(MaxAndRms, UseAbsRanksByMagnitude)
 
 class FindPeak : public fdtest::BackendTest {
  protected:
-  // An empty @p mask means no mask at all (a null criterion mask).
-  matrix::peak run(const std::vector<float>& img, const std::vector<bool>& mask = {}, bool absolute = false)
+  matrix::peak run(const std::vector<float>& img, const bool* mask = nullptr, bool absolute = false)
   {
     const auto sr = res().make_ctx();
-    fdtest::device_buffer<float> d_img(sr, img);
-    std::optional<fdtest::device_buffer<bool>> d_mask;
-    if (!mask.empty()) d_mask.emplace(sr, mask);
-    const matrix::peak_criterion criterion{.mask = d_mask ? d_mask->get() : nullptr, .absolute = absolute};
-    return matrix::find_peak(sr, core::span2d<const float>(d_img.get(), kNrow, kNcol), criterion);
+    const auto d_img = sr.stage(core::host_span2d<const float>(img.data(), kNrow, kNcol));
+    std::optional<core::mdcontainer<const bool, 2>> d_mask;
+    if (mask) d_mask = sr.stage(core::host_span2d<const bool>(mask, kNrow, kNcol));
+    return matrix::find_peak(sr, d_img, {.mask = d_mask ? d_mask->data_handle() : nullptr, .absolute = absolute});
   }
 };
 
@@ -122,13 +122,13 @@ TEST_F(FindPeak, TieGoesToTheSmallerIndex)
 TEST_F(FindPeak, MaskedPixelsNeverWin)
 {
   std::vector<float> img(kNpix, 0.0f);
-  std::vector<bool> mask(kNpix, false);
+  const auto mask = std::make_unique<bool[]>(kNpix);
   const int masked = flat(4, 4, kNcol), unmasked = flat(25, 7, kNcol);
   img.at(masked) = 5.0f;
-  mask.at(masked) = true;
+  mask[masked] = true;
   img.at(unmasked) = 2.0f;
 
-  EXPECT_EQ(run(img, mask).index, unmasked);
+  EXPECT_EQ(run(img, mask.get()).index, unmasked);
 }
 
 // The clean loop subtracts with signed_value, so abs ranks by magnitude but must keep the sign.
@@ -139,7 +139,7 @@ TEST_F(FindPeak, AbsRanksByMagnitudeAndKeepsTheSign)
   img.at(negative) = -3.0f;
   img.at(flat(25, 7, kNcol)) = 2.0f;
 
-  const auto p = run(img, {}, /*absolute=*/true);
+  const auto p = run(img, nullptr, /*absolute=*/true);
   EXPECT_EQ(p.index, negative);
   EXPECT_FLOAT_EQ(p.value, 3.0f);
   EXPECT_FLOAT_EQ(p.signed_value, -3.0f);
@@ -148,6 +148,9 @@ TEST_F(FindPeak, AbsRanksByMagnitudeAndKeepsTheSign)
 // A scale with no component is fully masked by the auto-mask: nothing qualifies, the peak is -inf.
 TEST_F(FindPeak, FullyMaskedImageGivesNegativeInfinity)
 {
-  const auto p = run(std::vector<float>(kNpix, 1.0f), std::vector<bool>(kNpix, true));
+  const auto mask = std::make_unique<bool[]>(kNpix);
+  std::fill_n(mask.get(), kNpix, true);
+
+  const auto p = run(std::vector<float>(kNpix, 1.0f), mask.get());
   EXPECT_TRUE(std::isinf(p.value) && p.value < 0.0f);
 }

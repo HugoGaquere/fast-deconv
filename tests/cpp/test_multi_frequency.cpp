@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "helpers/backend_test.hpp"
-#include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
 
 namespace common = fast_deconv::common;
@@ -206,25 +205,22 @@ class FitCoefficients : public fdtest::BackendTest {
     for (int f = 0; f < n_freq; ++f)
       for (int i = 0; i < kNpix; ++i) jn_image.at(f * kNpix + i) = jn.at(f);
 
+    std::vector<float> compact(n_order), per_chan(n_freq);
+
     const auto sr = res().make_ctx();
-    fdtest::device_buffer<float> d_dirty(sr, dirty);
-    fdtest::device_buffer<float> d_jn(sr, jn_image);
-    fdtest::device_buffer<float> d_w(sr, weights);
-    fdtest::device_buffer<float> d_xdes(sr, xdes);
-    fdtest::device_buffer<float> d_compact(sr, static_cast<std::size_t>(n_order));
-    fdtest::device_buffer<float> d_per_chan(sr, static_cast<std::size_t>(n_freq));
+    const auto d_dirty = sr.stage(core::host_span3d<const float>(dirty.data(), n_freq, kNrow, kNcol));
+    const auto d_jn = sr.stage(core::host_span3d<const float>(jn_image.data(), n_freq, kNrow, kNcol));
+    const auto d_w = sr.stage(core::host_span1d<const float>(weights.data(), n_freq));
+    const auto d_xdes = sr.stage(core::host_span2d<const float>(xdes.data(), n_freq, n_order));
+    auto d_compact = sr.stage(core::host_span1d<float>(compact.data(), n_order));
+    auto d_per_chan = sr.stage(core::host_span1d<float>(per_chan.data(), n_freq));
 
-    core::span3d<float> dirty_view(d_dirty.get(), n_freq, kNrow, kNcol);
-    core::span3d<float> jn_view(d_jn.get(), n_freq, kNrow, kNcol);
-    core::span1d<float> w_view(d_w.get(), n_freq);
-    core::span2d<float> xdes_view(d_xdes.get(), n_freq, n_order);
-    core::span1d<float> compact_view(d_compact.get(), n_order);
-    core::span1d<float> per_chan_view(d_per_chan.get(), n_freq);
-
-    mfs::fit_coefficients(sr, dirty_view, jn_view, w_view, xdes_view, peak, compact_view, per_chan_view);
+    mfs::fit_coefficients(sr, d_dirty, d_jn, d_w, d_xdes, peak, d_compact, d_per_chan);
+    sr.unstage(d_compact, compact.data());
+    sr.unstage(d_per_chan, per_chan.data());
     sr.wait();
 
-    return {d_compact.to_host(), d_per_chan.to_host()};
+    return {compact, per_chan};
   }
 
   // Same relative tolerance everywhere: the device solve runs in double.
