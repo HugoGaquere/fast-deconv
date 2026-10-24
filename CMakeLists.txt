@@ -173,6 +173,7 @@ set(FAST_DECONV_GENERIC_SOURCES
     src/fast_deconv/common/mask.cpp
     src/fast_deconv/common/clean.cpp
     src/fast_deconv/common/multi_frequency.cpp
+    src/fast_deconv/linalg/linalg.cpp
 )
 if(FAST_DECONV_WITH_CUDA)
   set_source_files_properties(${FAST_DECONV_GENERIC_SOURCES} PROPERTIES LANGUAGE CUDA)
@@ -196,7 +197,7 @@ target_link_libraries(fast_deconv PUBLIC
 )
 
 if(FAST_DECONV_WITH_CUDA)
-  target_link_libraries(fast_deconv PUBLIC emu::emu CUDA::cublas CUDA::cufft)
+  target_link_libraries(fast_deconv PUBLIC emu::emu CUDA::cufft)
   if(FAST_DECONV_WITH_PROFILER)
     # PUBLIC: core/profiler.hpp is a public header, so consumers need FD_NVTX_ENABLE too.
     target_link_libraries(fast_deconv PUBLIC CUDA::nvtx3)
