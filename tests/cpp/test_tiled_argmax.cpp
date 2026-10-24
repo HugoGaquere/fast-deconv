@@ -71,39 +71,6 @@ TEST_F(TiledArgmax, AllNegativeInitialisesToNegInf)
   EXPECT_EQ(idx, flat(pr, pc, w));
 }
 
-// Reuse one ctx across two calls, mimicking
-// the clean loop: peak moves between cycles, the second full pass must find it.
-// (The incremental dirty-footprint path is covered by IncrementalRefreshesDirtyFootprint.)
-TEST_F(TiledArgmax, WorkspaceReuseAcrossCalls)
-{
-  const int w = 64, h = 64;
-  const auto sr = res().make_ctx();
-
-  fdtest::device_buffer<float> d(sr, static_cast<std::size_t>(w) * h);
-  matrix::tiled_argmax_ctx ws{sr, core::dims<2>(h, w), 32};
-  const core::span2d<float> view(d.get(), h, w);
-
-  // Cycle 1: peak A.
-  std::vector<float> img(w * h, 0.0f);
-  const int ar = 10, ac = 12;
-  img.at(flat(ar, ac, w)) = 5.0f;
-  d.from_host(img);
-  auto [i1, v1, signed_v1] = ws.run(view);
-  sr.wait();
-  EXPECT_FLOAT_EQ(v1, 5.0f);
-  EXPECT_EQ(i1, flat(ar, ac, w));
-
-  // Cycle 2: clear A, plant a larger peak B elsewhere; reuse the same ctx.
-  img.at(flat(ar, ac, w)) = 0.0f;
-  const int br = 55, bc = 60;
-  img.at(flat(br, bc, w)) = 7.0f;
-  d.from_host(img);
-  auto [i2, v2, signed_v2] = ws.run(view);
-  sr.wait();
-  EXPECT_FLOAT_EQ(v2, 7.0f);
-  EXPECT_EQ(i2, flat(br, bc, w));
-}
-
 // Incremental path: seed every tile with a full pass, then dirty only a footprint
 // (as a clean subtraction would) and refresh via run_incremental. The new peak
 // planted inside the footprint must win; the untouched cached tiles must survive.
@@ -151,4 +118,52 @@ TEST_F(TiledArgmax, IncrementalRefreshesDirtyFootprint)
   sr.wait();
   EXPECT_FLOAT_EQ(v2, 5.0f);
   EXPECT_EQ(i2, flat(ar, ac, w));
+}
+
+// The clean loop searches under a peak_criterion, and run_incremental reuses the one of the last run().
+// A huge masked pixel must never win, and abs must rank a negative pixel by its magnitude and keep its sign
+// in signed_value, in the full pass and in the incremental refresh alike.
+TEST_F(TiledArgmax, CriterionMasksAndRanksByAbsInFullAndIncrementalPasses)
+{
+  const int w = 200, h = 200;  // 32-tiles -> 7x7 grid (ragged edges)
+  std::mt19937 rng(31);
+  std::vector<float> img(w * h);
+  fdtest::fill_uniform(rng, img, -1.0f, 1.0f);
+  std::vector<uint8_t> mask(w * h);
+  for (auto& m : mask) m = fdtest::uniform01(rng) < 0.2f ? 1 : 0;
+
+  const int masked = flat(150, 20, w), negative = flat(60, 170, w);
+  img.at(masked) = 9.0f;
+  mask.at(masked) = 1;
+  img.at(negative) = -4.0f;
+  mask.at(negative) = 0;
+  // The mask is static over a run: fix the footprint pixels' entries now, their values come later.
+  const int masked2 = flat(100, 90, w), negative2 = flat(130, 120, w);
+  mask.at(masked2) = 1;
+  mask.at(negative2) = 0;
+
+  const auto sr = res().make_ctx();
+  fdtest::device_buffer<float> d(sr, img);
+  fdtest::device_buffer<bool> d_mask(sr, std::vector<bool>(mask.begin(), mask.end()));
+
+  matrix::tiled_argmax_ctx ws{sr, core::dims<2>(h, w), 32};
+  const core::span2d<float> view(d.get(), h, w);
+
+  const auto p0 = ws.run(view, {.mask = d_mask.get(), .absolute = true});
+  sr.wait();
+  EXPECT_EQ(p0.index, negative);
+  EXPECT_FLOAT_EQ(p0.value, fdtest::masked_max(img, mask, /*use_abs=*/true));
+  EXPECT_FLOAT_EQ(p0.signed_value, -4.0f);
+
+  // Inside a footprint: a bigger masked pixel and a bigger negative one. Only the latter may win.
+  const int pr = 120, pc = 110, foot = 64;  // footprint [88,152) x [78,142)
+  img.at(masked2) = 20.0f;
+  img.at(negative2) = -6.0f;
+  d.from_host(img);
+
+  const auto p1 = ws.run_incremental(view, pr, pc, foot, foot);
+  sr.wait();
+  EXPECT_EQ(p1.index, negative2);
+  EXPECT_FLOAT_EQ(p1.value, 6.0f);
+  EXPECT_FLOAT_EQ(p1.signed_value, -6.0f);
 }

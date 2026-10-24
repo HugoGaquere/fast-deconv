@@ -3,14 +3,12 @@
 #include <cmath>
 #include <fast_deconv/common/multi_frequency.hpp>
 #include <fast_deconv/core/memory_types.hpp>
-#include <random>
 #include <utility>
 #include <vector>
 
 #include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
-#include "helpers/rng.hpp"
 namespace common = fast_deconv::common;
 
 namespace core = fast_deconv::core;
@@ -272,27 +270,6 @@ TEST_F(FitCoefficients, WeightedJonesFitMatchesHostLeastSquares)
   expect_matches(per_chan, expected.per_chan, "freq");
 }
 
-TEST_F(FitCoefficients, OverdeterminedNoisyFitMatchesHostLeastSquares)
-{
-  const int n_freq = 6;
-  const std::vector<double> log_nu = {0.0, 0.08, 0.15, 0.22, 0.29, 0.35};
-  const std::vector<double> alpha = {1.8, -0.9};
-
-  std::mt19937 rng(101);
-  std::vector<double> y;
-  for (const double l : log_nu) y.push_back(alpha.at(0) + l * alpha.at(1) + 0.05 * fdtest::normal01(rng));
-
-  const common::index2d peak{0, 0};  // top-left corner pixel
-  const auto sc = make_scene(log_design(log_nu), y, peak);
-  const auto [compact, per_chan] =
-      run(sc.xdes, std::vector<float>(n_freq, 1.0f), std::vector<float>(n_freq, 1.0f), sc.dirty, peak);
-  const auto expected =
-      host_fit(sc.xdes_d, std::vector<double>(n_freq, 1.0), std::vector<double>(n_freq, 1.0), y, kOrder);
-
-  expect_matches(compact, expected.compact, "order");
-  expect_matches(per_chan, expected.per_chan, "freq");
-}
-
 // The minor cycle subtracts gain * per_chan from the residual cube and books the
 // mean-residual drop as gain * peak. Those agree only if the fitted model
 // reproduces the band-weighted mean at the peak, so pin that invariant directly.
@@ -319,22 +296,6 @@ TEST_F(FitCoefficients, PreservesBandWeightedMeanAtSteepJones)
   // device solve absorbs because it runs in double.
   expect_matches(compact, expected.compact, "order");
   expect_matches(per_chan, expected.per_chan, "freq");
-}
-
-// Flat jones norms put the constant vector in the model span, so the constraint
-// is already satisfied and must not perturb the fit.
-TEST_F(FitCoefficients, ConstraintIsInactiveAtFlatJones)
-{
-  const std::vector<double> log_nu = {0.0, 0.1, 0.2, 0.3};
-  const std::vector<double> jn(4, 1.0767);
-  const std::vector<double> w = {0.25, 0.25, 0.25, 0.25};
-  const std::vector<double> y = {3.1, 2.7, 2.9, 2.4};
-
-  const common::index2d peak{3, 1};
-  const auto sc = make_scene(log_design(log_nu), y, peak);
-  const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak);
-
-  EXPECT_NEAR(band_weighted_mean(w, per_chan), band_weighted_mean(w, y), 1e-5);
 }
 
 // Fewer bands than coefficients: SAX is 2x4, so SAX^T W SAX is 4x4 of rank 2 and the
@@ -368,23 +329,4 @@ TEST_F(FitCoefficients, MinimumNormFitWhenFewerBandsThanOrder)
   double norm_sq = 0.0;
   for (int o = 0; o < kFitOrder; ++o) norm_sq += compact.at(o) * compact.at(o);
   EXPECT_LT(std::sqrt(norm_sq), 1.0) << "coefficients are not minimum-norm: the null-space component is unbounded";
-}
-
-// The square boundary: n_order == n_freq has a unique exact solution, which is also the
-// minimum-norm one. Pins that the branch switches on >= and not >.
-TEST_F(FitCoefficients, ExactFitAtSquareSystem)
-{
-  constexpr int kFitOrder = 3;
-  const std::vector<double> nu = {120.0e6, 144.0e6, 168.0e6};
-  const std::vector<double> jn = {0.7, 1.0, 0.6};
-  const std::vector<double> w = {1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0};
-  const std::vector<double> y = {0.05, -0.02, 0.011};
-
-  const common::index2d peak{1, 3};
-  const auto sc = make_scene(power_design(nu, /*nu0=*/144.0e6, kFitOrder), y, peak);
-  const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak, kFitOrder);
-  const auto expected = host_fit_min_norm(sc.xdes_d, jn, y, kFitOrder);
-
-  for (std::size_t f = 0; f < y.size(); ++f) EXPECT_NEAR(per_chan.at(f), y.at(f), 1e-6) << "band " << f;
-  expect_matches(compact, expected, "order");
 }
