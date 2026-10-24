@@ -44,14 +44,12 @@ TEST(NextFastSize, ReturnsSmallest7SmoothAtLeastN)
   }
 }
 
-class FftLayout : public fdtest::BackendTest {};
+class GaussianConvolution : public fdtest::BackendTest {};
 
-// convolve, from a spectrum and in one shot, is the linear convolution (zero outside the image) with the
-// band-limited Gaussian, in every plane of a batch, on odd and even, non-square sizes. Both backends are free of
-// wrap-around: the FFT path pads the plane by the largest reach over the sigmas, the host each line by the reach
-// of the sigma at hand. Sigma 0 has delta taps, so it checks the pad / normalize / crop round trip is the
-// identity; every sigma reuses one spectrum, so convolve must leave it intact.
-TEST_F(FftLayout, ConvolveSpectrumMatchesLinearConvolutionOracle)
+// convolve, from a precomputed spectrum and in one shot, is the linear convolution (zero outside the image,
+// no wrap-around) with the band-limited Gaussian, in every plane of a batch, on odd, even and non-square
+// sizes. Sigma 0 must give the input back. Every sigma reuses one spectrum, so convolve must leave it intact.
+TEST_F(GaussianConvolution, MatchesLinearConvolutionOracle)
 {
   const auto sr = res().make_ctx();
   const std::vector<float> sigmas{0.0f, 1.5f, 2.5f, 4.0f};
@@ -85,11 +83,10 @@ TEST_F(FftLayout, ConvolveSpectrumMatchesLinearConvolutionOracle)
   }
 }
 
-// psf_convolution entry against its definition, computed independently in double: conv is each channel
-// convolved once, conv2 the channel-weighted mean of each channel convolved twice. The build takes the
-// weighted mean first and convolves once with sigma * sqrt(2); this checks that shortcut. psf_convolution
-// is wrap-free for its sigmas, so the test holds on both backends.
-TEST_F(FftLayout, PsfConvolutionMatchesPerChannelOracle)
+// A psf_convolution entry against its definition: conv is each channel convolved once with the scale's
+// Gaussian, conv2 the channel-weighted mean of each channel convolved twice. The cache takes the weighted
+// mean first and convolves once with sigma * sqrt(2); this checks that shortcut.
+TEST_F(GaussianConvolution, PsfConvolutionMatchesItsDefinition)
 {
   const auto sr = res().make_ctx();
   constexpr int n_freq = 3, rows = 24, cols = 30;
