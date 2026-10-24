@@ -16,7 +16,13 @@ add_executable(fast_deconv_unit_tests
   test_clean.cpp
   test_gain.cpp
   test_multi_frequency.cpp
+  test_core_parallel.cpp
 )
+
+# Includes fd_backend/core/{reduce,for_each}.hpp directly, so under CUDA nvcc must compile it.
+if(FAST_DECONV_WITH_CUDA)
+  set_source_files_properties(test_core_parallel.cpp PROPERTIES LANGUAGE CUDA)
+endif()
 
 target_link_libraries(fast_deconv_unit_tests PRIVATE
   fast_deconv
