@@ -4,8 +4,6 @@
 
 #include <cstdint>
 
-#include "cublas_v2.h"
-#include "fast_deconv/util/cublas_macros.hpp"
 #include "fast_deconv/util/cuda_macros.hpp"
 
 namespace fast_deconv::core {
@@ -64,7 +62,7 @@ class exec_resources_impl {
 };
 
 /**
- * @brief The cuda exec_ctx: a stream, its cuBLAS handle, and stream-ordered allocation from the owning pool.
+ * @brief The cuda exec_ctx: a stream, and stream-ordered allocation from the owning pool.
  *
  * Members are public because the kernel launches in the .cu files need the stream.
  */
@@ -77,8 +75,6 @@ class exec_ctx_impl {
   {
     CHECK_CUDA(cudaSetDevice(device));
     CHECK_CUDA(cudaStreamCreateWithFlags(&cuda_stream, cudaStreamDefault));
-    CHECK_CUBLAS(cublasCreate(&cublas_handle));
-    CHECK_CUBLAS(cublasSetStream(cublas_handle, cuda_stream));
   }
 
   exec_ctx_impl(const exec_ctx_impl&) = delete;
@@ -89,7 +85,6 @@ class exec_ctx_impl {
   ~exec_ctx_impl()
   {
     CHECK_CUDA(cudaStreamSynchronize(cuda_stream));
-    CHECK_CUBLAS(cublasDestroy(cublas_handle));
     CHECK_CUDA(cudaStreamDestroy(cuda_stream));
   }
 
@@ -119,7 +114,6 @@ class exec_ctx_impl {
   void wait() const { CHECK_CUDA(cudaStreamSynchronize(cuda_stream)); }
 
   cudaStream_t cuda_stream{};
-  cublasHandle_t cublas_handle{};
   std::uint8_t device{};
   cudaMemPool_t memory_pool{};
 };
