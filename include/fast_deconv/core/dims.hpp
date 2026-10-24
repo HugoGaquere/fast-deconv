@@ -14,7 +14,7 @@ using dims = emu::dextents<std::int64_t, N>;
 /**
  * @brief The one narrowing conversion.
  *
- * Counts are int64, and a third-party API (cuBLAS, cuFFT, a launch config, a size_t shape) that takes less
+ * Counts are int64, and a third-party API (cuFFT, a launch config, a size_t shape) that takes less
  * gets its value through here, never through a bare cast.
  *
  * @param[in] v  Value to convert.

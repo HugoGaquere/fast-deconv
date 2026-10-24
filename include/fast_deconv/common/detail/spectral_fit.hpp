@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <fast_deconv/core/macro.hpp>
 
-// The spectral fit, written once for the host backend and the CUDA kernel (one thread, sequential).
+// The spectral fit run by fit_coefficients() on either backend: one index, sequential.
 namespace fast_deconv::multi_frequency::detail {
 
 // Largest spectral order the solve keeps in local storage. The order is the

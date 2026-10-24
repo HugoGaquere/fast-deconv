@@ -16,9 +16,7 @@ void binary_dilation(const core::exec_ctx& ctx, core::span2d<const bool> data, c
   const std::int64_t half_row = nrow_se / 2;
   const std::int64_t half_col = ncol_se / 2;
 
-  for (std::int64_t r = 0; r < nrow; r++) {
-    for (std::int64_t c = 0; c < ncol; c++) out(r, c) = false;
-  }
+  ctx.zero(out);
 
   for (std::int64_t pr = 0; pr < nrow; pr++) {
     for (std::int64_t pc = 0; pc < ncol; pc++) {

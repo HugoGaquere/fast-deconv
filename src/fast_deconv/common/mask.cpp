@@ -2,15 +2,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <emu/submdspan.hpp>
-#include <fast_deconv/common/detail/mask_steps.hpp>
 #include <fast_deconv/common/mask.hpp>
+#include <fast_deconv/core/macro.hpp>
 #include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/linalg/gaussian_convolution.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
 #include <fast_deconv/matrix/argmax.hpp>
 #include <fast_deconv/morphology/dilation.hpp>
 #include <fast_deconv/morphology/roi.hpp>
+#include <fd_backend/core/for_each.hpp>
+#include <iterator>
 #include <numbers>
+#include <vector>
 
 namespace fast_deconv::common {
 
@@ -34,7 +37,19 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
   const std::int64_t psf_ncol = central_facet_psfs.extent(2);
 
   // ---- 1. Zero the output and stamp peaks ----
-  detail::stamp_peaks(ctx, coords, scales, mask_per_scale);
+  // Flat offsets on the host, staged: the scatter then needs neither the coordinates nor the strides.
+  ctx.zero(mask_per_scale);
+  std::vector<std::int64_t> offsets;
+  offsets.reserve(coords.size());
+  for (std::size_t i = 0; i < coords.size(); i++)
+    offsets.push_back(mask_per_scale.mapping()(scales.at(i), coords.at(i).row, coords.at(i).col));
+  if (!offsets.empty()) {
+    const std::int64_t n_coords = std::ssize(offsets);
+    const auto d_offsets = ctx.stage(core::host_span1d<const std::int64_t>(offsets.data(), n_coords));
+    const std::int64_t* off = d_offsets.data_handle();
+    bool* stamped = mask_per_scale.data_handle();
+    core::for_each_index(ctx, n_coords, [=] FD_HOST_DEVICE(std::int64_t i) { stamped[off[i]] = true; });
+  }
 
   // ---- 2. Weighted mean of the channels' PSFs, transformed once and reused by every scale ----
   // Convolution is linear: sum_f w_f (G * psf_f) = G * (sum_f w_f psf_f), so one plane instead of n_freq.
@@ -57,8 +72,10 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
                   core::span3d<float>(conv2_psf.data_handle(), 1, psf_nrow, psf_ncol));
 
     // 3b. FWHM threshold: bool out = (conv2_psf > max / 2)
-    const float psf_max = matrix::find_peak(ctx, conv2_psf, {}).value;
-    detail::threshold_above(ctx, conv2_psf, psf_max * 0.5f, fwhm_mask);
+    const float half_max = matrix::find_peak(ctx, conv2_psf, {}).value * 0.5f;
+    const float* psf = conv2_psf.data_handle();
+    bool* fwhm = fwhm_mask.data_handle();
+    core::for_each_index(ctx, psf_nrow * psf_ncol, [=] FD_HOST_DEVICE(std::int64_t k) { fwhm[k] = psf[k] > half_max; });
 
     // 3c. Bounding box of FWHM, used as the structuring element's extent
     const roi structure_roi = morphology::compute_mask_roi(ctx, fwhm_mask);
@@ -68,7 +85,11 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
     morphology::binary_dilation(ctx, current_mask, fwhm_mask, structure_roi, dilation_out);
 
     // 3e. Mask everything outside the dilated neighborhoods, plus the external mask
-    detail::mask_outside(ctx, dilation_out, external_mask, current_mask);
+    const bool* dilated = dilation_out.data_handle();
+    const bool* external = external_mask.data_handle();
+    bool* out = current_mask.data_handle();
+    core::for_each_index(ctx, dirty_nrow * dirty_ncol,
+                         [=] FD_HOST_DEVICE(std::int64_t k) { out[k] = !dilated[k] || external[k]; });
   }
 }
 

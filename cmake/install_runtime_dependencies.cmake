@@ -9,7 +9,7 @@ file(GET_RUNTIME_DEPENDENCIES
 )
 
 foreach(_fd_library IN LISTS _fd_runtime_libraries)
-  # The resolved path uses the loader's name, e.g. libcublas.so.13. Copy the
+  # The resolved path uses the loader's name, e.g. libcufft.so.12. Copy the
   # actual file under that name without installing its entire symlink chain:
   # wheel archives would otherwise contain multiple copies of the same library.
   get_filename_component(_fd_library_name "${_fd_library}" NAME)

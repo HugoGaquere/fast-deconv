@@ -4,8 +4,6 @@
 
 #include <cstdint>
 
-#include "cublas_v2.h"
-#include "fast_deconv/util/cublas_macros.hpp"
 #include "fast_deconv/util/cuda_macros.hpp"
 
 namespace fast_deconv::core {
@@ -24,7 +22,7 @@ class exec_resources_impl {
   exec_resources_impl(exec_resources_impl&&) = delete;
   exec_resources_impl& operator=(exec_resources_impl&&) = delete;
 
-  ~exec_resources_impl() { CHECK_CUDA(cudaMemPoolDestroy(memory_pool)); }
+  ~exec_resources_impl() { REPORT_CUDA(cudaMemPoolDestroy(memory_pool)); }
 
   /// Bytes currently allocated by user code (live working set).
   std::uint64_t pool_used_bytes() const
@@ -64,7 +62,7 @@ class exec_resources_impl {
 };
 
 /**
- * @brief The cuda exec_ctx: a stream, its cuBLAS handle, and stream-ordered allocation from the owning pool.
+ * @brief The cuda exec_ctx: a stream, and stream-ordered allocation from the owning pool.
  *
  * Members are public because the kernel launches in the .cu files need the stream.
  */
@@ -77,8 +75,6 @@ class exec_ctx_impl {
   {
     CHECK_CUDA(cudaSetDevice(device));
     CHECK_CUDA(cudaStreamCreateWithFlags(&cuda_stream, cudaStreamDefault));
-    CHECK_CUBLAS(cublasCreate(&cublas_handle));
-    CHECK_CUBLAS(cublasSetStream(cublas_handle, cuda_stream));
   }
 
   exec_ctx_impl(const exec_ctx_impl&) = delete;
@@ -88,9 +84,8 @@ class exec_ctx_impl {
 
   ~exec_ctx_impl()
   {
-    CHECK_CUDA(cudaStreamSynchronize(cuda_stream));
-    CHECK_CUBLAS(cublasDestroy(cublas_handle));
-    CHECK_CUDA(cudaStreamDestroy(cuda_stream));
+    REPORT_CUDA(cudaStreamSynchronize(cuda_stream));
+    REPORT_CUDA(cudaStreamDestroy(cuda_stream));
   }
 
   void* alloc_bytes(std::uint64_t num_bytes) const
@@ -102,7 +97,7 @@ class exec_ctx_impl {
 
   void free_bytes(void* ptr) const noexcept
   {
-    if (ptr != nullptr) CHECK_CUDA(cudaFreeAsync(ptr, cuda_stream));
+    if (ptr != nullptr) REPORT_CUDA(cudaFreeAsync(ptr, cuda_stream));
   }
 
   // cudaMemcpyDefault: unified addressing infers the direction from the pointers.
@@ -111,10 +106,14 @@ class exec_ctx_impl {
     CHECK_CUDA(cudaMemcpyAsync(dst, src, num_bytes, cudaMemcpyDefault, cuda_stream));
   }
 
+  void zero_bytes(void* dst, std::uint64_t num_bytes) const
+  {
+    CHECK_CUDA(cudaMemsetAsync(dst, 0, num_bytes, cuda_stream));
+  }
+
   void wait() const { CHECK_CUDA(cudaStreamSynchronize(cuda_stream)); }
 
   cudaStream_t cuda_stream{};
-  cublasHandle_t cublas_handle{};
   std::uint8_t device{};
   cudaMemPool_t memory_pool{};
 };
