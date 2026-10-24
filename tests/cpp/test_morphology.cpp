@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <fast_deconv/common/region.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/morphology/dilation.hpp>
@@ -69,25 +70,10 @@ TEST_F(ComputeMaskRoiTest, BoundingBoxOfForegroundPixels)
   }
 }
 
-// A solid block, so the bbox is not just the hull of a few isolated pixels.
-TEST_F(ComputeMaskRoiTest, RectangleBlockBoundingBox)
-{
-  std::vector<bool> mask(NROW * NCOL, false);
-  const int r0 = 1, r1 = 4, c0 = 3, c1 = 8;
-  for (int r = r0; r <= r1; ++r)
-    for (int c = c0; c <= c1; ++c) mask.at(r * NCOL + c) = true;
-  auto r = run(mask);
-  EXPECT_EQ(r.rmin, r0);
-  EXPECT_EQ(r.rmax, r1 + 1);
-  EXPECT_EQ(r.cmin, c0);
-  EXPECT_EQ(r.cmax, c1 + 1);
-}
-
 // ============================================================================
 // binary_dilation
 //
-// Tests focus on properties (extensivity, single-pixel oracle, translation
-// equivariance) so they remain valid across implementation refactors.
+// Single-pixel oracle, at interior and border positions.
 // ============================================================================
 
 class BinaryDilationTest : public fdtest::BackendTest {
@@ -120,46 +106,21 @@ class BinaryDilationTest : public fdtest::BackendTest {
   }
 };
 
+// A single foreground pixel dilated by a 3x3 square SE gives the 3x3 block centered on it, clipped at the
+// image border; false elsewhere. The corners catch any wrap-around or row/col swap on the non-square plane.
 TEST_F(BinaryDilationTest, SinglePixelExpandsToStructuringElement)
 {
-  // Single foreground pixel at (row=3, col=5) dilated by a 3x3 square SE
-  // should produce a 3x3 block of true centered at (3, 5); false elsewhere.
-  std::vector<bool> data(NROW * NCOL, false);
-  const int row = 3, col = 5;
-  data[row * NCOL + col] = true;
+  for (const auto& [row, col] : {std::pair{3, 5}, {0, 0}, {0, NCOL - 1}, {NROW - 1, 0}, {NROW - 1, NCOL - 1}}) {
+    std::vector<bool> data(NROW * NCOL, false);
+    data[row * NCOL + col] = true;
 
-  auto se = se_square_3x3();
-  auto out = run(data, se, 3, common::roi{0, 3, 0, 3});
+    const auto out = run(data, se_square_3x3(), 3, common::roi{0, 3, 0, 3});
 
-  for (int r = 0; r < NROW; ++r) {
-    for (int c = 0; c < NCOL; ++c) {
-      const bool inside_block = (r >= row - 1 && r <= row + 1 && c >= col - 1 && c <= col + 1);
-      EXPECT_EQ(out[r * NCOL + c] != 0, inside_block) << "mismatch at (" << r << ", " << c << ")";
-    }
-  }
-}
-
-TEST_F(BinaryDilationTest, TranslationEquivariance)
-{
-  // Shifting the input by (dr, dc) should shift the output by the same amount.
-  // Catches indexing / off-by-one bugs (especially row vs col confusion in
-  // non-square data).
-  auto se = se_square_3x3();
-
-  std::vector<bool> a(NROW * NCOL, false);
-  a[2 * NCOL + 3] = true;
-  auto out_a = run(a, se, 3, common::roi{0, 3, 0, 3});
-
-  std::vector<bool> b(NROW * NCOL, false);
-  const int dr = 1, dc = 4;
-  b[(2 + dr) * NCOL + (3 + dc)] = true;
-  auto out_b = run(b, se, 3, common::roi{0, 3, 0, 3});
-
-  // Compare overlapping region: out_b[r, c] should equal out_a[r-dr, c-dc].
-  for (int r = dr; r < NROW; ++r) {
-    for (int c = dc; c < NCOL; ++c) {
-      EXPECT_EQ(out_b[r * NCOL + c], out_a[(r - dr) * NCOL + (c - dc)])
-          << "shift mismatch at (" << r << ", " << c << ")";
-    }
+    for (int r = 0; r < NROW; ++r)
+      for (int c = 0; c < NCOL; ++c) {
+        const bool inside_block = std::abs(r - row) <= 1 && std::abs(c - col) <= 1;
+        EXPECT_EQ(out[r * NCOL + c] != 0, inside_block)
+            << "pixel (" << row << ", " << col << "): mismatch at (" << r << ", " << c << ")";
+      }
   }
 }

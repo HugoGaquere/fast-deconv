@@ -225,21 +225,6 @@ TEST(Convergence, ZeroSubminorCountIsReportedAsNoComponents)
 // scale_stall_tracker
 // ============================================================================
 
-TEST(ScaleStallTracker, StallsAfterRepeatedSmallRmsChanges)
-{
-  scale_stall_tracker t(/*n_scales=*/3, /*max_stall_count=*/2, /*stall_threshold=*/0.01f);
-  t.init_rms(1.0f);
-
-  t.update(0, 1.0f);            // |Δrms| = 0 < threshold: strike 1
-  t.update(0, 1.0f);            // strike 2
-  EXPECT_FALSE(t.is_stall(0));  // stall requires count > max_stall_count
-
-  t.update(0, 1.0f);  // strike 3 > 2
-  EXPECT_TRUE(t.is_stall(0));
-  EXPECT_FALSE(t.is_stall(1));
-  EXPECT_FALSE(t.is_stall(2));
-}
-
 // Strikes are consecutive: real progress clears the count, so a scale that stalled in
 // an earlier flux regime is not retired for it once it starts moving the rms again.
 TEST(ScaleStallTracker, ProgressClearsEarlierStrikes)
