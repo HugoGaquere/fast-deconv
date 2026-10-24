@@ -166,6 +166,7 @@ file(GLOB_RECURSE FAST_DECONV_BACKEND_SOURCES CONFIGURE_DEPENDS
 # Written once against fd_backend/core/reduce.hpp; under CUDA, nvcc compiles them to instantiate the device side.
 set(FAST_DECONV_GENERIC_SOURCES
     src/fast_deconv/matrix/argmax.cpp
+    src/fast_deconv/morphology/roi.cpp
 )
 if(FAST_DECONV_WITH_CUDA)
   set_source_files_properties(${FAST_DECONV_GENERIC_SOURCES} PROPERTIES LANGUAGE CUDA)
