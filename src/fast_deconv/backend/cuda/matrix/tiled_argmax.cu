@@ -2,10 +2,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cub/block/block_reduce.cuh>
-#include <cub/cub.cuh>
-#include <cub/device/device_reduce.cuh>
 #include <fast_deconv/matrix/tiled_argmax.hpp>
-#include <fast_deconv/util/cuda_macros.hpp>
 #include <fd_backend/core/launch.cuh>
 
 namespace {
@@ -67,16 +64,8 @@ __global__ void tiled_argmax_reduce(const float* data, matrix::peak_criterion cr
 namespace fast_deconv::matrix {
 
 tiled_argmax_impl::tiled_argmax_impl(const core::exec_ctx& ctx, const tile_grid& grid)
-    : ctx_(ctx), grid_(grid), n_tiles_(grid.n_tiles_x * grid.n_tiles_y)
+    : ctx_(ctx), grid_(grid), d_tiles_(ctx.alloc_ptr<peak>(grid.n_tiles_x * grid.n_tiles_y))
 {
-  d_tiles_ = ctx_.alloc_ptr<peak>(n_tiles_);
-  d_result_ = ctx_.alloc_ptr<peak>(1);
-
-  // Size the CUB final-combine scratch once; the query writes final_temp_bytes_
-  // without touching d_tiles_/d_result_.
-  CHECK_CUDA(cub::DeviceReduce::Reduce(nullptr, final_temp_bytes_, d_tiles_.get(), d_result_.get(), n_tiles_,
-                                       peak_max{}, kPeakIdentity, ctx_.cuda_stream));
-  d_final_temp_ = ctx_.alloc_ptr<std::byte>(core::narrow<std::int64_t>(std::max<std::size_t>(final_temp_bytes_, 1)));
 }
 
 void tiled_argmax_impl::reduce_tiles(core::span2d<const float> data, peak_criterion criterion, tile_range range)
@@ -88,20 +77,6 @@ void tiled_argmax_impl::reduce_tiles(core::span2d<const float> data, peak_criter
   core::launch(ctx_, cfg, kernel::tiled_argmax_reduce, data.data_handle(), criterion, d_tiles_.get(),
                grid_.extents.extent(1), grid_.extents.extent(0), grid_.tile_size, grid_.tile_size, grid_.n_tiles_x,
                range.tx0, range.ty0);
-}
-
-// A device-wide CUB reduce rather than one block: small tiles give ~10^5 slots, which one block would serialize.
-// The op is associative and commutative with a deterministic tie-break, so CUB's block order is still exact.
-peak tiled_argmax_impl::combine()
-{
-  CHECK_CUDA(cub::DeviceReduce::Reduce(d_final_temp_.get(), final_temp_bytes_, d_tiles_.get(), d_result_.get(),
-                                       n_tiles_, peak_max{}, kPeakIdentity, ctx_.cuda_stream));
-
-  peak h_result{};
-  CHECK_CUDA(cudaMemcpyAsync(&h_result, d_result_.get(), sizeof(peak), cudaMemcpyDeviceToHost, ctx_.cuda_stream));
-  ctx_.wait();
-
-  return h_result;
 }
 
 }  // namespace fast_deconv::matrix
