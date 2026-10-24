@@ -1,7 +1,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <fast_deconv/common/detail/mask_steps.hpp>
-#include <fast_deconv/util/cuda_macros.hpp>
 #include <fd_backend/core/launch.cuh>
 #include <iterator>
 #include <vector>
@@ -39,7 +38,7 @@ namespace fast_deconv::common::detail {
 void stamp_peaks(const core::exec_ctx& ctx, const std::vector<index2d>& coords, const std::vector<int>& scales,
                  core::span3d<bool> mask_per_scale)
 {
-  CHECK_CUDA(cudaMemsetAsync(mask_per_scale.data_handle(), 0, mask_per_scale.size() * sizeof(bool), ctx.cuda_stream));
+  ctx.zero(mask_per_scale);
   if (coords.empty()) return;
 
   // Flat offsets on the host: the kernel then needs neither the coordinates nor the strides.

@@ -92,6 +92,7 @@ class exec_ctx : public exec_ctx_impl {
   void copy(const Dst& dst, const Src& src) const
   {
     if (dst.size() != src.size()) throw std::invalid_argument("copy: dst and src sizes differ");
+    assert(dst.is_exhaustive() && src.is_exhaustive() && "copy: strided views are not supported");
     copy(dst.data_handle(), src.data_handle(), narrow<std::int64_t>(src.size()));
   }
 
@@ -100,6 +101,25 @@ class exec_ctx : public exec_ctx_impl {
   void copy(T* dst, const T* src, std::int64_t n) const
   {
     this->copy_bytes(dst, src, narrow<std::size_t>(n) * sizeof(T));
+  }
+
+  /**
+   * @brief Sets every element of @p dst, backend memory, to all-zero bytes.
+   *
+   * Async, like copy().
+   */
+  template <typename Dst>
+  void zero(const Dst& dst) const
+  {
+    assert(dst.is_exhaustive() && "zero: strided views are not supported");
+    zero(dst.data_handle(), narrow<std::int64_t>(dst.size()));
+  }
+
+  /// Raw-pointer zero() of @p n elements.
+  template <typename T>
+  void zero(T* dst, std::int64_t n) const
+  {
+    this->zero_bytes(dst, narrow<std::size_t>(n) * sizeof(T));
   }
 
   /**

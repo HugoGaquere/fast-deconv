@@ -111,6 +111,11 @@ class exec_ctx_impl {
     CHECK_CUDA(cudaMemcpyAsync(dst, src, num_bytes, cudaMemcpyDefault, cuda_stream));
   }
 
+  void zero_bytes(void* dst, std::uint64_t num_bytes) const
+  {
+    CHECK_CUDA(cudaMemsetAsync(dst, 0, num_bytes, cuda_stream));
+  }
+
   void wait() const { CHECK_CUDA(cudaStreamSynchronize(cuda_stream)); }
 
   cudaStream_t cuda_stream{};
