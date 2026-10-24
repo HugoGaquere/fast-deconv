@@ -1,15 +1,16 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <fast_deconv/common/region.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/morphology/dilation.hpp>
 #include <fast_deconv/morphology/roi.hpp>
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include "helpers/backend_test.hpp"
-#include "helpers/device_buffers.hpp"
 
 namespace common = fast_deconv::common;
 namespace core = fast_deconv::core;
@@ -19,6 +20,7 @@ namespace fdtest = fast_deconv::test;
 // Non-square planes, so a row/col swap breaks every case.
 constexpr int kNrow = 6;
 constexpr int kNcol = 10;
+constexpr int kNpix = kNrow * kNcol;
 
 class Morphology : public fdtest::BackendTest {};
 
@@ -38,11 +40,11 @@ TEST_F(Morphology, MaskRoiIsTheBoundingBoxOfTruePixels)
 
   const auto sr = res().make_ctx();
   for (const auto& cs : cases) {
-    std::vector<bool> mask(kNrow * kNcol, false);
-    for (const auto& [r, c] : cs.pixels) mask.at(r * kNcol + c) = true;
-    fdtest::device_buffer<bool> d_mask(sr, mask);
+    const auto mask = std::make_unique<bool[]>(kNpix);
+    for (const auto& [r, c] : cs.pixels) mask[r * kNcol + c] = true;
+    const auto d_mask = sr.stage(core::host_span2d<const bool>(mask.get(), kNrow, kNcol));
 
-    const auto got = morpho::compute_mask_roi(sr, core::span2d<const bool>(d_mask.get(), kNrow, kNcol));
+    const auto got = morpho::compute_mask_roi(sr, d_mask);
 
     EXPECT_EQ(got.rmin, cs.expected.rmin) << cs.name;
     EXPECT_EQ(got.rmax, cs.expected.rmax) << cs.name;
@@ -55,24 +57,27 @@ TEST_F(Morphology, MaskRoiIsTheBoundingBoxOfTruePixels)
 // other pixel is written false: build_auto_mask reuses the output buffer across scales, so it starts dirty.
 TEST_F(Morphology, DilationOfSinglePixelIsTheClippedStructuringElement)
 {
+  const auto se = std::make_unique<bool[]>(3 * 3);
+  std::fill_n(se.get(), 3 * 3, true);
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<bool> d_se(sr, std::vector<bool>(3 * 3, true));
+  const auto d_se = sr.stage(core::host_span2d<const bool>(se.get(), 3, 3));
 
   for (const auto& [row, col] : {std::pair{3, 5}, {0, 0}, {0, kNcol - 1}, {kNrow - 1, 0}, {kNrow - 1, kNcol - 1}}) {
-    std::vector<bool> data(kNrow * kNcol, false);
-    data.at(row * kNcol + col) = true;
-    fdtest::device_buffer<bool> d_data(sr, data), d_out(sr, data.size());
-    d_out.fill_bytes(0xff);
+    const auto data = std::make_unique<bool[]>(kNpix);
+    data[row * kNcol + col] = true;
+    const auto out = std::make_unique<bool[]>(kNpix);
+    std::fill_n(out.get(), kNpix, true);
+    const auto d_data = sr.stage(core::host_span2d<const bool>(data.get(), kNrow, kNcol));
+    auto d_out = sr.stage(core::host_span2d<bool>(out.get(), kNrow, kNcol));
 
-    morpho::binary_dilation(sr, core::span2d<const bool>(d_data.get(), kNrow, kNcol),
-                            core::span2d<const bool>(d_se.get(), 3, 3), common::roi{0, 3, 0, 3},
-                            core::span2d<bool>(d_out.get(), kNrow, kNcol));
+    morpho::binary_dilation(sr, d_data, d_se, common::roi{0, 3, 0, 3}, d_out);
+    sr.unstage(d_out, out.get());
+    sr.wait();
 
-    const auto out = d_out.to_host();
     for (int r = 0; r < kNrow; ++r)
       for (int c = 0; c < kNcol; ++c) {
         const bool in_block = std::abs(r - row) <= 1 && std::abs(c - col) <= 1;
-        EXPECT_EQ(out.at(r * kNcol + c), in_block ? 1 : 0)
+        EXPECT_EQ(out[r * kNcol + c], in_block)
             << "pixel (" << row << ", " << col << "): mismatch at (" << r << ", " << c << ")";
       }
   }
