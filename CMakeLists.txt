@@ -163,6 +163,14 @@ file(GLOB_RECURSE FAST_DECONV_BACKEND_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/fast_deconv/backend/${FAST_DECONV_BACKEND}/*.cpp
 )
 
+# Written once against fd_backend/core/reduce.hpp; under CUDA, nvcc compiles them to instantiate the device side.
+set(FAST_DECONV_GENERIC_SOURCES
+    src/fast_deconv/matrix/argmax.cpp
+)
+if(FAST_DECONV_WITH_CUDA)
+  set_source_files_properties(${FAST_DECONV_GENERIC_SOURCES} PROPERTIES LANGUAGE CUDA)
+endif()
+
 add_library(fast_deconv STATIC
         src/fast_deconv/algorithm/ddmsc_cycles.cpp
         src/fast_deconv/algorithm/ddmsc.cpp
@@ -174,6 +182,7 @@ add_library(fast_deconv STATIC
         src/fast_deconv/common/convergence.cpp
         src/fast_deconv/common/gain.cpp
         src/fast_deconv/common/mask.cpp
+        ${FAST_DECONV_GENERIC_SOURCES}
         ${FAST_DECONV_BACKEND_SOURCES}
 )
 
