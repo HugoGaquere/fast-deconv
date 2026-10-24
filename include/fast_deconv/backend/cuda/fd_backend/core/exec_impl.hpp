@@ -22,7 +22,7 @@ class exec_resources_impl {
   exec_resources_impl(exec_resources_impl&&) = delete;
   exec_resources_impl& operator=(exec_resources_impl&&) = delete;
 
-  ~exec_resources_impl() { CHECK_CUDA(cudaMemPoolDestroy(memory_pool)); }
+  ~exec_resources_impl() { REPORT_CUDA(cudaMemPoolDestroy(memory_pool)); }
 
   /// Bytes currently allocated by user code (live working set).
   std::uint64_t pool_used_bytes() const
@@ -84,8 +84,8 @@ class exec_ctx_impl {
 
   ~exec_ctx_impl()
   {
-    CHECK_CUDA(cudaStreamSynchronize(cuda_stream));
-    CHECK_CUDA(cudaStreamDestroy(cuda_stream));
+    REPORT_CUDA(cudaStreamSynchronize(cuda_stream));
+    REPORT_CUDA(cudaStreamDestroy(cuda_stream));
   }
 
   void* alloc_bytes(std::uint64_t num_bytes) const
@@ -97,7 +97,7 @@ class exec_ctx_impl {
 
   void free_bytes(void* ptr) const noexcept
   {
-    if (ptr != nullptr) CHECK_CUDA(cudaFreeAsync(ptr, cuda_stream));
+    if (ptr != nullptr) REPORT_CUDA(cudaFreeAsync(ptr, cuda_stream));
   }
 
   // cudaMemcpyDefault: unified addressing infers the direction from the pointers.

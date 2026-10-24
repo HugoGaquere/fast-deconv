@@ -68,8 +68,8 @@ gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, st
 
 gaussian_convolution_ctx::~gaussian_convolution_ctx()
 {
-  CUFFT_CALL(cufftDestroy(r2c_));
-  CUFFT_CALL(cufftDestroy(c2r_));
+  REPORT_CUFFT(cufftDestroy(r2c_));
+  REPORT_CUFFT(cufftDestroy(c2r_));
 }
 
 void gaussian_convolution_ctx::forward_(float* input, complex_type* output) const
