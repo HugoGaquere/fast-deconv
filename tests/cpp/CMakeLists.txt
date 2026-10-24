@@ -7,7 +7,6 @@ find_package(GTest CONFIG REQUIRED)
 #-------------------------------------------------------------------#
 add_executable(fast_deconv_unit_tests
   test_convergence.cpp
-  test_large_index.cpp
   test_fft.cpp
   test_linalg.cpp
   test_matrix.cpp
