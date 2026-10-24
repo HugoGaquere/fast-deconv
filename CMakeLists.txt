@@ -171,6 +171,7 @@ set(FAST_DECONV_GENERIC_SOURCES
     src/fast_deconv/matrix/tiled_argmax.cpp
     src/fast_deconv/matrix/stats.cpp
     src/fast_deconv/common/mask.cpp
+    src/fast_deconv/common/clean.cpp
 )
 if(FAST_DECONV_WITH_CUDA)
   set_source_files_properties(${FAST_DECONV_GENERIC_SOURCES} PROPERTIES LANGUAGE CUDA)
