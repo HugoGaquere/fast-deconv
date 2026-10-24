@@ -50,19 +50,6 @@ inline std::vector<float> weighted_sum(const std::vector<float>& data, const std
   return out;
 }
 
-// Max over pixels where mask == 0 (mask nonzero means excluded, matching the
-// library convention). Returns -inf when every pixel is masked.
-inline float masked_max(const std::vector<float>& data, const std::vector<uint8_t>& mask, bool use_abs)
-{
-  float best = -std::numeric_limits<float>::infinity();
-  for (std::size_t i = 0; i < data.size(); ++i) {
-    if (mask.at(i)) continue;
-    const float v = use_abs ? std::fabs(data.at(i)) : data.at(i);
-    if (v > best) best = v;
-  }
-  return best;
-}
-
 // sqrt(max(E[x^2] - E[x]^2, 0)) over ALL pixels — the matrix::stats_ctx::max_and_rms
 // rms definition (its mask applies to the max only).
 inline float std_all(const std::vector<float>& data)

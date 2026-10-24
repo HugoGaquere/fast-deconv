@@ -3,7 +3,6 @@
 #include <fast_deconv/common/clean.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <random>
-#include <utility>
 #include <vector>
 
 #include "helpers/backend_test.hpp"
@@ -19,126 +18,110 @@ using fdtest::flat;
 
 namespace {
 
-// Host oracle mirroring the kernel's centering convention: the PSF's
-// (ph/2, pw/2) pixel lands on the peak; out-of-image parts are clipped.
-// residual[row, col] -= coeff * gain * psf[i, j] with (row, col) = peak + (i - ph/2, j - pw/2).
-std::vector<float> host_subtract(const std::vector<float>& residual, int h, int w, const std::vector<float>& psf,
-                                 int ph, int pw, common::index2d peak, float gain, float coeff = 1.0f)
+constexpr int kH = 16;
+constexpr int kW = 20;  // non-square residual
+
+// residual[peak + (i - ph/2, j - pw/2)] -= gain * psf[i, j], clipped to the image.
+std::vector<float> host_subtract(std::vector<float> residual, const std::vector<float>& psf, int ph, int pw,
+                                 common::index2d peak, float gain)
 {
-  std::vector<float> out = residual;
-  const int row0 = core::narrow<int>(peak.row) - ph / 2;
-  const int col0 = core::narrow<int>(peak.col) - pw / 2;
-  for (int i = 0; i < ph; ++i) {
+  for (int i = 0; i < ph; ++i)
     for (int j = 0; j < pw; ++j) {
-      const int row = row0 + i, col = col0 + j;
-      if (row < 0 || row >= h || col < 0 || col >= w) continue;
-      out.at(flat(row, col, w)) -= coeff * gain * psf.at(flat(i, j, pw));
+      const int row = static_cast<int>(peak.row) - ph / 2 + i, col = static_cast<int>(peak.col) - pw / 2 + j;
+      if (row >= 0 && row < kH && col >= 0 && col < kW)
+        residual.at(flat(row, col, kW)) -= gain * psf.at(flat(i, j, pw));
     }
-  }
-  return out;
+  return residual;
+}
+
+// Plane @p f of a (n_planes, plane) stack.
+std::vector<float> plane_of(const std::vector<float>& v, int f, int plane)
+{
+  return {v.begin() + f * plane, v.begin() + (f + 1) * plane};
 }
 
 }  // namespace
 
-class SubtractComponent : public fdtest::BackendTest {
- protected:
-  static constexpr int kH = 16;
-  static constexpr int kW = 20;  // non-square residual
+class SubtractComponent : public fdtest::BackendTest {};
 
-  std::vector<float> run_2d(const std::vector<float>& residual, const std::vector<float>& psf, int ph, int pw,
-                            common::index2d peak, float gain)
-  {
-    const auto sr = res().make_ctx();
-    fdtest::device_buffer<float> d_res(sr, residual);
-    fdtest::device_buffer<float> d_psf(sr, psf);
-
-    core::span2d<float> res_view(d_res.get(), kH, kW);
-    core::span2d<float> psf_view(d_psf.get(), ph, pw);
-
-    common::subtract_component(sr, res_view, psf_view, peak, gain);
-    sr.wait();
-    return d_res.to_host();
-  }
-
-  void expect_matches_oracle(const std::vector<float>& got, const std::vector<float>& expected)
-  {
-    ASSERT_EQ(got.size(), expected.size());
-    for (std::size_t i = 0; i < got.size(); ++i) ASSERT_FLOAT_EQ(got.at(i), expected.at(i)) << "flat index " << i;
-  }
-};
-
-// Interior, edge and corner peaks against the host oracle: the window is clipped
-// at the border and pixels outside it are never touched.
-TEST_F(SubtractComponent, SubtractsScaledPsfWindowAndClipsAtBorders)
+// The scaled PSF is subtracted around the peak and clipped at the image border; nothing else changes. The
+// 8x8 PSF pins the centering: its pixel (4, 4) lands on the peak, 4 rows/cols before it and 3 after.
+TEST_F(SubtractComponent, SubtractsPsfAroundPeakClippedAtBorders)
 {
   std::mt19937 rng(71);
   std::vector<float> residual(kH * kW);
   fdtest::fill_uniform(rng, residual, -1.0f, 1.0f);
-  std::vector<float> psf(5 * 5);
-  fdtest::fill_uniform(rng, psf, 0.0f, 1.0f);
+  const auto sr = res().make_ctx();
 
-  for (const auto& peak : {common::index2d{8, 10}, {0, 0}, {0, kW - 1}, {kH - 1, 0}, {kH - 1, kW - 1}}) {
-    const auto got = run_2d(residual, psf, 5, 5, peak, 0.5f);
-    expect_matches_oracle(got, host_subtract(residual, kH, kW, psf, 5, 5, peak, 0.5f));
+  for (const int n : {5, 8}) {
+    std::vector<float> psf(n * n);
+    fdtest::fill_uniform(rng, psf, 0.0f, 1.0f);
 
-    // Pixels outside the 5x5 window are bit-identical to the input.
-    for (int row = 0; row < kH; ++row)
-      for (int col = 0; col < kW; ++col)
-        if (std::abs(row - peak.row) > 2 || std::abs(col - peak.col) > 2)
-          ASSERT_EQ(got.at(flat(row, col, kW)), residual.at(flat(row, col, kW)))
-              << "touched (" << row << ", " << col << ")";
+    for (const auto& peak : {common::index2d{8, 10}, {0, 0}, {0, kW - 1}, {kH - 1, 0}, {kH - 1, kW - 1}}) {
+      SCOPED_TRACE(::testing::Message() << n << "x" << n << " psf, peak (" << peak.row << ", " << peak.col << ")");
+      fdtest::device_buffer<float> d_res(sr, residual), d_psf(sr, psf);
+
+      common::subtract_component(sr, core::span2d<float>(d_res.get(), kH, kW),
+                                 core::span2d<const float>(d_psf.get(), n, n), peak, 0.5f);
+
+      const auto got = d_res.to_host();
+      const auto expected = host_subtract(residual, psf, n, n, peak, 0.5f);
+      for (int i = 0; i < kH * kW; ++i) ASSERT_FLOAT_EQ(got.at(i), expected.at(i)) << "index " << i;
+    }
   }
 }
 
-// Even-sized PSF pins the b/2 centering convention: psf pixel (4, 4) of an 8x8
-// PSF lands on the peak, so the window is asymmetric (4 above/left, 3 below/right).
-TEST_F(SubtractComponent, EvenSizedPsfPinsCenterConvention)
+// The clean loop subtracts only where the residual still qualifies: masked pixels, and pixels that its
+// criterion ranks below the threshold, keep their value. With abs, a negative pixel qualifies by magnitude.
+TEST_F(SubtractComponent, SkipsMaskedPixelsAndPixelsBelowThreshold)
 {
-  std::mt19937 rng(79);
-  std::vector<float> residual(kH * kW);
-  fdtest::fill_uniform(rng, residual, -1.0f, 1.0f);
-  std::vector<float> psf(8 * 8);
-  fdtest::fill_uniform(rng, psf, 0.0f, 1.0f);
+  std::vector<float> residual(kH * kW, 1.0f);
+  std::vector<bool> mask(kH * kW, false);
+  const int small = flat(7, 9, kW), negative = flat(8, 11, kW), masked = flat(9, 10, kW);
+  residual.at(small) = 0.2f;
+  residual.at(negative) = -0.8f;
+  mask.at(masked) = true;
 
-  const common::index2d peak{7, 9};
-  const auto got = run_2d(residual, psf, 8, 8, peak, 1.0f);
-  const auto expected = host_subtract(residual, kH, kW, psf, 8, 8, peak, 1.0f);
-  expect_matches_oracle(got, expected);
+  const auto sr = res().make_ctx();
+  fdtest::device_buffer<float> d_res(sr, residual), d_psf(sr, std::vector<float>(5 * 5, 1.0f));
+  fdtest::device_buffer<bool> d_mask(sr, mask);
+
+  common::subtract_component(sr, core::span2d<float>(d_res.get(), kH, kW), core::span2d<const float>(d_psf.get(), 5, 5),
+                             {8, 10}, /*gain=*/0.5f, {.mask = d_mask.get(), .absolute = true}, /*threshold=*/0.5f);
+
+  const auto got = d_res.to_host();
+  EXPECT_FLOAT_EQ(got.at(flat(8, 10, kW)), 0.5f);  // in the window: 1 - 0.5
+  EXPECT_FLOAT_EQ(got.at(small), 0.2f);            // |0.2| < 0.5: untouched
+  EXPECT_FLOAT_EQ(got.at(negative), -1.3f);        // |-0.8| >= 0.5: subtracted
+  EXPECT_FLOAT_EQ(got.at(masked), 1.0f);           // masked: untouched
+  EXPECT_FLOAT_EQ(got.at(flat(0, 0, kW)), 1.0f);   // outside the window
 }
 
-TEST_F(SubtractComponent, MultiFrequencyOverloadUsesPerChannelCoeffs)
+// Every channel subtracts its own PSF scaled by gain * its spectral coefficient.
+TEST_F(SubtractComponent, MultiFrequencyScalesEachChannelByItsCoeff)
 {
-  const int n_freq = 3, ph = 5, pw = 5;
+  const int n_freq = 3, n = 5;
   std::mt19937 rng(83);
-  std::vector<float> residual(n_freq * kH * kW);
+  std::vector<float> residual(n_freq * kH * kW), psf(n_freq * n * n);
   fdtest::fill_uniform(rng, residual, -1.0f, 1.0f);
-  std::vector<float> psf(n_freq * ph * pw);
   fdtest::fill_uniform(rng, psf, 0.0f, 1.0f);
   const std::vector<float> coeffs = {1.0f, -0.5f, 0.25f};
   const float gain = 0.4f;
-
   const auto sr = res().make_ctx();
 
-  for (const auto& peak : {common::index2d{8, 10}, {0, 0}, {kH - 1, kW - 1}}) {
-    fdtest::device_buffer<float> d_res(sr, residual);
-    fdtest::device_buffer<float> d_psf(sr, psf);
-    fdtest::device_buffer<float> d_coeffs(sr, coeffs);
+  for (const auto& peak : {common::index2d{8, 10}, {kH - 1, kW - 1}}) {
+    fdtest::device_buffer<float> d_res(sr, residual), d_psf(sr, psf), d_coeffs(sr, coeffs);
 
-    core::span3d<float> res_view(d_res.get(), n_freq, kH, kW);
-    core::span3d<float> psf_view(d_psf.get(), n_freq, ph, pw);
-    core::span1d<float> coeffs_view(d_coeffs.get(), n_freq);
-
-    common::subtract_component(sr, res_view, psf_view, coeffs_view, peak, gain);
-    sr.wait();
+    common::subtract_component(sr, core::span3d<float>(d_res.get(), n_freq, kH, kW),
+                               core::span3d<const float>(d_psf.get(), n_freq, n, n),
+                               core::span1d<const float>(d_coeffs.get(), n_freq), peak, gain);
 
     const auto got = d_res.to_host();
     for (int f = 0; f < n_freq; ++f) {
-      const std::vector<float> res_f(residual.begin() + f * kH * kW, residual.begin() + (f + 1) * kH * kW);
-      const std::vector<float> psf_f(psf.begin() + f * ph * pw, psf.begin() + (f + 1) * ph * pw);
-      const auto expected = host_subtract(res_f, kH, kW, psf_f, ph, pw, peak, gain, coeffs.at(f));
-      for (int i = 0; i < kH * kW; ++i)
-        ASSERT_FLOAT_EQ(got.at(f * kH * kW + i), expected.at(i))
-            << "freq " << f << " flat index " << i << " peak (" << peak.row << ", " << peak.col << ")";
+      SCOPED_TRACE(::testing::Message() << "channel " << f << ", peak (" << peak.row << ", " << peak.col << ")");
+      const auto expected =
+          host_subtract(plane_of(residual, f, kH * kW), plane_of(psf, f, n * n), n, n, peak, gain * coeffs.at(f));
+      for (int i = 0; i < kH * kW; ++i) ASSERT_FLOAT_EQ(got.at(f * kH * kW + i), expected.at(i)) << "index " << i;
     }
   }
 }

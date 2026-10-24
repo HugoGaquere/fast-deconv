@@ -9,8 +9,8 @@
 #include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
-namespace common = fast_deconv::common;
 
+namespace common = fast_deconv::common;
 namespace core = fast_deconv::core;
 namespace mfs = fast_deconv::multi_frequency;
 namespace fdtest = fast_deconv::test;
@@ -235,9 +235,9 @@ class FitCoefficients : public fdtest::BackendTest {
   }
 };
 
-// With unit jones/weights and dirty[f, peak] = xdes[f, :] @ alpha, the fit is
-// exactly determined: compact must recover alpha and per_chan must reproduce
-// the peak values.
+// With unit jones/weights and dirty[f, peak] = xdes[f, :] @ alpha, the data lie
+// exactly on the model: compact must recover alpha and per_chan must reproduce
+// the peak values. Checked against the truth, not the oracle.
 TEST_F(FitCoefficients, RecoversExactCoefficientsWithUnitWeights)
 {
   const std::vector<double> log_nu = {0.0, 0.1, 0.2, 0.3};

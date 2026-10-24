@@ -2,63 +2,43 @@
 
 #include <fast_deconv/common/gain.hpp>
 #include <fast_deconv/core/memory_types.hpp>
-#include <random>
 #include <vector>
 
 #include "helpers/backend_test.hpp"
 #include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
-#include "helpers/rng.hpp"
 
 namespace core = fast_deconv::core;
 namespace common = fast_deconv::common;
 namespace fdtest = fast_deconv::test;
 
-namespace {
+using fdtest::flat;
 
-constexpr int kFacets = 2;
-constexpr int kFreq = 3;
-constexpr int kPsfH = 9;
-constexpr int kPsfW = 9;
-constexpr int kPsfNpix = kPsfH * kPsfW;
-constexpr float kGamma = 0.1f;
+class ComputeGainBatched : public fdtest::BackendTest {};
 
-// gain[facet] = gamma / max_pixel( sum_f w[f] * psf[facet, f] )
-std::vector<float> host_gains(const std::vector<float>& psfs, const std::vector<float>& weights, int n_facets)
+// gain = gamma / peak of the channel-weighted mean PSF, one per facet.
+TEST_F(ComputeGainBatched, IsGammaOverThePeakOfTheWeightedMeanPsf)
 {
-  std::vector<float> gains(n_facets);
-  for (int b = 0; b < n_facets; ++b) {
-    const std::vector<float> facet(psfs.begin() + b * kFreq * kPsfNpix, psfs.begin() + (b + 1) * kFreq * kPsfNpix);
-    const auto wmean = fdtest::weighted_sum(facet, weights, kPsfNpix);
-    gains.at(b) = kGamma / fdtest::masked_max(wmean, std::vector<uint8_t>(kPsfNpix, 0), false);
-  }
-  return gains;
-}
-
-}  // namespace
-
-class GainBatched : public fdtest::BackendTest {};
-
-TEST_F(GainBatched, PerFacetGainMatchesWeightedMeanMaxOracle)
-{
-  std::mt19937 rng(89);
-  std::vector<float> psfs(kFacets * kFreq * kPsfNpix);
-  fdtest::fill_uniform(rng, psfs, 0.0f, 0.5f);
-  // Distinct known peaks so the two facets produce clearly different gains.
-  psfs.at(0 * kFreq * kPsfNpix + 0 * kPsfNpix + fdtest::flat(4, 4, kPsfW)) = 1.0f;
-  psfs.at(1 * kFreq * kPsfNpix + 1 * kPsfNpix + fdtest::flat(2, 6, kPsfW)) = 2.0f;
+  constexpr int n_facets = 2, n_freq = 3, n = 9;
   const std::vector<float> weights = {0.5f, 0.3f, 0.2f};
+  std::vector<float> psfs(n_facets * n_freq * n * n, 0.0f);
+  const auto at = [&](int facet, int f, int r, int c) -> float& {
+    return psfs.at((facet * n_freq + f) * n * n + flat(r, c, n));
+  };
+
+  // Facet 0: every channel peaks at 1 in the center, so the mean peaks at 0.5 + 0.3 + 0.2 = 1.
+  for (int f = 0; f < n_freq; ++f) at(0, f, 4, 4) = 1.0f;
+  // Facet 1: the mean is 0.5 * 1 at (2, 6) and 0.2 * 4 = 0.8 at (7, 7), so it peaks at 0.8.
+  at(1, 0, 2, 6) = 1.0f;
+  at(1, 2, 7, 7) = 4.0f;
 
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_psfs(sr, psfs);
-  fdtest::device_buffer<float> d_w(sr, weights);
+  fdtest::device_buffer<float> d_psfs(sr, psfs), d_weights(sr, weights);
 
-  core::span4d<float> psf_view(d_psfs.get(), kFacets, kFreq, kPsfH, kPsfW);
-  core::span1d<float> w_view(d_w.get(), kFreq);
+  const auto gains = common::compute_gain_batched(sr, core::span4d<const float>(d_psfs.get(), n_facets, n_freq, n, n),
+                                                  core::span1d<const float>(d_weights.get(), n_freq), /*gamma=*/0.1f);
 
-  const auto gains = common::compute_gain_batched(sr, psf_view, w_view, kGamma);
-  const auto expected = host_gains(psfs, weights, kFacets);
-
-  ASSERT_EQ(gains.size(), static_cast<std::size_t>(kFacets));
-  for (int b = 0; b < kFacets; ++b) EXPECT_NEAR(gains.at(b), expected.at(b), 1e-6f * expected.at(b)) << "facet " << b;
+  ASSERT_EQ(gains.size(), 2u);
+  EXPECT_FLOAT_EQ(gains.at(0), 0.1f / 1.0f);
+  EXPECT_FLOAT_EQ(gains.at(1), 0.1f / 0.8f);
 }
