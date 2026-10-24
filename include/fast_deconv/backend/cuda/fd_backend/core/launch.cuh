@@ -3,11 +3,11 @@
 #include <cuda_runtime.h>
 
 #include <cstdint>
-#include <cstdlib>
 #include <fast_deconv/core/dims.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
-#include <iostream>
 #include <source_location>
+#include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace fast_deconv::core {
@@ -73,24 +73,22 @@ struct launch_cfg {
 /**
  * @brief Launch a kernel on the context's stream and check the launch.
  *
- * An empty grid is a no-op: CUDA rejects it as an invalid configuration. A failed launch prints the call site
- * recorded in @p cfg and exits.
+ * An empty grid is a no-op: CUDA rejects it as an invalid configuration.
  *
  * @param[in] ctx     Context whose stream runs the kernel.
  * @param[in] cfg     Grid, block and call site.
  * @param[in] kernel  The __global__ function.
  * @param[in] args    Kernel arguments, converted to its parameter types.
+ * @throws std::runtime_error If the launch fails, naming the call site recorded in @p cfg.
  */
 template <typename... KArgs, typename... Args>
 void launch(const exec_ctx& ctx, launch_cfg cfg, void (*kernel)(KArgs...), Args&&... args)
 {
   if (cfg.grid.x == 0 || cfg.grid.y == 0 || cfg.grid.z == 0) return;
   kernel<<<cfg.grid, cfg.block, 0, ctx.cuda_stream>>>(std::forward<Args>(args)...);
-  if (const cudaError_t err = cudaGetLastError(); err != cudaSuccess) {
-    std::cerr << "CUDA launch error at: " << cfg.loc.file_name() << ":" << cfg.loc.line() << std::endl;
-    std::cerr << cudaGetErrorString(err) << std::endl;
-    std::exit(EXIT_FAILURE);
-  }
+  if (const cudaError_t err = cudaGetLastError(); err != cudaSuccess)
+    throw std::runtime_error(std::string("CUDA launch error at ") + cfg.loc.file_name() + ":" +
+                             std::to_string(cfg.loc.line()) + ": " + cudaGetErrorString(err));
 }
 
 }  // namespace fast_deconv::core

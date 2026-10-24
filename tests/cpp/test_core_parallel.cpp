@@ -138,3 +138,25 @@ TEST_F(CoreForEachIndex, EmptyRangesAreNoOps)
   core::for_each_index(sr, 2, 0, 4, mark_3d{nullptr, 0, 4});
   sr.wait();
 }
+
+#ifdef __CUDACC__
+#include <fd_backend/core/launch.cuh>
+#include <stdexcept>
+
+namespace {
+__global__ void noop_kernel() {}
+}  // namespace
+
+class CudaErrors : public fdtest::BackendTest {};
+
+// A failed launch or runtime call raises instead of exiting the process, so a Python caller gets a RuntimeError.
+// 2048 threads per block is over every device's limit; the error is not sticky, so the context still works after.
+TEST_F(CudaErrors, BadLaunchAndRuntimeErrorsThrowAndLeaveTheContextUsable)
+{
+  const auto sr = res().make_ctx();
+  EXPECT_THROW(core::launch(sr, core::launch_cfg::custom(1, 2048), noop_kernel), std::runtime_error);
+  EXPECT_THROW(CHECK_CUDA(cudaErrorInvalidValue), std::runtime_error);
+
+  expect_each_index_once(sr, 1000, [&](std::int64_t* out) { core::for_each_index(sr, 1000, mark_1d{out}); });
+}
+#endif
