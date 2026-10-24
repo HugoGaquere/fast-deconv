@@ -1,14 +1,13 @@
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <fast_deconv/common/detail/mask_steps.hpp>
 
 namespace fast_deconv::common::detail {
 
-void stamp_peaks(const core::exec_ctx& /*ctx*/, const std::vector<index2d>& coords, const std::vector<int>& scales,
+void stamp_peaks(const core::exec_ctx& ctx, const std::vector<index2d>& coords, const std::vector<int>& scales,
                  core::span3d<bool> mask_per_scale)
 {
-  std::fill_n(mask_per_scale.data_handle(), mask_per_scale.size(), false);
+  ctx.zero(mask_per_scale);
   for (std::size_t i = 0; i < coords.size(); i++)
     mask_per_scale(scales.at(i), coords.at(i).row, coords.at(i).col) = true;
 }
