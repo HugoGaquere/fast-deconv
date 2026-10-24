@@ -12,7 +12,8 @@ namespace fast_deconv::multi_frequency {
  *   - n_freq > n_order: weighted least squares (weights_freq), corrected so the band-weighted mean of the fitted
  *     per-channel flux equals that of y;
  *   - n_freq <= n_order: the minimum-norm exact fit, theta = SAX^T (SAX SAX^T)^-1 y.
- * Solved in double. The backend sources derive both branches.
+ * Solved in double; common/detail/spectral_fit.hpp derives both branches. A singular system leaves NaN in both
+ * outputs.
  *
  * Runs on @p ctx; on the CUDA backend it is enqueued, not synced.
  *
@@ -24,7 +25,7 @@ namespace fast_deconv::multi_frequency {
  * @param[in]  peak_coords          Pixel to fit.
  * @param[out] compact_coeffs_out   Intrinsic coefficients theta, device, (n_order,).
  * @param[out] coeffs_per_chan_out  Fitted apparent flux per channel, SAX theta, device, (n_freq,).
- * @throws std::invalid_argument On the host backend, if n_order exceeds 8.
+ * @throws std::invalid_argument If n_order exceeds 8.
  */
 void fit_coefficients(const core::exec_ctx& ctx, core::span3d<const float> residual,
                       core::span3d<const float> jones_norm, core::span1d<const float> weights_freq,

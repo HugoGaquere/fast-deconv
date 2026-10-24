@@ -26,7 +26,7 @@ constexpr int kNcol = 47;
 constexpr int kNpix = kNrow * kNcol;
 
 // ============================================================================
-// stats_ctx::max_and_rms: max over the unmasked pixels, rms over all of them
+// max_and_rms: max over the unmasked pixels, rms over all of them
 // ============================================================================
 
 class MaxAndRms : public fdtest::BackendTest {
@@ -54,28 +54,22 @@ class MaxAndRms : public fdtest::BackendTest {
   }
 };
 
-// The masked 9 is not the max but does weigh in the rms. The driver reuses one ctx for every cycle, so a
-// second call on new data must see that data.
+// The masked 9 is not the max but does weigh in the rms.
 TEST_F(MaxAndRms, MaskHidesPixelsFromTheMaxOnly)
 {
   const auto sr = res().make_ctx();
   const auto d_mask = stage_mask(sr);
-  matrix::stats_ctx stats(sr, kNpix, /*use_abs=*/false);
 
-  const auto [max, rms] = stats.max_and_rms(stage_img(sr), d_mask);
+  const auto [max, rms] = matrix::max_and_rms(sr, stage_img(sr), d_mask, /*use_abs=*/false);
   EXPECT_FLOAT_EQ(max, 3.0f);
   EXPECT_NEAR(rms, fdtest::std_all(img), 1e-4f * fdtest::std_all(img));
-
-  img.at(positive) = 5.0f;
-  EXPECT_FLOAT_EQ(stats.max_and_rms(stage_img(sr), d_mask).max, 5.0f);
 }
 
 TEST_F(MaxAndRms, UseAbsRanksByMagnitude)
 {
   const auto sr = res().make_ctx();
-  matrix::stats_ctx stats(sr, kNpix, /*use_abs=*/true);
 
-  EXPECT_FLOAT_EQ(stats.max_and_rms(stage_img(sr), stage_mask(sr)).max, 4.0f);
+  EXPECT_FLOAT_EQ(matrix::max_and_rms(sr, stage_img(sr), stage_mask(sr), /*use_abs=*/true).max, 4.0f);
 }
 
 // ============================================================================

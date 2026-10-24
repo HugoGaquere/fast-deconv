@@ -15,8 +15,8 @@ class tiled_argmax_impl {
   /// Argmax of every tile in @p range under @p criterion, written into its cache slot.
   void reduce_tiles(core::span2d<const float> data, peak_criterion criterion, tile_range range);
 
-  /// Combine every cached tile down to one result.
-  peak combine() const;
+  /// The cache, one peak per tile in row-major tile order.
+  const peak* tiles() const { return tiles_.data(); }
 
  private:
   tile_grid grid_;

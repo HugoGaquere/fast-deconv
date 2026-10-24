@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/matrix/tiled_argmax.hpp>
+#include <fd_backend/core/reduce.hpp>
 #include <stdexcept>
 
 namespace fast_deconv::matrix {
@@ -20,10 +21,17 @@ tile_grid make_grid(core::dims<2> extents, std::int64_t tile_size)
           .n_tiles_y = core::ceil_div(extents.extent(0), tile_size)};
 }
 
+// Cached slot i, as is.
+struct tile_slot {
+  const peak* tiles;
+
+  FD_HOST_DEVICE peak operator()(std::int64_t i) const { return tiles[i]; }
+};
+
 }  // namespace
 
 tiled_argmax_ctx::tiled_argmax_ctx(const core::exec_ctx& ctx, core::dims<2> extents, std::int64_t tile_size)
-    : grid_(make_grid(extents, tile_size)), impl_(ctx, grid_)
+    : ctx_(ctx), grid_(make_grid(extents, tile_size)), impl_(ctx, grid_)
 {
 }
 
@@ -37,7 +45,7 @@ peak tiled_argmax_ctx::run(core::span2d<const float> data, peak_criterion criter
   impl_.reduce_tiles(data, criterion_, {.tx0 = 0, .ty0 = 0, .tx1 = grid_.n_tiles_x - 1, .ty1 = grid_.n_tiles_y - 1});
   seeded_ = true;
 
-  return impl_.combine();
+  return combine_();
 }
 
 peak tiled_argmax_ctx::run_incremental(core::span2d<const float> data, std::int64_t peak_row, std::int64_t peak_col,
@@ -68,7 +76,13 @@ peak tiled_argmax_ctx::run_incremental(core::span2d<const float> data, std::int6
 
   // Every cached slot is rescanned: the global winner can sit in any tile, and
   // after a subtraction last cycle's winner has dropped.
-  return impl_.combine();
+  return combine_();
+}
+
+peak tiled_argmax_ctx::combine_() const
+{
+  FD_PROFILE_FN();
+  return core::reduce(ctx_, grid_.n_tiles_x * grid_.n_tiles_y, tile_slot{impl_.tiles()}, peak_max{}, kPeakIdentity);
 }
 
 }  // namespace fast_deconv::matrix

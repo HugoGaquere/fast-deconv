@@ -4,7 +4,6 @@
 # so real leaks in fast_deconv host code still surface.
 leak:libcuda.so
 leak:libcudart
-leak:libcublas
 leak:libcufft
 leak:libnvrtc
 leak:libnvidia

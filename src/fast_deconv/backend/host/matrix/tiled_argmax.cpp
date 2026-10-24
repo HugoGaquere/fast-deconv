@@ -3,9 +3,6 @@
 #include <cstdint>
 #include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/matrix/tiled_argmax.hpp>
-#include <iterator>
-
-#include "../detail/peak_reduce.hpp"
 
 namespace fast_deconv::matrix {
 
@@ -13,8 +10,6 @@ namespace {
 
 // A tile scan is a few microseconds, so a handful of them already pays the fork.
 constexpr std::int64_t kMinParallelTiles = 8;
-// The combine is one compare per tile, so it needs far more of them to pay off.
-constexpr std::int64_t kMinParallelCombine = 8192;
 
 // Argmax of tile (tile_x, tile_y) of @p grid under @p criterion.
 peak reduce_tile(core::span2d<const float> data, peak_criterion criterion, const tile_grid& grid, std::int64_t tile_x,
@@ -54,17 +49,6 @@ void tiled_argmax_impl::reduce_tiles(core::span2d<const float> data, peak_criter
   for (std::int64_t ty = range.ty0; ty <= range.ty1; ty++)
     for (std::int64_t tx = range.tx0; tx <= range.tx1; tx++)
       tiles_.at(core::narrow<std::size_t>(ty * grid_.n_tiles_x + tx)) = reduce_tile(data, criterion, grid_, tx, ty);
-}
-
-peak tiled_argmax_impl::combine() const
-{
-  FD_PROFILE_FN();
-  peak result = kPeakIdentity;
-  const std::int64_t n_tiles = std::ssize(tiles_);
-#pragma omp parallel for reduction(peak_max : result) if (n_tiles > kMinParallelCombine)
-  for (std::int64_t i = 0; i < n_tiles; i++) result = peak_max{}(result, tiles_.at(core::narrow<std::size_t>(i)));
-
-  return result;
 }
 
 }  // namespace fast_deconv::matrix

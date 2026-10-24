@@ -173,6 +173,8 @@ class exec_ctx_impl {
 
   void copy_bytes(void* dst, const void* src, std::uint64_t num_bytes) const { std::memcpy(dst, src, num_bytes); }
 
+  void zero_bytes(void* dst, std::uint64_t num_bytes) const { std::memset(dst, 0, num_bytes); }
+
   void wait() const {}
 
   block_pool& memory_pool;

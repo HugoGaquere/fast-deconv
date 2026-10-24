@@ -163,17 +163,31 @@ file(GLOB_RECURSE FAST_DECONV_BACKEND_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/fast_deconv/backend/${FAST_DECONV_BACKEND}/*.cpp
 )
 
+# Written once against fd_backend/core/{reduce,for_each}.hpp; under CUDA, nvcc compiles them to
+# instantiate the device side.
+set(FAST_DECONV_GENERIC_SOURCES
+    src/fast_deconv/matrix/argmax.cpp
+    src/fast_deconv/morphology/roi.cpp
+    src/fast_deconv/matrix/tiled_argmax.cpp
+    src/fast_deconv/matrix/stats.cpp
+    src/fast_deconv/common/mask.cpp
+    src/fast_deconv/common/clean.cpp
+    src/fast_deconv/common/multi_frequency.cpp
+    src/fast_deconv/linalg/linalg.cpp
+)
+if(FAST_DECONV_WITH_CUDA)
+  set_source_files_properties(${FAST_DECONV_GENERIC_SOURCES} PROPERTIES LANGUAGE CUDA)
+endif()
+
 add_library(fast_deconv STATIC
         src/fast_deconv/algorithm/ddmsc_cycles.cpp
         src/fast_deconv/algorithm/ddmsc.cpp
         src/fast_deconv/algorithm/psf_convolution.cpp
         src/fast_deconv/algorithm/scales.cpp
         src/fast_deconv/linalg/gaussian_convolution.cpp
-        src/fast_deconv/matrix/stats.cpp
-        src/fast_deconv/matrix/tiled_argmax.cpp
         src/fast_deconv/common/convergence.cpp
         src/fast_deconv/common/gain.cpp
-        src/fast_deconv/common/mask.cpp
+        ${FAST_DECONV_GENERIC_SOURCES}
         ${FAST_DECONV_BACKEND_SOURCES}
 )
 
@@ -183,7 +197,7 @@ target_link_libraries(fast_deconv PUBLIC
 )
 
 if(FAST_DECONV_WITH_CUDA)
-  target_link_libraries(fast_deconv PUBLIC emu::emu CUDA::cublas CUDA::cufft)
+  target_link_libraries(fast_deconv PUBLIC emu::emu CUDA::cufft)
   if(FAST_DECONV_WITH_PROFILER)
     # PUBLIC: core/profiler.hpp is a public header, so consumers need FD_NVTX_ENABLE too.
     target_link_libraries(fast_deconv PUBLIC CUDA::nvtx3)

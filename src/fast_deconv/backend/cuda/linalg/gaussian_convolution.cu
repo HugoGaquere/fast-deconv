@@ -8,51 +8,42 @@
 #include <fast_deconv/linalg/linalg.hpp>
 #include <fast_deconv/util/cuda_macros.hpp>
 #include <fast_deconv/util/cufft_macros.hpp>
-#include <fd_backend/core/launch.cuh>
-
-namespace fast_deconv::kernel {
-
-// Copies a batch of (nx, ny) images to the top-left of (px, py) planes, one grid z-plane per image; the rest is
-// zeroed beforehand.
-__global__ void pad_kernel(const float* input, float* output, std::int64_t nx, std::int64_t ny, std::int64_t px,
-                           std::int64_t py)
-{
-  const std::int64_t row = std::int64_t{blockIdx.y} * blockDim.y + threadIdx.y;
-  const std::int64_t col = std::int64_t{blockIdx.x} * blockDim.x + threadIdx.x;
-  const std::int64_t b = blockIdx.z;
-  if (row >= nx || col >= ny) return;
-  output[(b * px + row) * py + col] = input[(b * nx + row) * ny + col];
-}
-
-// Copies the top-left (nx, ny) of a batch of (px, py) planes out, one grid z-plane per image.
-__global__ void crop_kernel(const float* input, float* output, std::int64_t nx, std::int64_t ny, std::int64_t px,
-                            std::int64_t py)
-{
-  const std::int64_t row = std::int64_t{blockIdx.y} * blockDim.y + threadIdx.y;
-  const std::int64_t col = std::int64_t{blockIdx.x} * blockDim.x + threadIdx.x;
-  const std::int64_t b = blockIdx.z;
-  if (row >= nx || col >= ny) return;
-  output[(b * nx + row) * ny + col] = input[(b * px + row) * py + col];
-}
-
-}  // namespace fast_deconv::kernel
 
 namespace fast_deconv::linalg {
 
+namespace {
+
+// Copies n_batch (nrow, ncol) blocks between stacks of planes whose rows hold src_ncol / dst_ncol floats and whose
+// planes hold src_nrow / dst_nrow rows; one copy for the whole batch.
+void copy_planes(const core::exec_ctx& ctx, const float* src, std::int64_t src_nrow, std::int64_t src_ncol, float* dst,
+                 std::int64_t dst_nrow, std::int64_t dst_ncol, std::int64_t nrow, std::int64_t ncol,
+                 std::int64_t n_batch)
+{
+  // Plane stride is pitch * ysize; the extent's width is in bytes for linear memory.
+  cudaMemcpy3DParms p{};
+  p.srcPtr = make_cudaPitchedPtr(const_cast<float*>(src), core::narrow<std::size_t>(src_ncol) * sizeof(float),
+                                 core::narrow<std::size_t>(src_ncol), core::narrow<std::size_t>(src_nrow));
+  p.dstPtr = make_cudaPitchedPtr(dst, core::narrow<std::size_t>(dst_ncol) * sizeof(float),
+                                 core::narrow<std::size_t>(dst_ncol), core::narrow<std::size_t>(dst_nrow));
+  p.extent = make_cudaExtent(core::narrow<std::size_t>(ncol) * sizeof(float), core::narrow<std::size_t>(nrow),
+                             core::narrow<std::size_t>(n_batch));
+  p.kind = cudaMemcpyDeviceToDevice;
+  CHECK_CUDA(cudaMemcpy3DAsync(&p, ctx.cuda_stream));
+}
+
+}  // namespace
+
 void pad(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output, std::int64_t n_batch)
 {
-  CHECK_CUDA(cudaMemsetAsync(output, 0, core::narrow<std::size_t>(dims.padded_total() * n_batch) * sizeof(float),
-                             ctx.cuda_stream));
-  const core::launch_cfg cfg(n_batch, dims.input_nrow, dims.input_ncol);
-  core::launch(ctx, cfg, kernel::pad_kernel, input, output, dims.input_nrow, dims.input_ncol, dims.padded_nrow,
-               dims.padded_ncol);
+  ctx.zero(output, dims.padded_total() * n_batch);
+  copy_planes(ctx, input, dims.input_nrow, dims.input_ncol, output, dims.padded_nrow, dims.padded_ncol,
+              dims.input_nrow, dims.input_ncol, n_batch);
 }
 
 void crop(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output, std::int64_t n_batch)
 {
-  const core::launch_cfg cfg(n_batch, dims.input_nrow, dims.input_ncol);
-  core::launch(ctx, cfg, kernel::crop_kernel, input, output, dims.input_nrow, dims.input_ncol, dims.padded_nrow,
-               dims.padded_ncol);
+  copy_planes(ctx, input, dims.padded_nrow, dims.padded_ncol, output, dims.input_nrow, dims.input_ncol,
+              dims.input_nrow, dims.input_ncol, n_batch);
 }
 
 gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, std::int64_t batch, std::int64_t nrow,
@@ -77,8 +68,8 @@ gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, st
 
 gaussian_convolution_ctx::~gaussian_convolution_ctx()
 {
-  CUFFT_CALL(cufftDestroy(r2c_));
-  CUFFT_CALL(cufftDestroy(c2r_));
+  REPORT_CUFFT(cufftDestroy(r2c_));
+  REPORT_CUFFT(cufftDestroy(c2r_));
 }
 
 void gaussian_convolution_ctx::forward_(float* input, complex_type* output) const
