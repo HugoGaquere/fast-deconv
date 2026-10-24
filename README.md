@@ -5,7 +5,7 @@ GPU-accelerated DDMSC deconvolution for radio astronomy, callable from Python.
 fast-deconv is a high-performance multi-scale and multi-frequency deconvolution engine with several execution backends: CUDA for NVIDIA GPUs and OpenMP for CPUs.
 It's designed for integration with [DDFacet](https://github.com/cyriltasse/DDFacet)-style imaging pipelines.
 
-> **Status:** beta (`v0.8.0`). The API may still change between minor versions.
+> **Status:** beta (`v0.9.0`). The API may still change between minor versions.
 
 ## Quick start
 
