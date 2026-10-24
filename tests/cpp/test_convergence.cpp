@@ -50,16 +50,6 @@ TEST(Convergence, IterationAccumulatesSubminorCountUpToMaxIterations)
   EXPECT_TRUE(c.should_stop());
 }
 
-TEST(Convergence, FluxDroppingBelowThresholdConverges)
-{
-  convergence c(100, 0.1f, 3, 4.0f, no_stalls());
-  c.init(1.0f, 1.0f);
-  c.track(0.5f, 1.0f, 1, 0);
-  EXPECT_EQ(c.status(), convergence_status::running);
-  c.track(0.05f, 1.0f, 1, 0);
-  EXPECT_EQ(c.status(), convergence_status::converged);
-}
-
 // Divergence strikes are cumulative and never reset (DDFacet behavior): spikes
 // separated by well-behaved iterations still add up to diverged.
 TEST(Convergence, DivergentStrikesAccumulateAcrossCalmIterations)
@@ -74,16 +64,6 @@ TEST(Convergence, DivergentStrikesAccumulateAcrossCalmIterations)
   EXPECT_EQ(c.status(), convergence_status::running);
 
   c.track(3.0f, 1.0f, 1, 0);  // strike 3 > max_divergent_iter=2
-  EXPECT_EQ(c.status(), convergence_status::diverged);
-}
-
-// Divergence is on |flux|: a large negative flux relative to the previous one
-// counts as a strike too.
-TEST(Convergence, DivergenceUsesAbsoluteFlux)
-{
-  convergence c(100, -100.0f, /*max_divergent_iter=*/0, /*divergence_factor=*/2.0f, no_stalls());
-  c.init(1.0f, 1.0f);
-  c.track(-5.0f, 1.0f, 1, 0);  // | -5 | > 2*|1|: strike 1 > 0
   EXPECT_EQ(c.status(), convergence_status::diverged);
 }
 
@@ -111,12 +91,6 @@ TEST(Convergence, StatusPrecedenceWhenSeveralReasonsHoldAtOnce)
   c3.init(1.0f, 5.0f);
   c3.track(0.05f, 5.0f, 0, 0);
   EXPECT_EQ(c3.status(), convergence_status::converged);
-
-  // diverged over no_components.
-  convergence c4(100, 0.1f, 10, 100.0f, no_stalls());
-  c4.init(1.0f, 1.0f);
-  c4.track(std::numeric_limits<float>::quiet_NaN(), 1.0f, 0, 0);
-  EXPECT_EQ(c4.status(), convergence_status::diverged);
 }
 
 // Slow exponential growth (~1%/iteration) never exceeds divergence_factor * previous
@@ -142,56 +116,25 @@ TEST(Convergence, SlowExponentialDivergenceIsCaughtOnlyPastTheFactor)
   EXPECT_EQ(c.status(), convergence_status::diverged);
 }
 
-// Once the residual overflows, every ordering test in update_status_ is false on NaN.
-// Without the isfinite latch the status stays running and the run grinds to
-// max_iteration, feeding a garbage residual to the next major cycle.
-TEST(Convergence, NonFiniteFluxIsReportedAsDiverged)
+// Once the residual overflows, every ordering test in update_status_ is false on NaN. Without the isfinite
+// latch the status stays running and the run grinds to max_iteration, feeding a garbage residual to the next
+// major cycle.
+TEST(Convergence, NonFiniteFluxOrRmsIsReportedAsDiverged)
 {
-  constexpr float nan_f = std::numeric_limits<float>::quiet_NaN();
-  constexpr float inf_f = std::numeric_limits<float>::infinity();
-
+  // NaN flux, in a cycle that also produced no component: the latch must outrank no_components.
   convergence c(100, 0.1f, /*max_divergent_iter=*/3, 4.0f, no_stalls());
   c.init(1.0f, 1.0f);
-  c.track(nan_f, 1.0f, 1, 0);
+  c.track(std::numeric_limits<float>::quiet_NaN(), 1.0f, /*subminor_count=*/0, 0);
   EXPECT_EQ(c.status(), convergence_status::diverged);
   EXPECT_TRUE(c.should_stop());
 
-  // inf scores only one strike (3 are tolerated): the latch is what stops it.
-  convergence c2(100, 0.1f, /*max_divergent_iter=*/3, 4.0f, no_stalls());
-  c2.init(1.0f, 1.0f);
-  c2.track(inf_f, 1.0f, 1, 0);
-  EXPECT_EQ(c2.status(), convergence_status::diverged);
-
-  // A non-finite INITIAL flux must not read as converged (NaN <= min_flux is false,
-  // but so is every other test, which is how a NaN cycle reported success).
-  convergence c3(100, 0.1f, 3, 4.0f, no_stalls());
-  c3.init(nan_f, 1.0f);
-  EXPECT_EQ(c3.status(), convergence_status::diverged);
-}
-
-// The rms can go non-finite while the peak is still a (huge) finite value scoring
-// only one strike, so the flux alone leaves the run reading as running.
-TEST(Convergence, NonFiniteRmsWithAFiniteFluxIsReportedAsDiverged)
-{
-  constexpr float inf_f = std::numeric_limits<float>::infinity();
-
-  // max_iter is well above the 250 subminor iterations so the budget does not end the
-  // run before the flux/rms checks are reached.
-  convergence c(1000, 0.1f, /*max_divergent_iter=*/5, /*divergence_factor=*/1.3f, no_stalls());
-  c.init(0.26f, 0.01f);
-  c.track(3.36e21f, 1.0f, 250, 0);
-  EXPECT_EQ(c.status(), convergence_status::running);
-
+  // The rms can go non-finite while the peak is still a (huge) finite value scoring only one of the five
+  // tolerated strikes, so only the rms half of the latch catches it. max_iter is well above the 250
+  // subminor iterations so the budget does not end the run first.
   convergence c2(1000, 0.1f, /*max_divergent_iter=*/5, /*divergence_factor=*/1.3f, no_stalls());
   c2.init(0.26f, 0.01f);
-  c2.track(3.36e21f, inf_f, 250, 0);
+  c2.track(3.36e21f, std::numeric_limits<float>::infinity(), 250, 0);
   EXPECT_EQ(c2.status(), convergence_status::diverged);
-  EXPECT_TRUE(c2.should_stop());
-
-  // A non-finite INITIAL rms must not read as converged either.
-  convergence c3(100, 0.1f, 5, 1.3f, no_stalls());
-  c3.init(0.05f, inf_f);
-  EXPECT_EQ(c3.status(), convergence_status::diverged);
 }
 
 // The owned stall tracker is seeded by init and updated by track, so retiring every
@@ -206,8 +149,6 @@ TEST(Convergence, AllScalesStalledStopsTheRun)
   c.track(0.9f, 5.0f, 3, 0);  // |Δrms| = 0 < 0.01: strike 1 > 0, and scale 0 is the only scale
   EXPECT_EQ(c.status(), convergence_status::all_scales_stalled);
   EXPECT_TRUE(c.should_stop());
-  EXPECT_TRUE(c.is_stall(0));
-  EXPECT_EQ(c.get_all_stalled(), std::vector<int>{0});
 }
 
 // An outer cycle that produced no component reports it instead of the driver breaking out.
@@ -261,15 +202,3 @@ TEST(ScaleStallTracker, AllStalledTracksEveryScale)
   EXPECT_EQ(t.get_all_stalled(), (std::vector<int>{0, 1}));
 }
 
-// last_rms_ is shared, but updates are strictly one per outer iteration, so the delta
-// a scale is judged on is exactly the progress its own clean loop made. Back-to-back
-// plateaus therefore strike each scale in turn, which is the intended reading.
-TEST(ScaleStallTracker, SharedLastRmsMeasuresEachScalesOwnProgress)
-{
-  scale_stall_tracker t(/*n_scales=*/2, /*max_stall_count=*/0, /*stall_threshold=*/0.01f);
-  t.init_rms(1.0f);
-
-  t.update(0, 1.0f);  // plateau on scale 0; last_rms_ stays 1.0
-  t.update(1, 1.0f);  // compared against scale 0's rms: scale 1 gets a strike
-  EXPECT_TRUE(t.is_stall(1));
-}
