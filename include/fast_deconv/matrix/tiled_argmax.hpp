@@ -5,6 +5,7 @@
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/matrix/peak.hpp>
 #include <fast_deconv/matrix/tile_grid.hpp>
+#include <utility>
 
 // Resolved by the include path: CMake puts backend/${FAST_DECONV_BACKEND}
 // on it, and every backend provides this file.
@@ -19,7 +20,7 @@ concept tiled_argmax_backend =
     std::constructible_from<T, const core::exec_ctx&, const tile_grid&> &&
     requires(T impl, core::span2d<const float> data, peak_criterion criterion, tile_range range) {
       { impl.reduce_tiles(data, criterion, range) } -> std::same_as<void>;
-      { impl.combine() } -> std::same_as<peak>;
+      { std::as_const(impl).tiles() } -> std::same_as<const peak*>;
     };
 
 static_assert(tiled_argmax_backend<tiled_argmax_impl>,
@@ -31,7 +32,7 @@ static_assert(tiled_argmax_backend<tiled_argmax_impl>,
  *
  * After a clean subtraction only dirties a sub-region, the global argmax can be refreshed by recomputing
  * the touched tiles instead of rescanning the whole image. The backend's tiled_argmax_impl holds the tile
- * cache; this layer validates the inputs and maps a footprint to the tiles it touches.
+ * cache; this layer validates the inputs, maps a footprint to the tiles it touches and combines the tiles.
  *
  * @code
  *   tiled_argmax_ctx tiled{ctx, mean_residual.extents(), 64};
@@ -77,6 +78,10 @@ class tiled_argmax_ctx {
                        std::int64_t foot_height, std::int64_t foot_width);
 
  private:
+  // The global peak over every cached tile. Syncs the context.
+  peak combine_() const;
+
+  const core::exec_ctx& ctx_;
   tile_grid grid_;
   tiled_argmax_impl impl_;
   peak_criterion criterion_{};
