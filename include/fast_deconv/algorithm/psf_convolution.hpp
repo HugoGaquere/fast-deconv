@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <fast_deconv/algorithm/scales.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
@@ -10,12 +11,6 @@
 
 namespace fast_deconv::algorithm {
 
-enum class psf_cache_mode {
-  lazy_pair,   // build one (scale, facet) on first use
-  lazy_scale,  // build every facet of a scale on that scale's first use
-  eager_all,   // build every (scale, facet) up front
-};
-
 class psf_convolution {
  public:
   struct entry {
@@ -25,11 +20,13 @@ class psf_convolution {
   };
 
   /**
-   * @param exec_ctx  Lane the builds run on; each build waits on it before returning. Must outlive this.
-   * @param raw_psfs  Raw PSFs, device, (n_facets, n_freq, psf_h, psf_w). Must outlive this.
-   * @param sigmas    Scale sigmas, host, (n_scales,). Copied.
-   * @param weights   Per-channel weights, device, (n_freq,). Must outlive this.
-   * @param gamma     CLEAN loop gain, folded into each entry's gain.
+   * @brief Lazy cache of the scale-convolved PSFs of one scale, built per (scale, facet) on first use.
+   *
+   * @param[in] exec_ctx  Context the builds run on; each build waits on it before returning. Must outlive this.
+   * @param[in] raw_psfs  Raw PSFs, device, (n_facets, n_freq, psf_h, psf_w). Must outlive this.
+   * @param[in] sigmas    Scale sigmas, host, (n_scales,). Copied.
+   * @param[in] weights   Per-channel weights, device, (n_freq,). Must outlive this.
+   * @param[in] gamma     CLEAN loop gain, folded into each entry's gain.
    */
   psf_convolution(const core::exec_ctx& exec_ctx, core::span4d<const float> raw_psfs, std::vector<float> sigmas,
                   core::span1d<const float> weights, float gamma);
@@ -39,25 +36,17 @@ class psf_convolution {
   psf_convolution(psf_convolution&&) = delete;
   psf_convolution& operator=(psf_convolution&&) = delete;
 
-  /// Entry for one (scale, facet), built on miss.
-  entry get(int scale, int facet);
+  /**
+   * @brief Entry for one (scale, facet), built on miss.
+   *
+   * A new scale frees the cached entries: sync every context still reading them first.
+   */
+  entry get(int scale, std::int64_t facet);
 
-  /// Build every facet of @p scale.
-  void prefetch_scale(int scale);
-
-  /// Build every (scale, facet).
-  void prefetch_all();
-
-  /// Drops every entry, once the build lane has drained. The caller must first drain
-  /// any other lane still reading handed-out entries: the frees are ordered on the build lane only.
-  void clear();
-
-  int n_scales() const { return n_scales_; }
-  int n_facets() const { return n_facets_; }
   std::size_t n_entries() const { return entries_.size(); }
 
  private:
-  entry build(int scale, int facet);
+  entry build(int scale, std::int64_t facet);
 
   const core::exec_ctx& exec_ctx_;
   const linalg::gaussian_convolution_ctx conv_ctx_;       // batch n_freq: the per-channel conv
@@ -67,14 +56,15 @@ class psf_convolution {
   std::vector<float> sigmas_;
 
   int n_scales_;
-  int n_facets_;
-  int n_freq_;
-  int psf_nrow_;
-  int psf_ncol_;
+  std::int64_t n_facets_;
+  std::int64_t n_freq_;
+  std::int64_t psf_nrow_;
+  std::int64_t psf_ncol_;
 
   float gamma_ = 0.0f;
+  int scale_ = -1;  // scale the entries belong to
 
-  std::unordered_map<int, entry> entries_;  // key = scale * n_facets + facet
+  std::unordered_map<std::int64_t, entry> entries_;  // scale_ entries, keyed by facet
 };
 
 }  // namespace fast_deconv::algorithm

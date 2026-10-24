@@ -28,7 +28,6 @@ class DDMSC:
         map_pixel_facet: npt.NDArray[np.int32],
         dirty_nrow: int,
         dirty_ncol: int,
-        n_freq: int,
         exec_device: int = ...,
     ) -> None:
         ...
@@ -121,7 +120,7 @@ class DDMSC:
         ...
 class DDMSCResult:
     @property
-    def coeffs(self) -> list[list[float]]:
+    def coeffs(self) -> npt.NDArray[np.float32]:
         ...
     @property
     def final_flux(self) -> float:

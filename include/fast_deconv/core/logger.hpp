@@ -43,12 +43,36 @@ struct fmt::formatter<M> {
 #define FD_LOG_LEVEL_OFF SPDLOG_LEVEL_OFF
 #define FD_LOG_ACTIVE_LEVEL SPDLOG_ACTIVE_LEVEL
 
+// Trace and debug lines carry [file:line]; info and above pass an empty
+// source_loc so the default pattern omits it.
 #define FD_LOG_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
 #define FD_LOG_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
-#define FD_LOG_INFO(...) SPDLOG_INFO(__VA_ARGS__)
-#define FD_LOG_WARN(...) SPDLOG_WARN(__VA_ARGS__)
-#define FD_LOG_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
-#define FD_LOG_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
+
+#define FD_LOG_NO_LOC_(lvl, ...) spdlog::default_logger_raw()->log(spdlog::source_loc{}, lvl, __VA_ARGS__)
+
+#if FD_LOG_ACTIVE_LEVEL <= FD_LOG_LEVEL_INFO
+#define FD_LOG_INFO(...) FD_LOG_NO_LOC_(spdlog::level::info, __VA_ARGS__)
+#else
+#define FD_LOG_INFO(...) (void)0
+#endif
+
+#if FD_LOG_ACTIVE_LEVEL <= FD_LOG_LEVEL_WARN
+#define FD_LOG_WARN(...) FD_LOG_NO_LOC_(spdlog::level::warn, __VA_ARGS__)
+#else
+#define FD_LOG_WARN(...) (void)0
+#endif
+
+#if FD_LOG_ACTIVE_LEVEL <= FD_LOG_LEVEL_ERROR
+#define FD_LOG_ERROR(...) FD_LOG_NO_LOC_(spdlog::level::err, __VA_ARGS__)
+#else
+#define FD_LOG_ERROR(...) (void)0
+#endif
+
+#if FD_LOG_ACTIVE_LEVEL <= FD_LOG_LEVEL_CRITICAL
+#define FD_LOG_CRITICAL(...) FD_LOG_NO_LOC_(spdlog::level::critical, __VA_ARGS__)
+#else
+#define FD_LOG_CRITICAL(...) (void)0
+#endif
 
 namespace fast_deconv::log {
 

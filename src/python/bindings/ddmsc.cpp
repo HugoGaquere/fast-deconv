@@ -29,12 +29,6 @@ void bind_ddmsc(py::module_& m)
       .value("no_components", fast_deconv::common::convergence_status::no_components)
       .finalize();
 
-  py::native_enum<fast_deconv::algorithm::psf_cache_mode>(ddmsc_module, "PsfCacheMode", "enum.Enum")
-      .value("lazy_pair", fast_deconv::algorithm::psf_cache_mode::lazy_pair)
-      .value("lazy_scale", fast_deconv::algorithm::psf_cache_mode::lazy_scale)
-      .value("eager_all", fast_deconv::algorithm::psf_cache_mode::eager_all)
-      .finalize();
-
   py::class_<ddmsc::ddmsc_result>(ddmsc_module, "DDMSCResult")
       .def_readonly("peak_coords", &ddmsc::ddmsc_result::peak_coords)
       .def_readonly("scales", &ddmsc::ddmsc_result::scales)
@@ -55,17 +49,15 @@ void bind_ddmsc(py::module_& m)
       .def_readonly("status", &ddmsc::ddmsc_result::status);
 
   py::class_<ddmsc::Ddmsc>(ddmsc_module, "DDMSC")
-      .def(py::init<const core::host_span4d<float>&, const core::host_span2d<float>&, const core::host_span2d<bool>&,
-                    const core::host_span1d<float>&, const core::host_span1d<float>&, const core::host_span2d<int>&,
-                    int, int, int, int>(),
+      .def(py::init<core::host_span4d<const float>, core::host_span2d<const float>, core::host_span2d<const bool>,
+                    core::host_span1d<const float>, core::host_span1d<const float>, core::host_span2d<const int>,
+                    std::int64_t, std::int64_t, int>(),
            py::arg("raw_psfs"), py::arg("xdes"), py::arg("scale_mask"), py::arg("scale_sigmas"), py::arg("scale_bias"),
-           py::arg("map_pixel_facet"), py::arg("dirty_nrow"), py::arg("dirty_ncol"), py::arg("n_freq"),
-           py::arg("exec_device") = 0,
+           py::arg("map_pixel_facet"), py::arg("dirty_nrow"), py::arg("dirty_ncol"), py::arg("exec_device") = 0,
            // Borrowed: scale_bias, map_pixel_facet, plus raw_psfs/xdes/scale_mask on the host backend.
            py::keep_alive<1, 2>(),  // raw_psfs
            py::keep_alive<1, 3>(),  // xdes
            py::keep_alive<1, 4>(),  // scale_mask
-           py::keep_alive<1, 5>(),  // scale_sigmas
            py::keep_alive<1, 6>(),  // scale_bias
            py::keep_alive<1, 7>())  // map_pixel_facet
       .def("run", &ddmsc::Ddmsc::run, py::arg("dirty"), py::arg("jones_norm"), py::arg("weights_freq"),
@@ -87,7 +79,6 @@ void bind_ddmsc(py::module_& m)
       .def_property("auto_mask_peak_threshold", &ddmsc::Ddmsc::auto_mask_peak_threshold,
                     &ddmsc::Ddmsc::set_auto_mask_peak_threshold)
       .def_property("auto_mask_rms_threshold", &ddmsc::Ddmsc::auto_mask_rms_threshold,
-                    &ddmsc::Ddmsc::set_auto_mask_rms_threshold)
-      .def_property("psf_cache_policy", &ddmsc::Ddmsc::psf_cache_policy, &ddmsc::Ddmsc::set_psf_cache_policy);
+                    &ddmsc::Ddmsc::set_auto_mask_rms_threshold);
 }
 }  // namespace fast_deconv::python

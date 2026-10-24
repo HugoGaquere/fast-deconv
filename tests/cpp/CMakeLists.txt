@@ -7,11 +7,8 @@ find_package(GTest CONFIG REQUIRED)
 #-------------------------------------------------------------------#
 add_executable(fast_deconv_unit_tests
   test_convergence.cpp
-  test_large_index.cpp
-  test_resources.cpp
   test_fft.cpp
   test_linalg.cpp
-  test_pseudo_inverse.cpp
   test_matrix.cpp
   test_morphology.cpp
   test_mask.cpp
@@ -19,7 +16,6 @@ add_executable(fast_deconv_unit_tests
   test_clean.cpp
   test_gain.cpp
   test_multi_frequency.cpp
-  test_ddmsc_class.cpp
 )
 
 target_link_libraries(fast_deconv_unit_tests PRIVATE

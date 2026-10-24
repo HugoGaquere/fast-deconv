@@ -1,15 +1,12 @@
 #include <gtest/gtest.h>
 
-#include <cmath>
-#include <cstdint>
+#include <algorithm>
 #include <fast_deconv/common/mask.hpp>
 #include <fast_deconv/core/memory_types.hpp>
-#include <limits>
-#include <utility>
+#include <memory>
 #include <vector>
 
 #include "helpers/backend_test.hpp"
-#include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
 
 namespace core = fast_deconv::core;
@@ -18,115 +15,71 @@ namespace fdtest = fast_deconv::test;
 
 using fdtest::flat;
 
-// ============================================================================
-// build_auto_mask
-// ============================================================================
-
+// build_auto_mask output: (n_scales, nrow, ncol), 1 = masked, 0 = valid.
 class BuildAutoMask : public fdtest::BackendTest {
  protected:
-  // Run build_auto_mask on a single-channel scene and return the host mask.
-  // The output buffer is pre-filled with @p prefill so the internal memset is
-  // exercised; @p psf is a full (psf_h, psf_w) plane.
-  std::vector<uint8_t> run(const std::vector<common::index2d>& coords, const std::vector<int>& scales,
-                           const std::vector<float>& psf, int psf_h, int psf_w, const std::vector<float>& sigmas,
-                           const std::vector<bool>& external, int nrow, int ncol, int prefill = 0xff)
+  // Single-channel run with a square PSF. The output starts all masked, as left by an earlier cycle, so a
+  // valid pixel the function forgets to write shows up.
+  std::vector<int> run(const std::vector<common::index2d>& coords, const std::vector<int>& scales,
+                       const std::vector<float>& psf, int psf_size, const std::vector<float>& sigmas,
+                       const bool* external, int nrow, int ncol)
   {
-    const int n_scales = static_cast<int>(sigmas.size());
-    const int plane = nrow * ncol;
+    const int n_scales = static_cast<int>(sigmas.size()), n = n_scales * nrow * ncol;
+    const auto mask = std::make_unique<bool[]>(n);
+    std::fill_n(mask.get(), n, true);
+    const std::vector<float> weights = {1.0f};
+
     const auto sr = res().make_ctx();
+    const auto d_psf = sr.stage(core::host_span3d<const float>(psf.data(), 1, psf_size, psf_size));
+    const auto d_weights = sr.stage(core::host_span1d<const float>(weights.data(), 1));
+    const auto d_external = sr.stage(core::host_span2d<const bool>(external, nrow, ncol));
+    auto d_mask = sr.stage(core::host_span3d<bool>(mask.get(), n_scales, nrow, ncol));
 
-    fdtest::device_buffer<bool> d_mask(sr, static_cast<std::size_t>(n_scales) * plane);
-    d_mask.fill_bytes(prefill);
-
-    fdtest::device_buffer<float> d_psf(sr, psf);
-    fdtest::device_buffer<float> d_weights(sr, std::vector<float>{1.0f});  // single channel
-    fdtest::device_buffer<bool> d_external(sr, external);
-
-    core::span3d<bool> mask_view(d_mask.get(), n_scales, nrow, ncol);
-    core::span3d<float> psf_view(d_psf.get(), 1, psf_h, psf_w);
-    core::span1d<float> weights_view(d_weights.get(), 1);
-    core::span2d<bool> external_view(d_external.get(), nrow, ncol);
-
-    common::build_auto_mask(sr, coords, scales, psf_view, weights_view, sigmas, external_view, mask_view);
+    common::build_auto_mask(sr, coords, scales, d_psf, d_weights, sigmas, d_external, d_mask);
+    sr.unstage(d_mask, mask.get());
     sr.wait();
-    return d_mask.to_host();
-  }
-
-  // Delta PSF at the FFT center (psf_h/2, psf_w/2); even sizes keep it there.
-  static std::vector<float> delta_psf(int psf_h, int psf_w)
-  {
-    std::vector<float> psf(static_cast<std::size_t>(psf_h) * psf_w, 0.0f);
-    psf.at((psf_h / 2) * psf_w + (psf_w / 2)) = 1.0f;
-    return psf;
+    return {mask.get(), mask.get() + n};
   }
 };
 
-// With a delta center_psf and sigma=0 for every scale, conv2_psf is a delta,
-// the FWHM mask is a single pixel and the dilation is the identity — so the
-// final "is-near-component" map matches the per-scale peak premask exactly.
-// After finalize_mask_kernel: mask = (!is_near_component) || external_mask.
-TEST_F(BuildAutoMask, DeltaPsfZeroSigmaProducesPeakOnlyPremask)
+// Delta PSF and sigma 0: the FWHM support is a single pixel, so on each scale the only valid pixels are the
+// peaks of that scale's own components.
+TEST_F(BuildAutoMask, DeltaPsfLeavesOnlyEachScalesPeaksValid)
 {
-  const int n_scales = 3, nrow = 4, ncol = 5;
-  const int plane = nrow * ncol;
+  const int nrow = 4, ncol = 5, plane = nrow * ncol;
+  std::vector<float> psf(8 * 8, 0.0f);
+  psf.at(flat(4, 4, 8)) = 1.0f;  // the FFT center of an 8x8 plane
+  const auto no_external = std::make_unique<bool[]>(plane);
 
-  const std::vector<common::index2d> coords = {{0, 0}, {1, 2}, {3, 4}};
-  const std::vector<int> scales = {0, 2, 1};
+  const auto mask = run({{0, 0}, {1, 2}, {3, 4}}, /*scales=*/{0, 2, 1}, psf, 8, /*sigmas=*/{0.0f, 0.0f, 0.0f},
+                        no_external.get(), nrow, ncol);
 
-  // sigma = 0 → freq-domain Gaussian is identically 1, conv2_psf == the PSF.
-  // External mask all-false, so the output mask is exactly !is_near_component.
-  const auto h_mask = run(coords, scales, delta_psf(8, 8), 8, 8, std::vector<float>(n_scales, 0.0f),
-                          std::vector<bool>(plane, false), nrow, ncol);
-
-  // Peak coords are the only "near component" pixels → mask=0 there, 1 elsewhere.
-  std::vector<uint8_t> expected(static_cast<std::size_t>(n_scales) * plane, 1);
-  for (std::size_t k = 0; k < coords.size(); ++k)
-    expected.at(scales.at(k) * plane + coords.at(k).row * ncol + coords.at(k).col) = 0;
-
-  for (std::size_t i = 0; i < expected.size(); ++i)
-    EXPECT_EQ(h_mask.at(i), expected.at(i)) << "Mismatch at flat idx " << i;
+  std::vector<int> expected(3 * plane, 1);
+  expected.at(0 * plane + flat(0, 0, ncol)) = 0;
+  expected.at(2 * plane + flat(1, 2, ncol)) = 0;
+  expected.at(1 * plane + flat(3, 4, ncol)) = 0;
+  EXPECT_EQ(mask, expected);
 }
 
-// A real (Gaussian) PSF and a nonzero scale sigma: the component's FWHM
-// neighborhood must come out unmasked (false) on that component's scale slice,
-// pixels far away stay masked (true), and scales with no components are fully
-// masked.
-TEST_F(BuildAutoMask, GaussianPsfUnmasksFwhmNeighborhoodOfComponent)
+// Gaussian PSF (sigma 1.5), component on scale 1 (sigma 1): conv2 = PSF ** G_1 ** G_1 is a Gaussian of
+// sigma sqrt(1.5^2 + 2 * 1^2) ~ 2.06, which is above half its peak within ~2.4 px. That neighborhood is
+// valid, except where the external mask covers it; everything else, and the component-free scale 0, is masked.
+TEST_F(BuildAutoMask, GaussianPsfValidatesTheFwhmNeighborhood)
 {
-  const int nrow = 16, ncol = 16;
-  const int plane = nrow * ncol;
+  const int n = 16, plane = n * n;
+  const auto external = std::make_unique<bool[]>(plane);
+  external[flat(8, 9, n)] = true;
 
-  // Single component at the image center, on scale 1 (sigma = 1.0).
-  const auto h_mask = run({{8, 8}}, {1}, fdtest::gaussian2d(16, 16, 8, 8, /*sigma_psf=*/1.5), 16, 16, {0.0f, 1.0f},
-                          std::vector<bool>(plane, false), nrow, ncol);
+  const auto mask = run({{8, 8}}, /*scales=*/{1}, fdtest::gaussian2d(n, n, 8, 8, 1.5), n, /*sigmas=*/{0.0f, 1.0f},
+                        external.get(), n, n);
+  const auto scale1 = [&](int r, int c) { return mask.at(plane + flat(r, c, n)); };
 
-  // Scale 1: the conv2 PSF has sigma_eff = sqrt(sigma_psf^2 + 2*sigma_s^2) ≈ 2.06,
-  // FWHM radius ≈ 1.18*sigma_eff ≈ 2.4 px — the component and its immediate
-  // neighbors must be valid (false); far corners stay masked (true).
-  EXPECT_EQ(h_mask.at(plane + flat(8, 8, ncol)), 0) << "component pixel must be unmasked";
-  EXPECT_EQ(h_mask.at(plane + flat(7, 8, ncol)), 0);
-  EXPECT_EQ(h_mask.at(plane + flat(8, 9, ncol)), 0);
-  EXPECT_EQ(h_mask.at(plane + flat(0, 0, ncol)), 1) << "far pixel must stay masked";
-  EXPECT_EQ(h_mask.at(plane + flat(15, 15, ncol)), 1);
+  EXPECT_EQ(scale1(8, 8), 0);  // the component
+  EXPECT_EQ(scale1(7, 8), 0);  // 1 px away
+  EXPECT_EQ(scale1(8, 6), 0);  // 2 px away
+  EXPECT_EQ(scale1(8, 5), 1);  // 3 px away: outside the FWHM
+  EXPECT_EQ(scale1(0, 0), 1);
+  EXPECT_EQ(scale1(8, 9), 1);  // inside the FWHM but externally masked
 
-  // Scale 0 has no components: its slice is fully masked.
-  for (int i = 0; i < plane; ++i) ASSERT_EQ(h_mask.at(i), 1) << "scale-0 pixel " << i;
-}
-
-// An externally-masked pixel stays masked even when it hosts a component: the
-// external mask is OR'd in after the component-neighborhood negation.
-TEST_F(BuildAutoMask, ExternalMaskOverridesComponentNeighborhood)
-{
-  const int nrow = 4, ncol = 5;
-  const int plane = nrow * ncol;
-
-  // External mask true exactly at the component pixel.
-  std::vector<bool> external(plane, false);
-  external.at(flat(1, 2, ncol)) = true;
-
-  const auto h_mask = run({{1, 2}}, {0}, delta_psf(8, 8), 8, 8, {0.0f}, external, nrow, ncol, /*prefill=*/0);
-
-  // Delta PSF + sigma 0 would leave exactly the component pixel unmasked, but
-  // the external mask overrides it: everything is masked.
-  for (int i = 0; i < plane; ++i) ASSERT_EQ(h_mask.at(i), 1) << "pixel " << i;
+  EXPECT_EQ(std::count(mask.begin(), mask.begin() + plane, 1), plane) << "scale 0 has no component";
 }

@@ -14,13 +14,13 @@ namespace fast_deconv::scale {
 
 scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gaussian_convolution_ctx& conv_ctx,
                                core::span2d<const float> dirty, const std::vector<float>& sigmas,
-                               core::host_span1d<float> bias, const std::vector<int>& retired, core::span3d<bool> mask,
-                               bool absolute)
+                               core::host_span1d<const float> bias, const std::vector<int>& retired,
+                               core::span3d<const bool> mask, bool absolute)
 {
   FD_PROFILE_FN();
 
-  auto current = exec_ctx.alloc_mdcontainer_async<float>(dirty.extent(0), dirty.extent(1));
-  auto best = exec_ctx.alloc_mdcontainer_async<float>(dirty.extent(0), dirty.extent(1));
+  auto current = exec_ctx.alloc_mdcontainer<float>(dirty.extent(0), dirty.extent(1));
+  auto best = exec_ctx.alloc_mdcontainer<float>(dirty.extent(0), dirty.extent(1));
 
   // No mask means no masking; a single-plane mask is shared by every scale.
   const auto criterion_for = [&](int s) {

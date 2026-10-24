@@ -17,7 +17,6 @@
 #include <vector>
 
 #include "helpers/backend_test.hpp"
-#include "helpers/device_buffers.hpp"
 #include "helpers/host_oracles.hpp"
 #include "helpers/rng.hpp"
 
@@ -132,6 +131,18 @@ std::vector<float> make_dirty(std::mt19937& rng)
   return dirty;
 }
 
+// out[i] = sum_f weights[f] * data[f * npix + i]
+std::vector<float> weighted_sum(const std::vector<float>& data, const std::vector<float>& weights, std::size_t npix)
+{
+  std::vector<float> out(npix, 0.0f);
+  for (std::size_t i = 0; i < npix; ++i) {
+    double acc = 0.0;
+    for (std::size_t f = 0; f < weights.size(); ++f) acc += static_cast<double>(weights.at(f)) * data.at(f * npix + i);
+    out.at(i) = static_cast<float>(acc);
+  }
+  return out;
+}
+
 // ---- Metric comparison machinery
 
 struct metric_row {
@@ -161,11 +172,13 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
     h_xdes.at(f * kOrder + 1) = static_cast<float>(std::log(kNu.at(f) / kNu.at(0)));
   }
 
-  // ---- Upload the per-run inputs; the context stages its static inputs itself.
+  // ---- Stage the per-run inputs.
+  const std::vector<float> h_jones(static_cast<std::size_t>(kFreq) * kNpix, 1.0f);
+  const std::vector<float> h_weights(kFreq, 1.0f / kFreq);
   const auto sr = res().make_ctx();
-  fdtest::device_buffer<float> d_dirty(sr, h_dirty);
-  fdtest::device_buffer<float> d_jones(sr, std::vector<float>(static_cast<std::size_t>(kFreq) * kNpix, 1.0f));
-  fdtest::device_buffer<float> d_weights(sr, std::vector<float>(kFreq, 1.0f / kFreq));
+  auto dirty = sr.stage(core::host_span3d<float>(h_dirty.data(), kFreq, kNrow, kNcol));
+  const auto jones = sr.stage(core::host_span3d<const float>(h_jones.data(), kFreq, kNrow, kNcol));
+  const auto weights = sr.stage(core::host_span1d<const float>(h_weights.data(), kFreq));
 
   auto h_mask = std::make_unique<bool[]>(kNpix);
   std::vector<float> h_sigmas(kScaleSigmas.begin(), kScaleSigmas.end());
@@ -180,8 +193,8 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   core::host_span1d<float> bias_view(scale_bias.data(), kScales);
   core::host_span2d<int> map_view(map_pixel_facet.data(), kNrow, kNcol);
 
-  ddmsc::context ctx(/*exec_device=*/0, psfs_view, xdes_view, mask_view, sigmas_view, bias_view, map_view, kNrow, kNcol,
-                     kFreq);
+  ddmsc::context ctx(/*exec_device=*/0, psfs_view, xdes_view, mask_view, sigmas_view, bias_view, map_view, kNrow,
+                     kNcol);
 
   const ddmsc::params p{
       // Gaussian-component cleaning shrinks the residual by only ~5% of the
@@ -210,24 +223,20 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
       .auto_mask_rms_threshold = std::nullopt,
   };
 
-  core::span3d<float> dirty_view(d_dirty.get(), kFreq, kNrow, kNcol);
-  core::span3d<float> jones_view(d_jones.get(), kFreq, kNrow, kNcol);
-  core::span1d<float> weights_view(d_weights.get(), kFreq);
-
   // ---- Run the full minor-cycle driver. `dirty` is left as the residual.
-  const auto result = ddmsc::run_ddmsc_cycles(ctx, p, dirty_view, jones_view, weights_view);
-
-  h_dirty = d_dirty.to_host();
+  const auto result = ddmsc::run_ddmsc_cycles(ctx, p, dirty, jones, weights);
+  sr.unstage(dirty, h_dirty.data());
+  sr.wait();
 
   // ---- Derive scalar metrics.
-  const auto residual = fdtest::weighted_sum(h_dirty, std::vector<float>(kFreq, 1.0f / kFreq), kNpix);
+  const auto residual = weighted_sum(h_dirty, std::vector<float>(kFreq, 1.0f / kFreq), kNpix);
   const float residual_rms = fdtest::std_all(residual);
   float residual_max_abs = 0.0f;
   for (const float v : residual) residual_max_abs = std::max(residual_max_abs, std::abs(v));
 
   const int n_components = static_cast<int>(result.peak_coords.size());
   ASSERT_EQ(result.gains.size(), result.peak_coords.size());
-  ASSERT_EQ(result.coeffs.size(), result.peak_coords.size() * result.n_order);
+  ASSERT_EQ(result.coeffs.size(), result.peak_coords.size() * core::narrow<std::size_t>(result.n_order));
 
   // Peak-flux removed from the dirty image per component: the subtraction is
   // coeff * gain * conv_psf where conv_psf is sum-normalized with peak p_s and
@@ -237,7 +246,8 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   double cleaned_flux_total = 0.0;
   std::array<int, kScales> components_per_scale{};
   for (int i = 0; i < n_components; ++i) {
-    cleaned_flux_total += static_cast<double>(p.gamma) * result.coeffs.at(i * result.n_order);
+    cleaned_flux_total +=
+        static_cast<double>(p.gamma) * result.coeffs.at(core::narrow<std::size_t>(i * result.n_order));
     components_per_scale.at(result.scales.at(i))++;
   }
 
@@ -248,11 +258,13 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   for (std::size_t s = 0; s < kSources.size(); ++s) {
     double nearest = 1e9;
     for (int i = 0; i < n_components; ++i) {
-      const double dr = result.peak_coords.at(i).first - kSources.at(s).row;
-      const double dc = result.peak_coords.at(i).second - kSources.at(s).col;
+      const auto dr = static_cast<double>(result.peak_coords.at(i).first - kSources.at(s).row);
+      const auto dc = static_cast<double>(result.peak_coords.at(i).second - kSources.at(s).col);
       const double dist = std::sqrt(dr * dr + dc * dc);
       nearest = std::min(nearest, dist);
-      if (dist <= 15.0) recovered_flux.at(s) += static_cast<double>(p.gamma) * result.coeffs.at(i * result.n_order);
+      if (dist <= 15.0)
+        recovered_flux.at(s) +=
+            static_cast<double>(p.gamma) * result.coeffs.at(core::narrow<std::size_t>(i * result.n_order));
     }
     nearest_component_px.at(s) = nearest;
   }

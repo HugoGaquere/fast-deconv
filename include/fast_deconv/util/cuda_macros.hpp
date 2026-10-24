@@ -4,10 +4,7 @@
 #include <iostream>
 
 #define CHECK_CUDA(val) check_cuda((val), #val, __FILE__, __LINE__)
-inline void check_cuda(cudaError_t err,
-                       const char* const func,
-                       const char* const file,
-                       const int line)
+inline void check_cuda(cudaError_t err, const char* const func, const char* const file, const int line)
 {
   if (err != cudaSuccess) {
     std::cerr << "CUDA Runtime Error at: " << file << ":" << line << std::endl;
@@ -26,5 +23,3 @@ inline void check_last(const char* const file, const int line)
     std::exit(EXIT_FAILURE);
   }
 }
-
-#define CEIL_DIV(a, b) (((a) + (b) - 1) / (b))

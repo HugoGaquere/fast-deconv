@@ -10,8 +10,11 @@
 
 namespace fast_deconv::core {
 
-/// Owns the device and its memory pool. One per device; hands its pool to
-/// every lane created from it.
+/**
+ * @brief Owns the device and its memory pool.
+ *
+ * One per device; hands its pool to every exec_ctx created from it.
+ */
 class exec_resources_impl {
  public:
   explicit exec_resources_impl(std::uint8_t device) : device(device), memory_pool(make_memory_pool(device)) {}
@@ -46,23 +49,25 @@ class exec_resources_impl {
   static cudaMemPool_t make_memory_pool(std::uint8_t device)
   {
     cudaMemPoolProps pool_props = {};
-    pool_props.allocType = cudaMemAllocationTypePinned;    // page-locked GPU memory
+    pool_props.allocType = cudaMemAllocationTypePinned;    // non-migratable device memory
     pool_props.handleTypes = cudaMemHandleTypeNone;        // no inter-process sharing
     pool_props.location.type = cudaMemLocationTypeDevice;  // memory lives on the GPU
     pool_props.location.id = device;                       // GPU to allocate on
     cudaMemPool_t pool{};
     CHECK_CUDA(cudaMemPoolCreate(&pool, &pool_props));
 
-    // configure memory pool to never release back to os
+    // Never release freed blocks back to the driver: they stay in the pool for reuse.
     std::uint64_t threshold = UINT64_MAX;
     CHECK_CUDA(cudaMemPoolSetAttribute(pool, cudaMemPoolAttrReleaseThreshold, &threshold));
     return pool;
   }
 };
 
-/// One execution lane: a stream, its cuBLAS handle, and stream-ordered
-/// allocation from the owning pool. Members are public because the kernel
-/// launches in the .cu files need the stream.
+/**
+ * @brief The cuda exec_ctx: a stream, its cuBLAS handle, and stream-ordered allocation from the owning pool.
+ *
+ * Members are public because the kernel launches in the .cu files need the stream.
+ */
 class exec_ctx_impl {
  public:
   /// Backend memory lives on the device, so stage() must really copy.
@@ -107,19 +112,6 @@ class exec_ctx_impl {
   }
 
   void wait() const { CHECK_CUDA(cudaStreamSynchronize(cuda_stream)); }
-
-  /// Bytes a new allocation can draw on: the pool holds its idle bytes back from the driver, so add them.
-  std::uint64_t available_bytes() const
-  {
-    std::size_t free_bytes = 0;
-    std::size_t total_bytes = 0;
-    CHECK_CUDA(cudaMemGetInfo(&free_bytes, &total_bytes));
-    cuuint64_t reserved = 0;
-    cuuint64_t used = 0;
-    CHECK_CUDA(cudaMemPoolGetAttribute(memory_pool, cudaMemPoolAttrReservedMemCurrent, &reserved));
-    CHECK_CUDA(cudaMemPoolGetAttribute(memory_pool, cudaMemPoolAttrUsedMemCurrent, &used));
-    return free_bytes + (reserved - used);
-  }
 
   cudaStream_t cuda_stream{};
   cublasHandle_t cublas_handle{};
