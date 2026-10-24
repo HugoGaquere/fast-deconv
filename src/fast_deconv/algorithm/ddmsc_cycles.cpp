@@ -80,7 +80,6 @@ std::optional<float> auto_mask_trigger(const params& p, float flux, float rms)
 
 struct run_workspace {
   core::cont2d<float> mean_residual_buf;
-  matrix::stats_ctx stats;
   matrix::tiled_argmax_ctx tiled;
   const linalg::gaussian_convolution_ctx scale_conv;
   psf_convolution psf_cache;
@@ -93,7 +92,6 @@ struct run_workspace {
   run_workspace(const context& ctx, const params& p, std::int64_t nrow, std::int64_t ncol, std::int64_t n_freq,
                 core::span1d<const float> weights_freq)
       : mean_residual_buf(ctx.compute_stream.alloc_mdcontainer<float>(nrow, ncol)),
-        stats(ctx.compute_stream, nrow * ncol, p.clean_negative),
         tiled(ctx.compute_stream, mean_residual_buf.extents(), 64),
         scale_conv(ctx.compute_stream, 1, ctx.dirty_nrow, ctx.dirty_ncol, ctx.scale_sigmas),
         psf_cache(ctx.compute_stream, ctx.raw_psfs, ctx.scale_sigmas, weights_freq, p.gamma),
@@ -222,7 +220,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   const core::span2d<float> mean_residual(ws.mean_residual_buf);
   linalg::weighted_sum(stream_a, dirty, weights_freq, mean_residual);
 
-  auto [track_flux, track_rms] = ws.stats.max_and_rms(mean_residual, ctx.mask);
+  auto [track_flux, track_rms] = matrix::max_and_rms(stream_a, mean_residual, ctx.mask, p.clean_negative);
 
   // A previous major cycle overflowed.
   if (!std::isfinite(track_flux) || !std::isfinite(track_rms))
@@ -292,7 +290,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
     linalg::weighted_sum(stream_a, dirty, weights_freq, mean_residual);
 
     // TODO(guards): stats use ctx.mask while the clean loop may search mask_per_scale.
-    auto [this_flux, this_rms] = ws.stats.max_and_rms(mean_residual, ctx.mask);
+    auto [this_flux, this_rms] = matrix::max_and_rms(stream_a, mean_residual, ctx.mask, p.clean_negative);
 
     deconv_convergence.track(this_flux, this_rms, n_clean_iter, selected_scale_idx);
 

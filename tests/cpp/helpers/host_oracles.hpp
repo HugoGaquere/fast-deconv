@@ -30,7 +30,7 @@ inline std::vector<float> gaussian2d(int nrow, int ncol, double cr, double cc, d
   return img;
 }
 
-// sqrt(max(E[x^2] - E[x]^2, 0)) over ALL pixels — the matrix::stats_ctx::max_and_rms
+// sqrt(max(E[x^2] - E[x]^2, 0)) over ALL pixels — the matrix::max_and_rms
 // rms definition (its mask applies to the max only).
 inline float std_all(const std::vector<float>& data)
 {
