@@ -34,6 +34,8 @@ if(NOT DEFINED CMAKE_CXX_STANDARD)
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# clangd cannot read nvcc --options-file; keep CUDA include paths inline in compile_commands.json.
+set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES OFF)
 
 option(FAST_DECONV_BUILD_TOOLS "Build the replay executable" OFF)
 option(FAST_DECONV_WITH_PROFILER "Enable core/profiler.hpp: NVTX on cuda, Tracy on host" OFF)
