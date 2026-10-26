@@ -2,6 +2,7 @@
 #include <concepts>
 #include <cstdint>
 #include <emu/detail/mdspan_types.hpp>
+#include <fast_deconv/core/concepts.hpp>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -30,5 +31,8 @@ To narrow(From v)
 }
 
 constexpr std::int64_t ceil_div(std::int64_t a, std::int64_t b) { return (a + b - 1) / b; }
+
+/// Element count of @p m as int64, without the unsigned size(); covers the whole buffer only when exhaustive.
+constexpr std::int64_t count(const cpts::mdspan auto& m) { return m.mapping().required_span_size(); }
 
 }  // namespace fast_deconv::core

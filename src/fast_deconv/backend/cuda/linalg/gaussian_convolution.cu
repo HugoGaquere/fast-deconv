@@ -92,7 +92,7 @@ void gaussian_convolution_ctx::forward(core::span3d<const float> input, spectrum
   FD_PROFILE_FN();
   assert(input.is_exhaustive() && input.extent(0) == batch_);
   assert(input.extent(1) == dims_.input_nrow && input.extent(2) == dims_.input_ncol);
-  assert(out.mapping().required_span_size() == batch_ * dims_.freq_total());
+  assert(out.extent(0) == batch_ * dims_.freq_total());
 
   pad(ctx_, dims_, input.data_handle(), padded_.get(), batch_);
   forward_(padded_.get(), out.data_handle());
@@ -101,7 +101,7 @@ void gaussian_convolution_ctx::forward(core::span3d<const float> input, spectrum
 void gaussian_convolution_ctx::convolve(const spectrum& in, float sigma, core::span3d<float> out) const
 {
   FD_PROFILE_FN();
-  assert(in.mapping().required_span_size() == batch_ * dims_.freq_total());
+  assert(in.extent(0) == batch_ * dims_.freq_total());
   assert(out.is_exhaustive() && out.extent(0) == batch_);
   assert(out.extent(1) == dims_.input_nrow && out.extent(2) == dims_.input_ncol);
   assert(gaussian_reach(sigma) <= std::min(dims_.padded_nrow - dims_.input_nrow, dims_.padded_ncol - dims_.input_ncol));

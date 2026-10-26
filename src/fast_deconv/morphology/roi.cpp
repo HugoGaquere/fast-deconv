@@ -41,8 +41,8 @@ common::roi compute_mask_roi(const core::exec_ctx& ctx, core::span2d<const bool>
 {
   FD_PROFILE_FN();
   assert(data.is_exhaustive());
-  const common::roi result = core::reduce(ctx, data.mapping().required_span_size(),
-                                          pixel_roi{data.data_handle(), data.extent(1)}, roi_union{}, kNoRoi);
+  const common::roi result =
+      core::reduce(ctx, core::count(data), pixel_roi{data.data_handle(), data.extent(1)}, roi_union{}, kNoRoi);
 
   // Nothing raised rmax, so the mask was empty: report an empty box, not the identity.
   if (result.rmax == 0) return {};

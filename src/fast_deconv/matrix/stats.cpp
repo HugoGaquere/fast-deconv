@@ -54,7 +54,7 @@ stats_result max_and_rms(const core::exec_ctx& ctx, core::span2d<const float> da
   assert(data.is_exhaustive() && mask.is_exhaustive());
   assert(data.extents() == mask.extents());
 
-  const std::int64_t n = data.mapping().required_span_size();
+  const std::int64_t n = core::count(data);
   if (n == 0) return {-INFINITY, 0.f};
 
   const stats_acc acc =

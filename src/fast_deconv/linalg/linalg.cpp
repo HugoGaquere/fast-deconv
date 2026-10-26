@@ -20,7 +20,7 @@ void weighted_sum(const core::exec_ctx& ctx, core::span3d<const float> A, core::
   float* o = out.data_handle();
 
   // Pixel-major: each pixel's accumulator stays in a register, and on CUDA a warp reads each plane contiguously.
-  core::for_each_index(ctx, out.mapping().required_span_size(), [=] FD_HOST_DEVICE(std::int64_t i) {
+  core::for_each_index(ctx, core::count(out), [=] FD_HOST_DEVICE(std::int64_t i) {
     float acc = 0.0f;
     for (std::int64_t c = 0; c < n_planes; c++) acc += a[c * plane + i] * w[c];
     o[i] = acc;
