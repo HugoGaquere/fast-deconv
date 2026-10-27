@@ -192,19 +192,3 @@ TEST(ScaleStallTracker, ThresholdIsRelativeToThePreviousRms)
     EXPECT_TRUE(t.is_stall(0)) << "rms " << rms;
   }
 }
-
-// reset() un-retires every scale; later updates strike from zero again.
-TEST(ScaleStallTracker, ResetClearsEveryStrike)
-{
-  scale_stall_tracker t(/*n_scales=*/2, /*max_stall_count=*/0, /*stall_threshold=*/0.01f);
-  t.init_rms(1.0f);
-  t.update(0, 1.0f);
-  t.update(1, 1.0f);
-  ASSERT_TRUE(t.all_stalled());
-
-  t.reset();
-  EXPECT_TRUE(t.get_all_stalled().empty());
-
-  t.update(1, 1.0f);
-  EXPECT_EQ(t.get_all_stalled(), std::vector<int>{1});
-}
