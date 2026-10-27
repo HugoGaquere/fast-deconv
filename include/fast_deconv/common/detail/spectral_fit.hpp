@@ -5,7 +5,7 @@
 #include <fast_deconv/core/macro.hpp>
 
 // The spectral fit run by fit_coefficients() on either backend: one index, sequential.
-namespace fast_deconv::multi_frequency::detail {
+namespace fast_deconv::common::detail {
 
 // Largest spectral order the solve keeps in local storage. The order is the
 // number of frequency basis functions, which is a handful in practice.
@@ -182,4 +182,4 @@ FD_HOST_DEVICE inline bool spectral_fit(float* compact_out, float* per_chan_out,
   return true;
 }
 
-}  // namespace fast_deconv::multi_frequency::detail
+}  // namespace fast_deconv::common::detail

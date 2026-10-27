@@ -126,7 +126,7 @@ core::cont3d<bool> build_scale_mask(const context& ctx, const ddmsc_result& resu
 }
 
 // Returns the number of components found, with both contexts synced.
-int clean_loop(run_workspace& ws, const context& ctx, const params& p, const scale::scale_result& selected,
+int clean_loop(run_workspace& ws, const context& ctx, const params& p, const common::scale_result& selected,
                core::span3d<float> dirty, core::span3d<const float> jones_norm, core::span1d<const float> weights_freq,
                int first_component, ddmsc_result& result)
 {
@@ -167,8 +167,8 @@ int clean_loop(run_workspace& ws, const context& ctx, const params& p, const sca
 
     const std::int64_t coeffs_offset = (std::int64_t{first_component} + n_clean_iter) * n_order;
     auto spectral_coeffs = core::span1d<float>(ws.all_coeffs.data_handle() + coeffs_offset, n_order);
-    multi_frequency::fit_coefficients(ctx.cube_exec, dirty, jones_norm, weights_freq, ctx.xdes, peak_coords,
-                                      spectral_coeffs, ws.coeffs_per_chan);
+    common::fit_coefficients(ctx.cube_exec, dirty, jones_norm, weights_freq, ctx.xdes, peak_coords, spectral_coeffs,
+                             ws.coeffs_per_chan);
 
     common::subtract_component(ctx.cube_exec, dirty, conv_psf, ws.coeffs_per_chan, peak_coords, gain);
     common::subtract_component(ctx.exec, scaled_residual, conv2_psf, peak_coords, peak_signed * gain,
@@ -190,6 +190,24 @@ int clean_loop(run_workspace& ws, const context& ctx, const params& p, const sca
 }
 
 // The minor-cycle loop on staged inputs; appends this run's components to the context's history.
+//
+// weighted_sum → mean residual; max_and_rms → stop_flux
+// ├─ outer loop, until convergence stops
+// │  ├─ auto-mask engaged? build mask_per_scale (once)
+// │  ├─ auto-mask on? combine_scale_masks over the live scales
+// │  ├─ select_best_scale → scale s, scaled residual, first peak
+// │  ├─ clean loop, while peak > peak_factor · first peak and under max_clean_iteration
+// │  │  ├─ psf_cache.get(s, facet of peak)
+// │  │  ├─ fit_coefficients              cube_exec
+// │  │  ├─ subtract_component (cube)     cube_exec
+// │  │  ├─ subtract_component (scaled)   exec
+// │  │  └─ tiled argmax, incremental     exec
+// │  ├─ wait both
+// │  ├─ no component found? convergence.track with 0 components, next iteration
+// │  └─ weighted_sum, max_and_rms, convergence.track
+// ├─ copy the spectral coefficients into the result
+// ├─ max_and_rms under the external mask → final flux and rms; status from convergence
+// └─ append the peaks and scales to the session history
 ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float> dirty,
                               core::span3d<const float> jones_norm, core::span1d<const float> weights_freq)
 {
@@ -272,9 +290,9 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
         if (std::ranges::find(retired, s) == retired.end()) active.push_back(s);
       common::combine_scale_masks(ctx.exec, *ws.mask_per_scale, active, *ws.merged_active_mask);
     }
-    const scale::scale_result selected =
-        scale::select_best_scale(ctx.exec, ws.scale_conv, mean_residual, ctx.scale_sigmas, ctx.scale_bias, retired,
-                                 scale_masks, p.clean_negative);
+    const common::scale_result selected =
+        common::select_best_scale(ctx.exec, ws.scale_conv, mean_residual, ctx.scale_sigmas, ctx.scale_bias, retired,
+                                  scale_masks, p.clean_negative);
     const int selected_scale_idx = selected.scale;
 
     const int n_clean_iter =

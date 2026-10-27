@@ -3,7 +3,7 @@
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/index.hpp>
 
-namespace fast_deconv::multi_frequency {
+namespace fast_deconv::common {
 
 /**
  * @brief Fit the spectral model of the component at @p peak_coords and its per-channel flux.
@@ -32,4 +32,4 @@ void fit_coefficients(const core::exec_ctx& ctx, core::span3d<const float> resid
                       core::span2d<const float> xdes, core::index2d peak_coords, core::span1d<float> compact_coeffs_out,
                       core::span1d<float> coeffs_per_chan_out);
 
-}  // namespace fast_deconv::multi_frequency
+}  // namespace fast_deconv::common

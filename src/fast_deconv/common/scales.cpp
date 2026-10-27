@@ -10,17 +10,17 @@
 
 #include "fast_deconv/matrix/peak.hpp"
 
-namespace fast_deconv::scale {
+namespace fast_deconv::common {
 
-scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gaussian_convolution_ctx& conv_ctx,
+scale_result select_best_scale(const core::exec_ctx& ctx, const linalg::gaussian_convolution_ctx& conv_ctx,
                                core::span2d<const float> dirty, const std::vector<float>& sigmas,
                                core::host_span1d<const float> bias, const std::vector<int>& retired,
                                core::span3d<const bool> mask, bool absolute)
 {
   FD_PROFILE_FN();
 
-  auto current = exec_ctx.alloc_mdcontainer<float>(dirty.extent(0), dirty.extent(1));
-  auto best = exec_ctx.alloc_mdcontainer<float>(dirty.extent(0), dirty.extent(1));
+  auto current = ctx.alloc_mdcontainer<float>(dirty.extent(0), dirty.extent(1));
+  auto best = ctx.alloc_mdcontainer<float>(dirty.extent(0), dirty.extent(1));
 
   // No mask means no masking; a single-plane mask is shared by every scale.
   const auto criterion_for = [&](int s) {
@@ -45,7 +45,7 @@ scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gau
   };
 
   // Scale 0 is the identity: search dirty in place, copy only if it wins.
-  if (!is_retired(0)) is_better(0, matrix::find_peak(exec_ctx, dirty, criterion_for(0)));
+  if (!is_retired(0)) is_better(0, matrix::find_peak(ctx, dirty, criterion_for(0)));
 
   // One forward transform, shared by every scale's convolution.
   auto spectrum = conv_ctx.make_spectrum();
@@ -57,12 +57,12 @@ scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gau
     // Rebuilt each time: the swap below moves current onto the other buffer.
     conv_ctx.convolve(spectrum, sigmas.at(s),
                       core::span3d<float>(current.data_handle(), 1, current.extent(0), current.extent(1)));
-    if (is_better(s, matrix::find_peak(exec_ctx, current, criterion_for(s)))) std::swap(current, best);
+    if (is_better(s, matrix::find_peak(ctx, current, criterion_for(s)))) std::swap(current, best);
   }
 
   if (best_scale < 0) throw std::invalid_argument("select_best_scale: every scale is retired");
 
-  if (best_scale == 0) exec_ctx.copy(best, dirty);
+  if (best_scale == 0) ctx.copy(best, dirty);
 
   return {.scale = best_scale,
           .scaled_residual = std::move(best),
@@ -70,4 +70,4 @@ scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gau
           .criterion = criterion_for(best_scale)};
 }
 
-}  // namespace fast_deconv::scale
+}  // namespace fast_deconv::common
