@@ -26,8 +26,7 @@ class gaussian_convolution_ctx {
    * @param[in] batch  Images per call.
    * @param[in] nrow   Image rows.
    * @param[in] ncol   Image columns.
-   * @param[in] sigmas Unused: each line is padded to gaussian_reach(sigma) of the sigma at hand, wrap-free for
-   *                   any sigma. Kept for the CUDA backend's signature.
+   * @param[in] sigmas Unused: each line is padded to the reach of its own sigma. Kept for the CUDA signature.
    * @param[in] factor Unused, as @p sigmas.
    */
   gaussian_convolution_ctx(const core::exec_ctx& ctx, std::int64_t batch, std::int64_t nrow, std::int64_t ncol,

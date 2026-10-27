@@ -179,16 +179,14 @@ struct Ddmsc {
   /**
    * @brief Builds the context (see context::context); cfg starts at the params defaults.
    *
-   * Staging borrows on the host backend, so there the staged inputs must outlive this too.
+   * Borrowed inputs must outlive this, and so must the staged ones on the host backend, which borrows them.
    *
    * @param[in] raw_psfs         Raw PSFs, host, (n_facets, n_freq, psf_h, psf_w). Staged.
    * @param[in] xdes             Spectral design matrix, host, (n_freq, n_order). Staged.
    * @param[in] mask             External mask, host, (dirty_nrow, dirty_ncol), true = masked. Staged.
    * @param[in] scale_sigmas     Gaussian sigma per scale, host, (n_scales,). Copied.
-   * @param[in] scale_bias       Per-scale weight on the peak value during scale selection, host, (n_scales,).
-   *                             Borrowed: must outlive this.
-   * @param[in] map_pixel_facet  Facet index of every dirty pixel, host, (dirty_nrow, dirty_ncol). Borrowed: must
-   *                             outlive this.
+   * @param[in] scale_bias       Per-scale weight on the peak value during scale selection, host, (n_scales,). Borrowed.
+   * @param[in] map_pixel_facet  Facet index of every dirty pixel, host, (dirty_nrow, dirty_ncol). Borrowed.
    * @param[in] dirty_nrow       Dirty image rows.
    * @param[in] dirty_ncol       Dirty image columns.
    * @param[in] exec_device      Device the resources and streams are created on.
@@ -201,8 +199,7 @@ struct Ddmsc {
   /**
    * @brief Run the minor loop for one major cycle.
    *
-   * @param[in,out] dirty         Dirty image, host, (n_freq, nrow, ncol); the residual is written back
-   *                              before returning.
+   * @param[in,out] dirty         Dirty image, host, (n_freq, nrow, ncol); the residual is written back.
    * @param[in]     jones_norm    Jones normalization, host, (n_freq, nrow, ncol).
    * @param[in]     weights_freq  Per-frequency weights, host, (n_freq,).
    * @return Extracted components, entry/exit flux and standard deviation, and why the loop stopped.
