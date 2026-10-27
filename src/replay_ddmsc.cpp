@@ -1,4 +1,4 @@
-// Replay a DDMSC session captured from DDFacet, without launching DDFacet.
+// Replay a captured DDMSC session, without the imager.
 //
 // Usage:  replay_ddmsc <dump_dir> [--device=N] [--cycle=N] [--runs=N]
 //                      [--max-iter=N] [--max-clean-iter=N]
@@ -35,7 +35,7 @@
 // 1-outer warm-up first absorbs the process's CUDA initialisation. --csv=FILE
 // appends one row per repetition, tagged with --label and the host name.
 //
-// The dump is produced by running DDFacet with FAST_DECONV_DUMP=<dir> (see
+// The dump is produced by running the imager with FAST_DECONV_DUMP=<dir> (see
 // fast_deconv/__init__.py): `init/` holds the ctor inputs, `cycle_<N>/` holds
 // one major cycle's run() inputs plus every algorithm parameter as it stood
 // for that call. Cycles replay in order on a single Ddmsc, so the auto-mask

@@ -226,7 +226,6 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   FD_LOG_INFO("{}", format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_nrow, psf_ncol));
   FD_PROFILE_APPINFO(format_run_banner(p, dirty_nrows, dirty_ncols, n_freq, n_facets, n_scales, psf_nrow, psf_ncol));
 
-  // Matches DDFacet's NBand check.
   if (n_freq < 2 * n_order)
     FD_LOG_WARN("run_ddmsc: spectral fit is under-constrained (n_freq={} n_order={}); want n_freq >= 2*n_order.",
                 n_freq, n_order);

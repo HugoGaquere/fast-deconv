@@ -110,7 +110,7 @@ fit_oracle host_fit(const std::vector<double>& xdes, const std::vector<double>& 
 
 // Host double-precision minimum-norm fit, for n_order >= n_freq. There are fewer bands
 // than coefficients, so SAX theta = y has infinitely many solutions and the Gram matrix
-// SAX^T W SAX is singular. Take the smallest solution instead, as DDFacet does:
+// SAX^T W SAX is singular. Take the smallest solution instead:
 //   H = SAX SAX^T (n_freq x n_freq),  theta = SAX^T H^-1 y
 // The weights cancel exactly in this branch, so they are not an argument.
 std::vector<double> host_fit_min_norm(const std::vector<double>& xdes, const std::vector<double>& jn_at_peak,
