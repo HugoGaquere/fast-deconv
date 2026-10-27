@@ -28,12 +28,14 @@ class scale_stall_tracker {
   /**
    * @param[in] n_scales         Number of scales tracked.
    * @param[in] max_stall_count  Strikes a scale may take before it counts as stalled.
-   * @param[in] stall_threshold  Absolute standard deviation change below which an update is a strike.
+   * @param[in] stall_threshold  Standard deviation change, relative to the previous one, below which an update is a
+   *                             strike.
    */
   scale_stall_tracker(int n_scales, int max_stall_count, float stall_threshold)
       : scales_stall_count_(n_scales, 0), max_stall_count_(max_stall_count), stall_threshold_(stall_threshold) {};
 
-  /// Strike for @p scale if @p rms (standard deviation) moved less than the threshold, else reset its count.
+  /// Strike for @p scale if @p rms (standard deviation) moved by less than the threshold times the previous one,
+  /// else reset its count.
   void update(int scale, float rms);
   /// True once every scale is stalled.
   bool all_stalled() const;
@@ -41,6 +43,8 @@ class scale_stall_tracker {
   bool is_stall(int scale) const;
   /// Sets the standard deviation the first update() compares against.
   void init_rms(float rms);
+  /// Clears every scale's strikes, which un-retires the stalled scales.
+  void reset();
   /// Indices of the stalled scales, ascending.
   std::vector<int> get_all_stalled() const;
 
@@ -88,6 +92,8 @@ class convergence {
   [[nodiscard]] bool is_stall(int scale) const;
   /// See scale_stall_tracker::get_all_stalled().
   [[nodiscard]] std::vector<int> get_all_stalled() const;
+  /// See scale_stall_tracker::reset().
+  void reset_stalls();
 
   /// Seeds the initial flux and standard deviation; must be called once before any track().
   void init(float flux, float rms);

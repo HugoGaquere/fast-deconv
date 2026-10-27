@@ -40,8 +40,9 @@ struct params {
   int max_clean_iteration = 0;  // sub-minor loop iterations per scale selection
 
   // scales params
-  // A standard deviation change, from the previous outer iteration, below this is one stall strike for the
-  // selected scale; a strike-free iteration resets its count. More than 5 consecutive strikes retire the scale.
+  // Relative standard deviation change between outer iterations below which the selected scale takes a stall strike;
+  // a strike-free iteration resets its count. More than 5 consecutive strikes retire the scale. Engaging the
+  // auto-mask clears every count.
   float scale_stall_threshold = 0.0f;
   bool enable_auto_mask = false;        // master switch for auto-masking
   bool force_enable_auto_mask = false;  // with enable_auto_mask, engage masking immediately, bypassing thresholds

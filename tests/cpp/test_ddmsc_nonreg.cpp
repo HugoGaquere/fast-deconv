@@ -215,8 +215,8 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
       // makes the smoothed plane outbid compact scales even when scale-3
       // cleaning stops improving the rms, and retirement is what breaks that
       // spiral (as in production). Productive outer iterations move the rms by
-      // ~1e-3 in this scene; below 1e-4 counts as a stall strike.
-      .scale_stall_threshold = 1e-4f,
+      // a few percent in this scene; a move below 0.5% of it counts as a stall strike.
+      .scale_stall_threshold = 5e-3f,
       .enable_auto_mask = false,
       .force_enable_auto_mask = false,
       .auto_mask_peak_threshold = std::nullopt,
