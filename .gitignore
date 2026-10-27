@@ -53,10 +53,10 @@ docs/*
 *.nsys-rep
 *.sqlite
 
-# Paper raw run data (large; regenerated from scripts/paper)
+# Paper raw run data (large; regenerated from ../fast-deconv-scripts/paper)
 paper_data/
 
-# Paper figures (regenerated from paper_data via scripts/paper/paper.py)
+# Paper figures (regenerated from paper_data via ../fast-deconv-scripts/paper/paper.py)
 paper_figures/
 
 # CMake / IDE-generated
