@@ -118,11 +118,12 @@ struct ddmsc_result {
   std::int64_t n_order = 0;
   float initial_flux = 0.0f;  // peak flux of the mean residual on entry
   float initial_rms = 0.0f;   // standard deviation of the mean residual on entry
-  float final_flux = 0.0f;    // peak flux of the mean residual after the last outer iteration
-  float final_rms = 0.0f;     // standard deviation of the mean residual after the last outer iteration
-  float stop_flux = 0.0f;     // composed stop-flux threshold used for this call (max of the four limits)
-  int total_iterations = 0;   // total minor iterations consumed across all outer cycles
-  int outer_iterations = 0;   // scale selections, including the one that found no component
+  // final_flux and final_rms ignore the auto-mask.
+  float final_flux = 0.0f;   // peak flux of the mean residual after the last outer iteration
+  float final_rms = 0.0f;    // standard deviation of the mean residual after the last outer iteration
+  float stop_flux = 0.0f;    // composed stop-flux threshold used for this call (max of the four limits)
+  int total_iterations = 0;  // total minor iterations consumed across all outer cycles
+  int outer_iterations = 0;  // scale selections, including the one that found no component
   common::convergence_status status = common::convergence_status::running;  // why the outer loop ended
 
   /// @p capacity is the most components one call can produce.

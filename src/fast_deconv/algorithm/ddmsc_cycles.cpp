@@ -88,6 +88,8 @@ struct run_workspace {
   core::cont1d<float> coeffs_per_chan;
   // Built once, the first time the auto-mask engages.
   std::optional<core::cont3d<bool>> mask_per_scale;
+  // Pixels some active (non-retired) scale may clean; the stop and divergence stats are measured on it.
+  std::optional<core::cont2d<bool>> merged_active_mask;
 
   run_workspace(const context& ctx, const params& p, std::int64_t nrow, std::int64_t ncol, std::int64_t n_freq,
                 core::span1d<const float> weights_freq)
@@ -243,6 +245,9 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   result.initial_flux = track_flux;
   result.initial_rms = track_rms;
   int last_selected_scale = -1;
+  // Switched to the auto-mask once, when it engages.
+  core::span3d<const bool> scale_masks(ctx.mask.data_handle(), 1, ctx.mask.extent(0), ctx.mask.extent(1));
+  core::span2d<const bool> stats_mask = ctx.mask;
 
   stream_a.wait();
   while (!deconv_convergence.should_stop()) {
@@ -261,14 +266,23 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
     if (auto_mask_threshold && !ws.mask_per_scale) {
       FD_LOG_INFO("Start auto masking at threshold {}", *auto_mask_threshold);
       ws.mask_per_scale = build_scale_mask(ctx, result, weights_freq, dirty_nrows, dirty_ncols);
+      ws.merged_active_mask = stream_a.alloc_mdcontainer<bool>(dirty_nrows, dirty_ncols);
+      scale_masks = *ws.mask_per_scale;
+      // A peak no scale can reach must not hold the loop above the stop flux.
+      stats_mask = *ws.merged_active_mask;
+      deconv_convergence.reset_stalls();
     }
 
     const auto retired = deconv_convergence.get_all_stalled();
+    if (ws.mask_per_scale) {
+      std::vector<int> active;
+      for (int s = 0; s < n_scales; s++)
+        if (std::ranges::find(retired, s) == retired.end()) active.push_back(s);
+      common::combine_scale_masks(stream_a, *ws.mask_per_scale, active, *ws.merged_active_mask);
+    }
     const scale::scale_result selected =
-        auto_mask_threshold ? scale::select_best_scale(stream_a, ws.scale_conv, mean_residual, ctx.scale_sigmas,
-                                                       ctx.scale_bias, retired, *ws.mask_per_scale, p.clean_negative)
-                            : scale::select_best_scale(stream_a, ws.scale_conv, mean_residual, ctx.scale_sigmas,
-                                                       ctx.scale_bias, retired, ctx.mask, p.clean_negative);
+        scale::select_best_scale(stream_a, ws.scale_conv, mean_residual, ctx.scale_sigmas, ctx.scale_bias, retired,
+                                 scale_masks, p.clean_negative);
     const int selected_scale_idx = selected.scale;
 
     const int n_clean_iter =
@@ -289,8 +303,7 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
 
     linalg::weighted_sum(stream_a, dirty, weights_freq, mean_residual);
 
-    // TODO(guards): stats use ctx.mask while the clean loop may search mask_per_scale.
-    auto [this_flux, this_rms] = matrix::max_and_rms(stream_a, mean_residual, ctx.mask, p.clean_negative);
+    auto [this_flux, this_rms] = matrix::max_and_rms(stream_a, mean_residual, stats_mask, p.clean_negative);
 
     deconv_convergence.track(this_flux, this_rms, n_clean_iter, selected_scale_idx);
 
@@ -323,8 +336,9 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
               common::to_string(deconv_convergence.status()));
 
   result.set_coeffs(stream_b, core::span2d<const float>{ws.all_coeffs.data_handle(), total_iterations, n_order});
-  result.final_flux = track_flux;
-  result.final_rms = track_rms;
+  const auto final_stats = matrix::max_and_rms(stream_a, mean_residual, ctx.mask, p.clean_negative);
+  result.final_flux = final_stats.max;
+  result.final_rms = final_stats.rms;
   result.stop_flux = stop_flux;
   result.total_iterations = total_iterations;
   result.status = deconv_convergence.status();
