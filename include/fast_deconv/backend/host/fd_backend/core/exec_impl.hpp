@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <fast_deconv/core/profiler.hpp>
@@ -57,6 +58,7 @@ class block_pool {
       throw;
     }
     used_bytes_ += num_bytes;
+    peak_used_bytes_ = std::max(peak_used_bytes_, used_bytes_);
     // Under the lock: Tracy needs the reported order to match the real one.
     FD_PROFILE_ALLOC(ptr, num_bytes);
     return ptr;
@@ -111,11 +113,19 @@ class block_pool {
     return used_bytes_ + idle;
   }
 
+  /// Highest used_bytes() since the pool was created.
+  std::uint64_t peak_used_bytes() const
+  {
+    const std::lock_guard lock(mutex_);
+    return peak_used_bytes_;
+  }
+
  private:
   mutable std::mutex mutex_;
   std::unordered_map<std::uint64_t, std::vector<void*>> free_lists_;
   std::unordered_map<void*, std::uint64_t> live_;
   std::uint64_t used_bytes_ = 0;
+  std::uint64_t peak_used_bytes_ = 0;
 };
 
 /**
@@ -135,6 +145,7 @@ class exec_resources_impl {
 
   std::uint64_t pool_used_bytes() const { return memory_pool.used_bytes(); }
   std::uint64_t pool_reserved_bytes() const { return memory_pool.reserved_bytes(); }
+  std::uint64_t pool_peak_used_bytes() const { return memory_pool.peak_used_bytes(); }
 
   /**
    * @brief Pool every exec_ctx allocates from.

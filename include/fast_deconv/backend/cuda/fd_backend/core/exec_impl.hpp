@@ -40,6 +40,14 @@ class exec_resources_impl {
     return static_cast<std::uint64_t>(v);
   }
 
+  /// Highest pool_used_bytes() since the pool was created.
+  std::uint64_t pool_peak_used_bytes() const
+  {
+    cuuint64_t v = 0;
+    CHECK_CUDA(cudaMemPoolGetAttribute(memory_pool, cudaMemPoolAttrUsedMemHigh, &v));
+    return static_cast<std::uint64_t>(v);
+  }
+
   std::uint8_t device{};
   cudaMemPool_t memory_pool{};
 

@@ -54,8 +54,8 @@ struct params {
 
 struct context {
   core::exec_resources resources;
-  core::exec_ctx compute_stream;  // scale search, PSF builds and the mean-residual clean loop
-  core::exec_ctx aux_stream;      // clean-loop fit/subtract, overlapping compute_stream
+  core::exec_ctx exec;       // default; everything except the clean loop's cube updates
+  core::exec_ctx cube_exec;  // clean-loop fit/subtract on the dirty cube, overlapping exec
   core::cont4d<const float> raw_psfs;
   core::cont2d<const float> xdes;
   core::cont2d<const bool> mask;
@@ -73,7 +73,7 @@ struct context {
    *
    * The host spans must outlive the context: the host backend borrows them.
    *
-   * @param[in] exec_device      Device the resources and both streams are created on.
+   * @param[in] exec_device      Device the resources and both contexts are created on.
    * @param[in] raw_psfs         Raw PSFs, host, (n_facets, n_freq, psf_h, psf_w). Staged.
    * @param[in] xdes             Spectral design matrix, host, (n_freq, n_order). Staged.
    * @param[in] mask             External mask, host, (dirty_nrow, dirty_ncol), true = masked. Staged.
@@ -88,18 +88,18 @@ struct context {
           core::host_span1d<const float> scale_bias, core::host_span2d<const int> map_pixel_facet,
           std::int64_t dirty_nrow, std::int64_t dirty_ncol)
       : resources(exec_device),
-        compute_stream(resources.make_ctx()),
-        aux_stream(resources.make_ctx()),
-        raw_psfs(compute_stream.stage(raw_psfs)),
-        xdes(compute_stream.stage(xdes)),
-        mask(compute_stream.stage(mask)),
+        exec(resources.make_ctx()),
+        cube_exec(resources.make_ctx()),
+        raw_psfs(exec.stage(raw_psfs)),
+        xdes(exec.stage(xdes)),
+        mask(exec.stage(mask)),
         scale_sigmas(scale_sigmas.data_handle(), scale_sigmas.data_handle() + scale_sigmas.size()),
         scale_bias(scale_bias),
         map_pixel_facet(map_pixel_facet),
         dirty_nrow(dirty_nrow),
         dirty_ncol(dirty_ncol)
   {
-    compute_stream.wait();  // staging copies complete before construction returns
+    exec.wait();  // staging copies complete before construction returns
   }
 
   context(const context&) = delete;

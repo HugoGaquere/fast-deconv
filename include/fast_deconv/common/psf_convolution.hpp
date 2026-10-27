@@ -43,8 +43,6 @@ class psf_convolution {
    */
   entry get(int scale, std::int64_t facet);
 
-  std::size_t n_entries() const { return entries_.size(); }
-
  private:
   entry build(int scale, std::int64_t facet);
 

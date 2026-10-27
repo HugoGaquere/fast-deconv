@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <emu/submdspan.hpp>
@@ -83,7 +84,7 @@ struct run_workspace {
   matrix::tiled_argmax_ctx tiled;
   const linalg::gaussian_convolution_ctx scale_conv;
   common::psf_convolution psf_cache;
-  // Coefficient buffers live on aux_stream, which writes them.
+  // Coefficient buffers live on cube_exec, which writes them.
   core::cont1d<float> all_coeffs;
   core::cont1d<float> coeffs_per_chan;
   // Built once, the first time the auto-mask engages.
@@ -93,13 +94,13 @@ struct run_workspace {
 
   run_workspace(const context& ctx, const params& p, std::int64_t nrow, std::int64_t ncol, std::int64_t n_freq,
                 core::span1d<const float> weights_freq)
-      : mean_residual_buf(ctx.compute_stream.alloc_mdcontainer<float>(nrow, ncol)),
-        tiled(ctx.compute_stream, mean_residual_buf.extents(), 64),
-        scale_conv(ctx.compute_stream, 1, ctx.dirty_nrow, ctx.dirty_ncol, ctx.scale_sigmas),
-        psf_cache(ctx.compute_stream, ctx.raw_psfs, ctx.scale_sigmas, weights_freq, p.gamma),
-        all_coeffs(ctx.aux_stream.alloc_mdcontainer<float>((std::int64_t{p.max_iteration} + p.max_clean_iteration) *
-                                                           ctx.xdes.extent(1))),
-        coeffs_per_chan(ctx.aux_stream.alloc_mdcontainer<float>(n_freq))
+      : mean_residual_buf(ctx.exec.alloc_mdcontainer<float>(nrow, ncol)),
+        tiled(ctx.exec, mean_residual_buf.extents(), 64),
+        scale_conv(ctx.exec, 1, ctx.dirty_nrow, ctx.dirty_ncol, ctx.scale_sigmas),
+        psf_cache(ctx.exec, ctx.raw_psfs, ctx.scale_sigmas, weights_freq, p.gamma),
+        all_coeffs(ctx.cube_exec.alloc_mdcontainer<float>((std::int64_t{p.max_iteration} + p.max_clean_iteration) *
+                                                          ctx.xdes.extent(1))),
+        coeffs_per_chan(ctx.cube_exec.alloc_mdcontainer<float>(n_freq))
   {
   }
 };
@@ -109,8 +110,7 @@ core::cont3d<bool> build_scale_mask(const context& ctx, const ddmsc_result& resu
                                     core::span1d<const float> weights_freq, std::int64_t nrow, std::int64_t ncol)
 {
   FD_PROFILE_FN();
-  const auto& stream_a = ctx.compute_stream;
-  auto mask_per_scale = stream_a.alloc_mdcontainer<bool>(ctx.scale_sigmas.size(), nrow, ncol);
+  auto mask_per_scale = ctx.exec.alloc_mdcontainer<bool>(ctx.scale_sigmas.size(), nrow, ncol);
 
   const int central_facet_idx = ctx.map_pixel_facet(nrow / 2, ncol / 2);
   core::span3d<const float> central_facet_psfs = emu::submdspan(ctx.raw_psfs, central_facet_idx);
@@ -120,19 +120,17 @@ core::cont3d<bool> build_scale_mask(const context& ctx, const ddmsc_result& resu
   std::vector<int> all_scales = ctx.historical_scales;
   all_scales.insert(all_scales.end(), result.scales.begin(), result.scales.end());
 
-  common::build_auto_mask(stream_a, all_coords, all_scales, central_facet_psfs, weights_freq, ctx.scale_sigmas,
+  common::build_auto_mask(ctx.exec, all_coords, all_scales, central_facet_psfs, weights_freq, ctx.scale_sigmas,
                           ctx.mask, mask_per_scale);
   return mask_per_scale;
 }
 
-// Returns the number of components found.
+// Returns the number of components found, with both contexts synced.
 int clean_loop(run_workspace& ws, const context& ctx, const params& p, const scale::scale_result& selected,
                core::span3d<float> dirty, core::span3d<const float> jones_norm, core::span1d<const float> weights_freq,
                int first_component, ddmsc_result& result)
 {
   FD_PROFILE_FN();
-  const auto& stream_a = ctx.compute_stream;
-  const auto& stream_b = ctx.aux_stream;
   const std::int64_t dirty_ncols = dirty.extent(2);
   const std::int64_t n_order = ctx.xdes.extent(1);
   const int selected_scale_idx = selected.scale;
@@ -169,11 +167,11 @@ int clean_loop(run_workspace& ws, const context& ctx, const params& p, const sca
 
     const std::int64_t coeffs_offset = (std::int64_t{first_component} + n_clean_iter) * n_order;
     auto spectral_coeffs = core::span1d<float>(ws.all_coeffs.data_handle() + coeffs_offset, n_order);
-    multi_frequency::fit_coefficients(stream_b, dirty, jones_norm, weights_freq, ctx.xdes, peak_coords, spectral_coeffs,
-                                      ws.coeffs_per_chan);
+    multi_frequency::fit_coefficients(ctx.cube_exec, dirty, jones_norm, weights_freq, ctx.xdes, peak_coords,
+                                      spectral_coeffs, ws.coeffs_per_chan);
 
-    common::subtract_component(stream_b, dirty, conv_psf, ws.coeffs_per_chan, peak_coords, gain);
-    common::subtract_component(stream_a, scaled_residual, conv2_psf, peak_coords, peak_signed * gain,
+    common::subtract_component(ctx.cube_exec, dirty, conv_psf, ws.coeffs_per_chan, peak_coords, gain);
+    common::subtract_component(ctx.exec, scaled_residual, conv2_psf, peak_coords, peak_signed * gain,
                                selected.criterion, threshold);
     // Only the conv2_psf footprint changed: rescan just the touched tiles.
     const auto next = ws.tiled.run_incremental(scaled_residual, peak_coords.row, peak_coords.col, conv2_psf.extent(0),
@@ -184,6 +182,10 @@ int clean_loop(run_workspace& ws, const context& ctx, const params& p, const sca
 
     n_clean_iter++;
   }
+  // Callers read dirty, so cube_exec's subtracts must be done.
+  ctx.exec.wait();
+  ctx.cube_exec.wait();
+  FD_PROFILE_MARK("clean_loop synced");
   return n_clean_iter;
 }
 
@@ -195,10 +197,6 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
 
   const std::int64_t psf_nrow = ctx.raw_psfs.extent(2);
   const std::int64_t psf_ncol = ctx.raw_psfs.extent(3);
-
-  // stream_b runs the per-channel fit/subtract on dirty, overlapping stream_a.
-  const auto& stream_a = ctx.compute_stream;
-  const auto& stream_b = ctx.aux_stream;
 
   const std::int64_t n_freq = dirty.extent(0);
   const std::int64_t n_facets = ctx.raw_psfs.extent(0);
@@ -219,9 +217,9 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
 
   FD_PROFILE_MARK("init/mean_residual");
   const core::span2d<float> mean_residual(ws.mean_residual_buf);
-  linalg::weighted_sum(stream_a, dirty, weights_freq, mean_residual);
+  linalg::weighted_sum(ctx.exec, dirty, weights_freq, mean_residual);
 
-  auto [track_flux, track_rms] = matrix::max_and_rms(stream_a, mean_residual, ctx.mask, p.clean_negative);
+  auto [track_flux, track_rms] = matrix::max_and_rms(ctx.exec, mean_residual, ctx.mask, p.clean_negative);
 
   // A previous major cycle overflowed.
   if (!std::isfinite(track_flux) || !std::isfinite(track_rms))
@@ -248,24 +246,19 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   core::span3d<const bool> scale_masks(ctx.mask.data_handle(), 1, ctx.mask.extent(0), ctx.mask.extent(1));
   core::span2d<const bool> stats_mask = ctx.mask;
 
-  stream_a.wait();
+  ctx.exec.wait();
   while (!deconv_convergence.should_stop()) {
     FD_PROFILE_FRAME();
     FD_PROFILE_SCOPE("outer_iter");
     result.outer_iterations++;
     FD_LOG_DEBUG("run_ddmsc: outer iter start total_iterations={} track_flux={:.8f} track_rms={:.8f}",
                  deconv_convergence.iteration(), track_flux, track_rms);
-    FD_PROFILE_PLOT("peak_flux", track_flux);
-    FD_PROFILE_PLOT("rms", track_rms);
-    FD_PROFILE_PLOT("pool_used_mib", static_cast<double>(ctx.resources.pool_used_bytes()) / (1 << 20));
-    FD_PROFILE_PLOT("pool_reserved_mib", static_cast<double>(ctx.resources.pool_reserved_bytes()) / (1 << 20));
-    FD_PROFILE_PLOT("psf_cache_entries", static_cast<std::int64_t>(ws.psf_cache.n_entries()));
 
     const std::optional<float> auto_mask_threshold = auto_mask_trigger(p, track_flux, track_rms);
     if (auto_mask_threshold && !ws.mask_per_scale) {
       FD_LOG_INFO("Start auto masking at threshold {}", *auto_mask_threshold);
       ws.mask_per_scale = build_scale_mask(ctx, result, weights_freq, dirty_nrows, dirty_ncols);
-      ws.merged_active_mask = stream_a.alloc_mdcontainer<bool>(dirty_nrows, dirty_ncols);
+      ws.merged_active_mask = ctx.exec.alloc_mdcontainer<bool>(dirty_nrows, dirty_ncols);
       scale_masks = *ws.mask_per_scale;
       // A peak no scale can reach must not hold the loop above the stop flux.
       stats_mask = *ws.merged_active_mask;
@@ -277,20 +270,15 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
       std::vector<int> active;
       for (int s = 0; s < n_scales; s++)
         if (std::ranges::find(retired, s) == retired.end()) active.push_back(s);
-      common::combine_scale_masks(stream_a, *ws.mask_per_scale, active, *ws.merged_active_mask);
+      common::combine_scale_masks(ctx.exec, *ws.mask_per_scale, active, *ws.merged_active_mask);
     }
     const scale::scale_result selected =
-        scale::select_best_scale(stream_a, ws.scale_conv, mean_residual, ctx.scale_sigmas, ctx.scale_bias, retired,
+        scale::select_best_scale(ctx.exec, ws.scale_conv, mean_residual, ctx.scale_sigmas, ctx.scale_bias, retired,
                                  scale_masks, p.clean_negative);
     const int selected_scale_idx = selected.scale;
 
     const int n_clean_iter =
         clean_loop(ws, ctx, p, selected, dirty, jones_norm, weights_freq, deconv_convergence.iteration(), result);
-
-    stream_a.wait();
-    // The weighted_sum below reads dirty, so stream_b's subtracts must be done.
-    stream_b.wait();
-    FD_PROFILE_MARK("clean_loop synced");
     FD_PROFILE_PLOT("clean_iters", static_cast<std::int64_t>(n_clean_iter));
 
     // The residual is untouched when no component was found, so the previous stats still hold.
@@ -300,9 +288,9 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
       continue;
     }
 
-    linalg::weighted_sum(stream_a, dirty, weights_freq, mean_residual);
+    linalg::weighted_sum(ctx.exec, dirty, weights_freq, mean_residual);
 
-    auto [this_flux, this_rms] = matrix::max_and_rms(stream_a, mean_residual, stats_mask, p.clean_negative);
+    auto [this_flux, this_rms] = matrix::max_and_rms(ctx.exec, mean_residual, stats_mask, p.clean_negative);
 
     deconv_convergence.track(this_flux, this_rms, n_clean_iter, selected_scale_idx);
 
@@ -327,15 +315,10 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
   FD_PROFILE_FRAME();
 
   FD_PROFILE_MARK("finalize");
-  stream_a.wait();
-  stream_b.wait();
 
   const int total_iterations = deconv_convergence.iteration();
-  FD_LOG_INFO("run_ddmsc: completed ({} iterations, exit={})", total_iterations,
-              common::to_string(deconv_convergence.status()));
-
-  result.set_coeffs(stream_b, core::span2d<const float>{ws.all_coeffs.data_handle(), total_iterations, n_order});
-  const auto final_stats = matrix::max_and_rms(stream_a, mean_residual, ctx.mask, p.clean_negative);
+  result.set_coeffs(ctx.cube_exec, core::span2d<const float>{ws.all_coeffs.data_handle(), total_iterations, n_order});
+  const auto final_stats = matrix::max_and_rms(ctx.exec, mean_residual, ctx.mask, p.clean_negative);
   result.final_flux = final_stats.max;
   result.final_rms = final_stats.rms;
   result.stop_flux = stop_flux;
@@ -361,16 +344,29 @@ Ddmsc::Ddmsc(core::host_span4d<const float> raw_psfs, core::host_span2d<const fl
 ddmsc_result Ddmsc::run(core::host_span3d<float> dirty, core::host_span3d<const float> jones_norm,
                         core::host_span1d<const float> weights_freq)
 {
-  const core::exec_ctx& exec_ctx = ctx.compute_stream;
-
-  auto staged_dirty = exec_ctx.stage(dirty);
-  auto staged_jones = exec_ctx.stage(jones_norm);
-  auto staged_weights = exec_ctx.stage(weights_freq);
+  const auto t0 = std::chrono::steady_clock::now();
+  auto staged_dirty = ctx.exec.stage(dirty);
+  auto staged_jones = ctx.exec.stage(jones_norm);
+  auto staged_weights = ctx.exec.stage(weights_freq);
 
   ddmsc_result result = run_ddmsc_cycles(ctx, cfg, staged_dirty, staged_jones, staged_weights);
 
-  exec_ctx.unstage(staged_dirty, dirty.data_handle());
-  exec_ctx.wait();
+  ctx.exec.unstage(staged_dirty, dirty.data_handle());
+  ctx.exec.wait();
+
+  const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  constexpr double mib = 1 << 20;
+  FD_LOG_INFO(
+      "run_ddmsc: completed in {:.3f} ms\n"
+      "  result | components={}  outer={}  exit={}\n"
+      "  flux   | {:.6g} -> {:.6g}  stop={:.6g}\n"
+      "  rms    | {:.6g} -> {:.6g}\n"
+      "  pool   | used={:.1f} MiB  reserved={:.1f} MiB  peak={:.1f} MiB",
+      ms, result.n_components(), result.outer_iterations, common::to_string(result.status), result.initial_flux,
+      result.final_flux, result.stop_flux, result.initial_rms, result.final_rms,
+      static_cast<double>(ctx.resources.pool_used_bytes()) / mib,
+      static_cast<double>(ctx.resources.pool_reserved_bytes()) / mib,
+      static_cast<double>(ctx.resources.pool_peak_used_bytes()) / mib);
   return result;
 }
 

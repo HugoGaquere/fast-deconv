@@ -400,9 +400,7 @@ int main(int argc, char** argv)
       baseline_ms.push_back(base_ms);
       per_outer_ms.push_back(per_outer);
 
-      printf("run %d: %.3f ms, baseline %.3f ms, %.3f ms per outer (%zu components, %d outer, flux %.6g, rms %.6g)\n",
-             run, ms, base_ms, per_outer, result.n_components(), result.outer_iterations, result.final_flux,
-             result.final_rms);
+      printf("run %d: %.3f ms, baseline %.3f ms, %.3f ms per outer\n", run, ms, base_ms, per_outer);
       if (csv.is_open()) {
         csv << label << ',' << host.data() << ',' << dir << ',' << first_cycle << ',' << nrow << ',' << ncol << ','
             << *force_scale << ',' << outer << ',' << clean_iter << ',' << run << ',' << ms << ',' << base_ms << ','
@@ -435,15 +433,12 @@ int main(int argc, char** argv)
 
       cycle_inputs in = load_inputs(cdir);
       configure(*imager, cdir);
-      const auto [ms, result] = timed_run(*imager, in);
+      // run() logs the cycle's recap.
+      const double ms = timed_run(*imager, in).first;
       total_ms += ms;
       if (cycle_ms.size() <= static_cast<size_t>(cycle - first_cycle)) cycle_ms.emplace_back();
       cycle_ms.at(cycle - first_cycle).push_back(ms);
 
-      if (run == 0)
-        printf("cycle %d: %.3f ms, %zu components, %d outer, flux %.6g -> %.6g (stop %.6g), rms %.6g -> %.6g\n", cycle,
-               ms, result.n_components(), result.outer_iterations, result.initial_flux, result.final_flux,
-               result.stop_flux, result.initial_rms, result.final_rms);
       if (only_cycle >= 0) {
         break;
       }
