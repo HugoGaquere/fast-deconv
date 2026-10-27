@@ -6,7 +6,7 @@ namespace fast_deconv::morphology {
 
 // Scatter form of the CUDA gather: out(r, c) is set when data(r - h + i, c - w + j) && structure(i, j).
 void binary_dilation(const core::exec_ctx& ctx, core::span2d<const bool> data, core::span2d<const bool> structure,
-                     common::roi structure_roi, core::span2d<bool> out)
+                     core::roi structure_roi, core::span2d<bool> out)
 {
   FD_PROFILE_FN();
   const std::int64_t nrow = data.extent(0);

@@ -115,7 +115,7 @@ core::cont3d<bool> build_scale_mask(const context& ctx, const ddmsc_result& resu
   const int central_facet_idx = ctx.map_pixel_facet(nrow / 2, ncol / 2);
   core::span3d<const float> central_facet_psfs = emu::submdspan(ctx.raw_psfs, central_facet_idx);
 
-  std::vector<common::index2d> all_coords = ctx.historical_peak_coords;
+  std::vector<core::index2d> all_coords = ctx.historical_peak_coords;
   for (const auto& [r, c] : result.peak_coords) all_coords.push_back({r, c});
   std::vector<int> all_scales = ctx.historical_scales;
   all_scales.insert(all_scales.end(), result.scales.begin(), result.scales.end());

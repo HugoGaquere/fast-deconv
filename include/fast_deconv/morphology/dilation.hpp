@@ -19,6 +19,6 @@ namespace fast_deconv::morphology {
  * @param[out] out            Dilated image, device, (nrow, ncol), written entirely. Must not alias @p data.
  */
 void binary_dilation(const core::exec_ctx& ctx, core::span2d<const bool> data, core::span2d<const bool> structure,
-                     common::roi structure_roi, core::span2d<bool> out);
+                     core::roi structure_roi, core::span2d<bool> out);
 
 }  // namespace fast_deconv::morphology

@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <fast_deconv/common/region.hpp>
+#include <fast_deconv/core/region.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/morphology/dilation.hpp>
 #include <fast_deconv/morphology/roi.hpp>
@@ -12,7 +12,6 @@
 
 #include "helpers/backend_test.hpp"
 
-namespace common = fast_deconv::common;
 namespace core = fast_deconv::core;
 namespace morpho = fast_deconv::morphology;
 namespace fdtest = fast_deconv::test;
@@ -29,8 +28,8 @@ TEST_F(Morphology, MaskRoiIsTheBoundingBoxOfTruePixels)
 {
   const struct {
     const char* name;
-    std::vector<common::index2d> pixels;
-    common::roi expected;
+    std::vector<core::index2d> pixels;
+    core::roi expected;
   } cases[] = {
       {"empty", {}, {0, 0, 0, 0}},
       {"single pixel", {{2, 7}}, {2, 3, 7, 8}},
@@ -70,7 +69,7 @@ TEST_F(Morphology, DilationOfSinglePixelIsTheClippedStructuringElement)
     const auto d_data = sr.stage(core::host_span2d<const bool>(data.get(), kNrow, kNcol));
     auto d_out = sr.stage(core::host_span2d<bool>(out.get(), kNrow, kNcol));
 
-    morpho::binary_dilation(sr, d_data, d_se, common::roi{0, 3, 0, 3}, d_out);
+    morpho::binary_dilation(sr, d_data, d_se, core::roi{0, 3, 0, 3}, d_out);
     sr.unstage(d_out, out.get());
     sr.wait();
 

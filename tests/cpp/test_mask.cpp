@@ -20,7 +20,7 @@ class BuildAutoMask : public fdtest::BackendTest {
  protected:
   // Single-channel run with a square PSF. The output starts all masked, as left by an earlier cycle, so a
   // valid pixel the function forgets to write shows up.
-  std::vector<int> run(const std::vector<common::index2d>& coords, const std::vector<int>& scales,
+  std::vector<int> run(const std::vector<core::index2d>& coords, const std::vector<int>& scales,
                        const std::vector<float>& psf, int psf_size, const std::vector<float>& sigmas,
                        const bool* external, int nrow, int ncol)
   {

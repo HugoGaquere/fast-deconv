@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fast_deconv/common/convergence.hpp>
-#include <fast_deconv/common/region.hpp>
+#include <fast_deconv/core/region.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
@@ -65,7 +65,7 @@ struct context {
   std::int64_t dirty_nrow;
   std::int64_t dirty_ncol;
 
-  std::vector<common::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
+  std::vector<core::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
   std::vector<int> historical_scales;                   // scale of each historical component
 
   /**
@@ -136,7 +136,7 @@ struct ddmsc_result {
   [[nodiscard]] std::size_t n_components() const { return peak_coords.size(); }
 
   /// Appends one component; its coefficients come later, in set_coeffs().
-  void add_component(common::index2d coords, int scale, float gain)
+  void add_component(core::index2d coords, int scale, float gain)
   {
     peak_coords.emplace_back(coords.row, coords.col);
     scales.push_back(scale);

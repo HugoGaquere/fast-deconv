@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 
-namespace fast_deconv::common {
+namespace fast_deconv::core {
 
 /// A 2D index into a row-major array. Ordered row-then-column, matching span2d's extent order.
 struct index2d {
@@ -35,4 +35,4 @@ inline overlap_region compute_overlap_region(index2d center, std::int64_t a_nrow
   return {arow0, acol0, arow0 - brow_origin, acol0 - bcol_origin, arow1 - arow0, acol1 - acol0, a_ncol, b_ncol};
 }
 
-}  // namespace fast_deconv::common
+}  // namespace fast_deconv::core

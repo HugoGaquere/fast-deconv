@@ -8,12 +8,12 @@
 namespace fast_deconv::common {
 
 void subtract_component(const core::exec_ctx& ctx, core::span2d<float> residual, core::span2d<const float> psf,
-                        index2d peak_coords, float gain, matrix::peak_criterion criterion, float threshold)
+                        core::index2d peak_coords, float gain, matrix::peak_criterion criterion, float threshold)
 {
   FD_PROFILE_FN();
   assert(residual.is_exhaustive() && psf.is_exhaustive());
   const auto ovr =
-      compute_overlap_region(peak_coords, residual.extent(0), residual.extent(1), psf.extent(0), psf.extent(1));
+      core::compute_overlap_region(peak_coords, residual.extent(0), residual.extent(1), psf.extent(0), psf.extent(1));
   float* res = residual.data_handle();
   const float* p = psf.data_handle();
   core::for_each_index(ctx, ovr.nrow, ovr.ncol, [=] FD_HOST_DEVICE(std::int64_t r, std::int64_t c) {
@@ -24,11 +24,11 @@ void subtract_component(const core::exec_ctx& ctx, core::span2d<float> residual,
 }
 
 void subtract_component(const core::exec_ctx& ctx, core::span3d<float> residual, core::span3d<const float> psf,
-                        core::span1d<const float> spectral_coeffs, index2d peak_coords, float gain)
+                        core::span1d<const float> spectral_coeffs, core::index2d peak_coords, float gain)
 {
   FD_PROFILE_FN();
   const auto ovr =
-      compute_overlap_region(peak_coords, residual.extent(1), residual.extent(2), psf.extent(1), psf.extent(2));
+      core::compute_overlap_region(peak_coords, residual.extent(1), residual.extent(2), psf.extent(1), psf.extent(2));
   const std::int64_t res_freq_stride = residual.stride(0);
   const std::int64_t psf_freq_stride = psf.stride(0);
   float* res = residual.data_handle();
