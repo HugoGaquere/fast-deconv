@@ -223,7 +223,7 @@ int main(int argc, char** argv)
   // stages them to the device.
   auto npy_raw_psfs = load_init("raw_psfs");
   auto npy_xdes = load_init("xdes");
-  auto npy_mask = load_init("scale_mask");
+  auto npy_mask = load_init("mask");
   auto npy_scale_sigmas = load_init("scale_sigmas");
   auto npy_scale_bias = load_init("scale_bias");
   auto npy_map_pixel = load_init("map_pixel_facet");

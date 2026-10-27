@@ -36,7 +36,7 @@ history across calls.
 
 ```
 DDFacet                                     fast-deconv
-DDMSC(raw_psfs, xdes, scale_mask, …)   ──►  stage inputs, create the pool and both contexts
+DDMSC(raw_psfs, xdes, mask, …)         ──►  stage inputs, create the pool and both contexts
 for each major cycle:
     grid → residual cube
     run(dirty, jones_norm, w)          ──►  minor cycle; dirty ← new residual

@@ -115,7 +115,7 @@ xdes = np.vander(nu, 2, increasing=True).astype(np.float32)  # (n_freq, n_order)
 deconv = DDMSC(
     raw_psfs=psfs,
     xdes=xdes,
-    scale_mask=np.zeros((n, n), bool),                      # True = masked out
+    mask=np.zeros((n, n), bool),                            # True = masked out
     scale_sigmas=np.array([0.0, 1.5], np.float32),          # sigma 0 = point source
     scale_bias=np.array([1.0, 0.8], np.float32),
     map_pixel_facet=np.zeros((n, n), np.int32),             # facet index per pixel
@@ -148,7 +148,7 @@ once per major cycle.
 |---|---|---|---|
 | `raw_psfs` | `(n_facets, n_freq, psf_h, psf_w)` | `float32` | Stokes-I PSF of each facet and band, normalised to unit peak |
 | `xdes` | `(n_freq, n_order)` | `float32` | Spectral basis evaluated at each band, e.g. `(ν/ν0)^k`; any linear basis, up to 8 terms |
-| `scale_mask` | `(nrow, ncol)` | `bool` | External mask, `True` = pixel excluded from cleaning |
+| `mask` | `(nrow, ncol)` | `bool` | External mask, `True` = pixel excluded from cleaning |
 | `scale_sigmas` | `(n_scales,)` | `float32` | Gaussian sigma of each scale, in pixels; `0` = delta scale |
 | `scale_bias` | `(n_scales,)` | `float32` | Per-scale bias multiplying the peak during scale selection ([Offringa & Smirnov 2017](https://arxiv.org/abs/1706.06786)); `1` for the delta scale |
 | `map_pixel_facet` | `(nrow, ncol)` | `int32` | Facet (= `raw_psfs` axis 0) index of every pixel; all zeros for a single PSF |
