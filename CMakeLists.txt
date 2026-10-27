@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.26)
 
 # Selects include/fast_deconv/backend/<name> (headers) and src/fast_deconv/backend/<name> (implementations).
-set(FAST_DECONV_BACKEND "cuda" CACHE STRING "Compute backend: cuda | host")
+set(FAST_DECONV_BACKEND "host" CACHE STRING "Compute backend: cuda | host")
 set_property(CACHE FAST_DECONV_BACKEND PROPERTY STRINGS cuda host)
 
 if(NOT FAST_DECONV_BACKEND MATCHES "^(cuda|host)$")

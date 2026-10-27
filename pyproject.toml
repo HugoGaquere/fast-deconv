@@ -1,7 +1,7 @@
 [project]
 name = "fast-deconv"
 version = "0.9.1"
-description = "GPU-accelerated deconvolution for radio astronomy"
+description = "High-performance deconvolution for radio astronomy, on GPUs and multi-core CPUs"
 readme = "README.md"
 authors = [
   { name = "Hugo Gaquere", email = "hugo.gaquere@obspm.fr" },
@@ -23,14 +23,20 @@ build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
 minimum-version = "build-system.requires"
-build-dir = "build/{wheel_tag}"
+build-dir = "build/{wheel_tag}-host"
 editable.rebuild = true
 
-[tool.scikit-build.cmake]
-define = {CMAKE_PROJECT_TOP_LEVEL_INCLUDES = "cmake/conan_provider.cmake"}
+[tool.scikit-build.cmake.define]
+CMAKE_PROJECT_TOP_LEVEL_INCLUDES = "cmake/conan_provider.cmake"
+FAST_DECONV_BACKEND = {env = "FAST_DECONV_BACKEND", default = "host"}
+
+# The backends enable different CMake languages, so they cannot share a cache.
+[[tool.scikit-build.overrides]]
+if.env.FAST_DECONV_BACKEND = "cuda"
+build-dir = "build/{wheel_tag}-cuda"
 
 [tool.uv]
-cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.{h,c,hpp,cpp}" }, { file = "CMakeLists.txt" }]
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.{h,c,hpp,cpp}" }, { file = "CMakeLists.txt" }, { env = "FAST_DECONV_BACKEND" }]
 
 # Tests are C++/GTest; CUDA tests need a GPU. No wheel test-command.
 [tool.cibuildwheel]
