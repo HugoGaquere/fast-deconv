@@ -7,7 +7,7 @@
 #include <limits>
 #include <vector>
 
-namespace fast_deconv::scale {
+namespace fast_deconv::common {
 
 /// Selected scale, its residual plane and that plane's peak.
 struct scale_result {
@@ -24,9 +24,9 @@ struct scale_result {
  * with Gaussian(sigmas[s]), ranked by matrix::peak_criterion. Scale 0 is taken as the identity, whatever
  * sigmas[0]: @p dirty is searched directly. Strictly greater wins, so the lowest scale takes a tie and a NaN peak
  * never wins. @p mask is (n_scales, nrow, ncol) with one plane per scale, (1, nrow, ncol) shared by every scale, or a
- * null data handle for no mask. Syncs @p exec_ctx.
+ * null data handle for no mask. Syncs @p ctx.
  *
- * @param[in] exec_ctx  Execution context; scratch is allocated on it.
+ * @param[in] ctx       Execution context; scratch is allocated on it.
  * @param[in] conv_ctx  Convolution context for one (nrow, ncol) image, batch 1, wrap-free for @p sigmas.
  * @param[in] dirty     Mean residual, device, (nrow, ncol).
  * @param[in] sigmas    Gaussian sigma per scale, (n_scales,).
@@ -37,19 +37,19 @@ struct scale_result {
  * @return The selected scale, its convolved residual, that plane's peak and the criterion it was ranked by.
  * @throws std::invalid_argument If every scale is retired.
  */
-scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gaussian_convolution_ctx& conv_ctx,
+scale_result select_best_scale(const core::exec_ctx& ctx, const linalg::gaussian_convolution_ctx& conv_ctx,
                                core::span2d<const float> dirty, const std::vector<float>& sigmas,
                                core::host_span1d<const float> bias, const std::vector<int>& retired,
                                core::span3d<const bool> mask, bool absolute);
 
 /// select_best_scale() with one (nrow, ncol) @p mask shared by every scale.
-inline scale_result select_best_scale(const core::exec_ctx& exec_ctx, const linalg::gaussian_convolution_ctx& conv_ctx,
+inline scale_result select_best_scale(const core::exec_ctx& ctx, const linalg::gaussian_convolution_ctx& conv_ctx,
                                       core::span2d<const float> dirty, const std::vector<float>& sigmas,
                                       core::host_span1d<const float> bias, const std::vector<int>& retired,
                                       core::span2d<const bool> mask, bool absolute)
 {
-  return select_best_scale(exec_ctx, conv_ctx, dirty, sigmas, bias, retired,
+  return select_best_scale(ctx, conv_ctx, dirty, sigmas, bias, retired,
                            core::span3d<const bool>(mask.data_handle(), 1, mask.extent(0), mask.extent(1)), absolute);
 }
 
-}  // namespace fast_deconv::scale
+}  // namespace fast_deconv::common

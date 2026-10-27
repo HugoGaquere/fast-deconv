@@ -10,7 +10,7 @@
 #include "helpers/host_oracles.hpp"
 
 namespace core = fast_deconv::core;
-namespace mfs = fast_deconv::multi_frequency;
+namespace common = fast_deconv::common;
 namespace fdtest = fast_deconv::test;
 
 using fdtest::flat;
@@ -163,8 +163,7 @@ std::vector<double> power_design(const std::vector<double>& nu, double nu0, int 
   return xdes;
 }
 
-scene make_scene(std::vector<double> xdes_d, const std::vector<double>& y, core::index2d peak,
-                 float background = 0.0f)
+scene make_scene(std::vector<double> xdes_d, const std::vector<double>& y, core::index2d peak, float background = 0.0f)
 {
   const int n_freq = static_cast<int>(y.size());
   scene sc;
@@ -214,7 +213,7 @@ class FitCoefficients : public fdtest::BackendTest {
     auto d_compact = sr.stage(core::host_span1d<float>(compact.data(), n_order));
     auto d_per_chan = sr.stage(core::host_span1d<float>(per_chan.data(), n_freq));
 
-    mfs::fit_coefficients(sr, d_dirty, d_jn, d_w, d_xdes, peak, d_compact, d_per_chan);
+    common::fit_coefficients(sr, d_dirty, d_jn, d_w, d_xdes, peak, d_compact, d_per_chan);
     sr.unstage(d_compact, compact.data());
     sr.unstage(d_per_chan, per_chan.data());
     sr.wait();
