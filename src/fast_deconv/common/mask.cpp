@@ -93,4 +93,52 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
   }
 }
 
+void combine_scale_masks(const core::exec_ctx& ctx, core::span3d<const bool> mask_per_scale,
+                         const std::vector<int>& scales, core::span2d<bool> out)
+{
+  FD_PROFILE_FN();
+  assert(mask_per_scale.is_exhaustive() && out.is_exhaustive());
+  assert(out.extent(0) == mask_per_scale.extent(1) && out.extent(1) == mask_per_scale.extent(2));
+  assert(mask_per_scale.extent(0) <= 64);
+
+  // The selected scales as a bitmask: bit s set = scale s selected.
+  // 64 bits cap n_scales at 64 (asserted above).
+  //
+  // Building it:
+  // std::uint64_t{1} << s is a number whose only set bit is bit s.
+  // OR-ing (|=) it into selected turns that bit on.
+  //
+  // Example for scales = {0,2,3}
+  // start                selected = 0b0000
+  // s=0: 1<<0 = 0b0001 → selected = 0b0001
+  // s=2: 1<<2 = 0b0100 → selected = 0b0101
+  // s=3: 1<<3 = 0b1000 → selected = 0b1101
+  //
+  // Reading it in the kernel:
+  // if (selected >> s & 1)
+  // selected >> s shifts bit s down to position 0,
+  // & 1 keeps only that bit. The result is 1 when scale s is selected.
+  //
+  // With selected = 0b1101:
+  // s=0: 0b1101 & 1 = 1 → used
+  // s=1: 0b0110 & 1 = 0 → skipped
+  // s=2: 0b0011 & 1 = 1 → used
+  // s=3: 0b0001 & 1 = 1 → used
+
+  std::uint64_t selected = 0;
+  for (const int s : scales) selected |= std::uint64_t{1} << s;
+
+  const std::int64_t scale_stride = mask_per_scale.stride(0);
+  const std::int64_t n_scales = mask_per_scale.extent(0);
+  const bool* masks = mask_per_scale.data_handle();
+  const std::int64_t n_elements = core::count(out);
+  bool* combined = out.data_handle();
+  core::for_each_index(ctx, n_elements, [=] FD_HOST_DEVICE(std::int64_t i) {
+    bool masked = true;
+    for (std::int64_t s = 0; s < n_scales; s++)
+      if (selected >> s & 1) masked = masked && masks[s * scale_stride + i];
+    combined[i] = masked;
+  });
+}
+
 }  // namespace fast_deconv::common

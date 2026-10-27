@@ -83,3 +83,46 @@ TEST_F(BuildAutoMask, GaussianPsfValidatesTheFwhmNeighborhood)
 
   EXPECT_EQ(std::count(mask.begin(), mask.begin() + plane, 1), plane) << "scale 0 has no component";
 }
+
+// combine_scale_masks output: (nrow, ncol), 1 = masked, 0 = valid.
+class CombineScaleMasks : public fdtest::BackendTest {
+ protected:
+  // The output starts all valid, so a masked pixel the function forgets to write shows up.
+  std::vector<int> run(const std::vector<bool>& masks, int n_scales, int nrow, int ncol, const std::vector<int>& scales)
+  {
+    const int n = n_scales * nrow * ncol, plane = nrow * ncol;
+    const auto h_masks = std::make_unique<bool[]>(n);
+    std::copy(masks.begin(), masks.end(), h_masks.get());
+    const auto out = std::make_unique<bool[]>(plane);
+
+    const auto sr = res().make_ctx();
+    const auto d_masks = sr.stage(core::host_span3d<const bool>(h_masks.get(), n_scales, nrow, ncol));
+    auto d_out = sr.stage(core::host_span2d<bool>(out.get(), nrow, ncol));
+
+    common::combine_scale_masks(sr, d_masks, scales, d_out);
+    sr.unstage(d_out, out.get());
+    sr.wait();
+    return {out.get(), out.get() + plane};
+  }
+};
+
+// Three 1x4 scale masks, each valid on a different pixel: a pixel is valid when one of the chosen scales is.
+TEST_F(CombineScaleMasks, ValidWhereAnyChosenScaleIsValid)
+{
+  // clang-format off
+  const std::vector<bool> masks = {
+      false, true,  true,  true,   // scale 0: pixel 0 valid
+      true,  false, true,  true,   // scale 1: pixel 1 valid
+      true,  true,  false, true,   // scale 2: pixel 2 valid
+  };
+  // clang-format on
+  EXPECT_EQ(run(masks, 3, 1, 4, {0, 1, 2}), (std::vector<int>{0, 0, 0, 1}));
+  EXPECT_EQ(run(masks, 3, 1, 4, {0, 2}), (std::vector<int>{0, 1, 0, 1})) << "scale 1 left out";
+  EXPECT_EQ(run(masks, 3, 1, 4, {1}), (std::vector<int>{1, 0, 1, 1}));
+}
+
+TEST_F(CombineScaleMasks, NoScalesMasksEverything)
+{
+  const std::vector<bool> masks(2 * 3, false);
+  EXPECT_EQ(run(masks, 2, 1, 3, {}), (std::vector<int>{1, 1, 1}));
+}

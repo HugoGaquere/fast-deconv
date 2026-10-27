@@ -43,4 +43,18 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coor
                      const std::vector<float>& scale_sigmas, core::span2d<const bool> external_mask,
                      core::span3d<bool> mask_per_scale);
 
+/**
+ * @brief Union of the valid regions of some scales' masks: the pixels at least one of them may clean.
+ *
+ * out[r, c] = false (valid) iff mask_per_scale[s, r, c] is false for some s in @p scales; with no scales,
+ * every pixel is masked.
+ *
+ * @param[in]  ctx             Execution context.
+ * @param[in]  mask_per_scale  (n_scales, nrow, ncol) bool, true = masked, as written by build_auto_mask.
+ * @param[in]  scales          Indices of the scales to combine, host.
+ * @param[out] out             (nrow, ncol) bool, true = masked, written entirely.
+ */
+void combine_scale_masks(const core::exec_ctx& ctx, core::span3d<const bool> mask_per_scale,
+                         const std::vector<int>& scales, core::span2d<bool> out);
+
 }  // namespace fast_deconv::common
