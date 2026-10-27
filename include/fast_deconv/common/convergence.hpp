@@ -28,12 +28,13 @@ class scale_stall_tracker {
   /**
    * @param[in] n_scales         Number of scales tracked.
    * @param[in] max_stall_count  Strikes a scale may take before it counts as stalled.
-   * @param[in] stall_threshold  Absolute standard deviation change below which an update is a strike.
+   * @param[in] stall_threshold  Relative standard deviation change below which an update is a strike.
    */
   scale_stall_tracker(int n_scales, int max_stall_count, float stall_threshold)
       : scales_stall_count_(n_scales, 0), max_stall_count_(max_stall_count), stall_threshold_(stall_threshold) {};
 
-  /// Strike for @p scale if @p rms (standard deviation) moved less than the threshold, else reset its count.
+  /// Strike for @p scale if @p rms (standard deviation) moved by less than the threshold times the previous one,
+  /// else reset its count.
   void update(int scale, float rms);
   /// True once every scale is stalled.
   bool all_stalled() const;
@@ -41,6 +42,8 @@ class scale_stall_tracker {
   bool is_stall(int scale) const;
   /// Sets the standard deviation the first update() compares against.
   void init_rms(float rms);
+  /// Clears every scale's strikes, which un-retires the stalled scales.
+  void reset();
   /// Indices of the stalled scales, ascending.
   std::vector<int> get_all_stalled() const;
 
@@ -62,10 +65,8 @@ class convergence {
   /**
    * @param[in] max_iter            Minor-iteration budget across all outer iterations.
    * @param[in] min_flux            Stop flux: converged once the peak flux is at or below it.
-   * @param[in] max_divergent_iter  Divergent iterations tolerated; one more is diverged. Counted cumulatively,
-   *                                never reset.
-   * @param[in] divergence_factor   An iteration diverges when |flux| exceeds this times the previous or the initial
-   *                                |flux|.
+   * @param[in] max_divergent_iter  Divergent iterations tolerated, counted cumulatively; one more is diverged.
+   * @param[in] divergence_factor   Divergent when |flux| exceeds this times the previous or the initial |flux|.
    * @param[in] stalls              Stall tracker, updated by every track().
    */
   convergence(int max_iter, float min_flux, int max_divergent_iter, float divergence_factor, scale_stall_tracker stalls)
@@ -88,6 +89,8 @@ class convergence {
   [[nodiscard]] bool is_stall(int scale) const;
   /// See scale_stall_tracker::get_all_stalled().
   [[nodiscard]] std::vector<int> get_all_stalled() const;
+  /// See scale_stall_tracker::reset().
+  void reset_stalls();
 
   /// Seeds the initial flux and standard deviation; must be called once before any track().
   void init(float flux, float rms);

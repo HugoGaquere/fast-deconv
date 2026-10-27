@@ -32,7 +32,7 @@ _DUMP_PARAMS = (
 _DUMP_CTOR_ARGS = (
     "raw_psfs",
     "xdes",
-    "scale_mask",
+    "mask",
     "scale_sigmas",
     "scale_bias",
     "map_pixel_facet",

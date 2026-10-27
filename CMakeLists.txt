@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.26)
 
 # Selects include/fast_deconv/backend/<name> (headers) and src/fast_deconv/backend/<name> (implementations).
-set(FAST_DECONV_BACKEND "cuda" CACHE STRING "Compute backend: cuda | host")
+set(FAST_DECONV_BACKEND "host" CACHE STRING "Compute backend: cuda | host")
 set_property(CACHE FAST_DECONV_BACKEND PROPERTY STRINGS cuda host)
 
 if(NOT FAST_DECONV_BACKEND MATCHES "^(cuda|host)$")
@@ -34,6 +34,8 @@ if(NOT DEFINED CMAKE_CXX_STANDARD)
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# clangd cannot read nvcc --options-file; keep CUDA include paths inline in compile_commands.json.
+set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_INCLUDES OFF)
 
 option(FAST_DECONV_BUILD_TOOLS "Build the replay executable" OFF)
 option(FAST_DECONV_WITH_PROFILER "Enable core/profiler.hpp: NVTX on cuda, Tracy on host" OFF)
@@ -171,7 +173,7 @@ set(FAST_DECONV_GENERIC_SOURCES
     src/fast_deconv/matrix/tiled_argmax.cpp
     src/fast_deconv/matrix/stats.cpp
     src/fast_deconv/common/mask.cpp
-    src/fast_deconv/common/clean.cpp
+    src/fast_deconv/common/subtract.cpp
     src/fast_deconv/common/multi_frequency.cpp
     src/fast_deconv/linalg/linalg.cpp
 )
@@ -180,10 +182,9 @@ if(FAST_DECONV_WITH_CUDA)
 endif()
 
 add_library(fast_deconv STATIC
-        src/fast_deconv/algorithm/ddmsc_cycles.cpp
         src/fast_deconv/algorithm/ddmsc.cpp
-        src/fast_deconv/algorithm/psf_convolution.cpp
-        src/fast_deconv/algorithm/scales.cpp
+        src/fast_deconv/common/psf_convolution.cpp
+        src/fast_deconv/common/scales.cpp
         src/fast_deconv/linalg/gaussian_convolution.cpp
         src/fast_deconv/common/convergence.cpp
         src/fast_deconv/common/gain.cpp

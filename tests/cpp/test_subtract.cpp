@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <fast_deconv/common/clean.hpp>
+#include <fast_deconv/common/subtract.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <memory>
 #include <random>
@@ -23,7 +23,7 @@ constexpr int kW = 20;  // non-square residual
 
 // residual[peak + (i - ph/2, j - pw/2)] -= gain * psf[i, j], clipped to the image.
 std::vector<float> host_subtract(std::vector<float> residual, const std::vector<float>& psf, int ph, int pw,
-                                 common::index2d peak, float gain)
+                                 core::index2d peak, float gain)
 {
   for (int i = 0; i < ph; ++i)
     for (int j = 0; j < pw; ++j) {
@@ -58,7 +58,7 @@ TEST_F(SubtractComponent, SubtractsPsfAroundPeakClippedAtBorders)
     fdtest::fill_uniform(rng, psf, 0.0f, 1.0f);
     const auto d_psf = sr.stage(core::host_span2d<const float>(psf.data(), n, n));
 
-    for (const auto& peak : {common::index2d{8, 10}, {0, 0}, {0, kW - 1}, {kH - 1, 0}, {kH - 1, kW - 1}}) {
+    for (const auto& peak : {core::index2d{8, 10}, {0, 0}, {0, kW - 1}, {kH - 1, 0}, {kH - 1, kW - 1}}) {
       SCOPED_TRACE(::testing::Message() << n << "x" << n << " psf, peak (" << peak.row << ", " << peak.col << ")");
       std::vector<float> got = residual;
       auto d_res = sr.stage(core::host_span2d<float>(got.data(), kH, kW));
@@ -117,7 +117,7 @@ TEST_F(SubtractComponent, MultiFrequencyScalesEachChannelByItsCoeff)
   const auto d_psf = sr.stage(core::host_span3d<const float>(psf.data(), n_freq, n, n));
   const auto d_coeffs = sr.stage(core::host_span1d<const float>(coeffs.data(), n_freq));
 
-  for (const auto& peak : {common::index2d{8, 10}, {kH - 1, kW - 1}}) {
+  for (const auto& peak : {core::index2d{8, 10}, {kH - 1, kW - 1}}) {
     std::vector<float> got = residual;
     auto d_res = sr.stage(core::host_span3d<float>(got.data(), n_freq, kH, kW));
 

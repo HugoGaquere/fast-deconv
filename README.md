@@ -1,17 +1,101 @@
 # fast-deconv
 
-GPU-accelerated DDMSC deconvolution for radio astronomy, callable from Python.
+High-performance DDMSC deconvolution for radio astronomy, on GPUs and multi-core CPUs, callable from Python.
 
-fast-deconv is a high-performance multi-scale and multi-frequency deconvolution engine with several execution backends: CUDA for NVIDIA GPUs and OpenMP for CPUs.
+fast-deconv is an optimized multi-scale and multi-frequency deconvolution engine with two execution backends, both tuned for speed: CUDA for NVIDIA GPUs and OpenMP for multi-core CPUs.
 It's designed for integration with [DDFacet](https://github.com/cyriltasse/DDFacet)-style imaging pipelines.
 
-> **Status:** beta (`v0.9.1`). The API may still change between minor versions.
+> **Status:** beta (`v0.9.2`). The API may still change between minor versions.
+
+## Requirements
+
+- Linux
+- A C++20 compiler with OpenMP
+- Python ≥ 3.10; NumPy is the only runtime dependency
+- **CUDA backend only:** the CUDA Toolkit and an NVIDIA GPU
+
+CMake and Conan come from `pip` in the setup below. The C++ libraries (emu, fmt, spdlog,
+DUCC, ...) are fetched by the build, so there is nothing else to install.
+
+## First-time setup
+
+Do this once per machine.
+
+### 1. Virtual environment and build tools
+
+Create and activate a venv at the repo root, then install the build tools: `conan`, `cmake` and `ninja`.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install conan cmake ninja
+```
+
+[uv](https://docs.astral.sh/uv/) works too and is faster: run `uv venv` instead of
+`python3 -m venv .venv`, and `uv pip` wherever this README says `pip`.
+
+### 2. Conan profile
+
+A Conan profile describes your toolchain (OS, architecture, compiler and its version, C++
+standard, build type). Conan uses it to choose or build dependency binaries that match your build.
+`detect` creates one from the compiler it finds:
+
+```bash
+conan profile detect --exist-ok
+conan profile path default   # the file to edit
+```
+
+In that file, set `compiler.cppstd=gnu20` to match the project. `pip install` derives its own
+profile from CMake, but `scripts/build.sh` and plain `conan install` use this one.
+
+Optional defaults, in `$(conan config home)/global.conf`:
+
+- `tools.cmake.cmaketoolchain:generator=Ninja`: use Ninja instead of Make.
+- `tools.build:skip_test=True`: don't fetch or build GoogleTest unless a command asks for it.
+  `scripts/build.sh -t` overrides it.
+
+### 3. The `cosmic` remote
+
+fast-deconv depends on [emu](https://gitlab.obspm.fr/cosmic/tools/emu), which is not on
+ConanCenter. Add the remote that hosts it, which allows anonymous reads, then check that emu
+resolves:
+
+```bash
+conan remote add cosmic https://gitlab.obspm.fr/api/v4/projects/5071/packages/conan
+conan list "emu/*" -r cosmic   # should print a list of emu versions
+```
+
+### 4. CUDA Toolkit (CUDA backend only)
+
+Skip this step if you only build the CPU backend.
+
+Conan and CMake locate CUDA with CMake's `FindCUDAToolkit`, so `nvcc` must be on `PATH`, or
+`CUDAToolkit_ROOT` must point at the toolkit:
+
+```bash
+export PATH=/usr/local/cuda/bin:$PATH
+nvcc --version
+```
+
+CUDA builds target the GPU in the build machine (`native`) by default. To build for
+other GPUs, or on a machine without one, set `CMAKE_CUDA_ARCHITECTURES` or
+`CUDAARCHS`, e.g. `CUDAARCHS="80;90"`.
 
 ## Quick start
 
+Build and install the package into the active environment, like any pip package. Choose a
+backend; each build contains exactly one. To work on fast-deconv itself, see
+[Development](#development) instead.
+
 ```bash
-pip install .
+pip install .                           # CPU: OpenMP, no GPU needed
+FAST_DECONV_BACKEND=cuda pip install .  # CUDA: NVIDIA GPU + CUDA Toolkit
 ```
+
+The first install compiles the dependencies that have no prebuilt binary for your profile,
+including emu's Boost, so it takes a while. Later builds reuse Conan's cache in `~/.conan2`.
+
+The Python API is the same for both backends.
 
 ```python
 import numpy as np
@@ -31,7 +115,7 @@ xdes = np.vander(nu, 2, increasing=True).astype(np.float32)  # (n_freq, n_order)
 deconv = DDMSC(
     raw_psfs=psfs,
     xdes=xdes,
-    scale_mask=np.zeros((n, n), bool),                      # True = masked out
+    mask=np.zeros((n, n), bool),                            # True = masked out
     scale_sigmas=np.array([0.0, 1.5], np.float32),          # sigma 0 = point source
     scale_bias=np.array([1.0, 0.8], np.float32),
     map_pixel_facet=np.zeros((n, n), np.int32),             # facet index per pixel
@@ -64,7 +148,7 @@ once per major cycle.
 |---|---|---|---|
 | `raw_psfs` | `(n_facets, n_freq, psf_h, psf_w)` | `float32` | Stokes-I PSF of each facet and band, normalised to unit peak |
 | `xdes` | `(n_freq, n_order)` | `float32` | Spectral basis evaluated at each band, e.g. `(ν/ν0)^k`; any linear basis, up to 8 terms |
-| `scale_mask` | `(nrow, ncol)` | `bool` | External mask, `True` = pixel excluded from cleaning |
+| `mask` | `(nrow, ncol)` | `bool` | External mask, `True` = pixel excluded from cleaning |
 | `scale_sigmas` | `(n_scales,)` | `float32` | Gaussian sigma of each scale, in pixels; `0` = delta scale |
 | `scale_bias` | `(n_scales,)` | `float32` | Per-scale bias multiplying the peak during scale selection ([Offringa & Smirnov 2017](https://arxiv.org/abs/1706.06786)); `1` for the delta scale |
 | `map_pixel_facet` | `(nrow, ncol)` | `int32` | Facet (= `raw_psfs` axis 0) index of every pixel; all zeros for a single PSF |
@@ -93,85 +177,61 @@ Algorithm parameters are properties you can change between `run()` calls:
 
 Types are in `src/fast_deconv/_fast_deconv/ddmsc.pyi`.
 
-## Requirements
+## Development
 
-- Linux
-- CMake ≥ 3.26
-- A C++20 compiler with OpenMP
-- [Conan 2.x](https://conan.io). The build calls it automatically through
-  `cmake/conan_provider.cmake`.
-- Python ≥ 3.10, for the Python package
-- **CUDA backend only:** the CUDA Toolkit and an NVIDIA GPU
+### Editable Python install
 
-CUDA builds target the GPU in the build machine (`native`) by default. To build for
-other GPUs, or on a machine without one, set `CMAKE_CUDA_ARCHITECTURES` or
-`CUDAARCHS`, e.g. `CUDAARCHS="80;90"`.
-
-### Third-party libraries
-
-- [emu](https://gitlab.obspm.fr/cosmic/tools/emu)
-- [fmt](https://github.com/fmtlib/fmt)
-- [spdlog](https://github.com/gabime/spdlog)
-- [pybind11](https://github.com/pybind/pybind11)
-- [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit)
-- [DUCC](https://gitlab.mpcdf.mpg.de/mtr/ducc)
-- [Tracy](https://github.com/wolfpld/tracy)
-- [GoogleTest](https://github.com/google/googletest)
-- [nlohmann/json](https://github.com/nlohmann/json)
-
-## Installing the Python package
-
-scikit-build-core compiles the extension during install, and Conan fetches the C++
-dependencies. NumPy is the only runtime dependency.
+Unlike `pip install .`, an editable install rebuilds the extension on import after C++
+changes:
 
 ```bash
-pip install .     # CUDA backend
-uv sync           # editable development install; rebuilds on import after C++ changes
+uv sync                           # host
+FAST_DECONV_BACKEND=cuda uv sync  # cuda
 ```
 
-To build the CPU backend (PocketFFT + OpenMP), set the backend before installing:
+### Wheels for distribution
 
-```bash
-SKBUILD_CMAKE_DEFINE="FAST_DECONV_BACKEND=host" pip install .
-```
-
-To build wheels for distribution, use `./scripts/build.sh --python`, which writes
-`dist/cuda/`, or `./scripts/build.sh all --python`, which writes one wheel per
+To build wheels to install on other machines, use `./scripts/build.sh --python`, which writes
+`dist/host/`, or `./scripts/build.sh all --python`, which writes one wheel per
 backend to `dist/<backend>/`. Linux wheels bundle their shared dependencies,
 including OpenMP and the CUDA math libraries. The NVIDIA driver and the system
 C/C++ runtime must still be installed on the target machine.
 
-For an Apptainer image with DDFacet and fast-deconv, see [APPTAINER.md](APPTAINER.md).
-
-## Building the C++ library
+### Building the C++ library
 
 `scripts/build.sh` configures and builds each backend in its own tree
 (`build/<build_type>-backend_<backend>`), so CUDA and host builds never overwrite
 each other.
 
 ```bash
-./scripts/build.sh                # cuda, Release
-./scripts/build.sh host           # host, Release
+./scripts/build.sh                # host, Release
+./scripts/build.sh cuda           # cuda, Release
 ./scripts/build.sh all -t         # both backends, then run ctest
 ./scripts/build.sh cuda Debug     # other build types: Debug, RelWithDebInfo
 ./scripts/build.sh -t=Mask        # build, then ctest -R Mask
+./scripts/build.sh cuda --clean   # delete the tree, then rebuild from conan install
 ./scripts/build.sh --help         # profiling and flame-graph options
 ```
+
+Conan and CMake configure run only on a fresh tree; later runs just build. Pass `--clean`
+after changing `conanfile.py`, the Conan profile, `-t`, `--profile` or `--flamegraph`.
 
 To build without the script, run Conan and CMake directly:
 
 ```bash
-conan install . -o "fast-deconv/*:backend=cuda" -c tools.build:skip_test=False \
+conan install . -o "fast-deconv/*:backend=host" -c tools.build:skip_test=False \
       --build=missing -s build_type=Release
-cmake --preset conan-release-backend_cuda
-cmake --build build/release-backend_cuda
+cmake --preset conan-release-backend_host
+cmake --build build/release-backend_host
 ```
+
+For the CUDA backend, replace `host` with `cuda` in all three commands.
 
 Conan only supplies the dependencies. This recipe does not package the library.
 
 | CMake option | Default | Effect |
 |---|---|---|
-| `FAST_DECONV_BACKEND` | `cuda` | `cuda` or `host` (CPU) |
+| `FAST_DECONV_BACKEND` | `host` | `cuda` or `host` (CPU) |
 | `FAST_DECONV_BUILD_TOOLS` | `OFF` | Build the `replay_ddmsc` tool (`build.sh` turns it on) |
 | `BUILD_TESTING` | set by Conan | Build the GoogleTest suites |
 | `FAST_DECONV_WITH_PROFILER` | `OFF` | NVTX ranges (cuda) or Tracy client (host) |
@@ -185,40 +245,47 @@ preset, also pass `-DBUILD_TESTING=OFF`. Python builds never include the tests.
 The build produces `libfast_deconv.a`, plus `replay_ddmsc`,
 `fast_deconv_unit_tests` and `fast_deconv_nonreg_tests` when they are enabled.
 
-## Tests
+### Tests
 
-The test suite is C++ only. Run it from a build tree; for the CPU backend, use
-`build/release-backend_host`.
+The test suite is C++ only. Run it from a build tree built with `-t`:
 
 ```bash
-ctest --test-dir build/release-backend_cuda -L UNIT     # kernels checked against CPU oracles
-ctest --test-dir build/release-backend_cuda -L NONREG   # full synthetic DDMSC run vs baseline
+ctest --test-dir build/release-backend_host -L UNIT     # kernels checked against CPU oracles
+ctest --test-dir build/release-backend_host -L NONREG   # full synthetic DDMSC run vs baseline
 ```
 
-The CUDA test binaries need a GPU to run.
+For the CUDA backend, use `build/release-backend_cuda` instead. Its test binaries need a GPU to run.
 
 The non-regression test compares the scalar metrics of a synthetic run with
 `tests/baselines/ddmsc_synthetic.json`. After an intentional algorithmic change,
 regenerate the baseline, review the diff, and commit it:
 
 ```bash
-FAST_DECONV_UPDATE_BASELINE=1 ctest --test-dir build/release-backend_cuda -L NONREG
+FAST_DECONV_UPDATE_BASELINE=1 ctest --test-dir build/release-backend_host -L NONREG
 git diff tests/baselines/ddmsc_synthetic.json
 ```
 
-## Layout
+## Architecture
 
-```
-include/fast_deconv/      public headers: algorithm, common, core, linalg, matrix, morphology, util
-  backend/<cuda|host>/    backend-specific headers
-src/fast_deconv/          shared sources and the Python package
-  backend/<cuda|host>/    backend implementations (.cu / .cpp)
-src/python/bindings/      pybind11 wrappers
-src/replay_ddmsc.cpp      dump replay tool
-tests/cpp/                GoogleTest unit and non-regression tests
-tests/baselines/          non-regression baseline
-scripts/                  build, plotting and paper-benchmark scripts
-```
+For the code layout, the layers, the backends and their invariants, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Contributing
+
+TODO
+
+## Third-party libraries
+
+fast-deconv builds on:
+
+- [emu](https://gitlab.obspm.fr/cosmic/tools/emu)
+- [fmt](https://github.com/fmtlib/fmt)
+- [spdlog](https://github.com/gabime/spdlog)
+- [pybind11](https://github.com/pybind/pybind11)
+- [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit)
+- [DUCC](https://gitlab.mpcdf.mpg.de/mtr/ducc)
+- [Tracy](https://github.com/wolfpld/tracy)
+- [GoogleTest](https://github.com/google/googletest)
+- [nlohmann/json](https://github.com/nlohmann/json)
 
 ## License
 

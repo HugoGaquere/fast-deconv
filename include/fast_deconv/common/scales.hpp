@@ -23,7 +23,8 @@ struct scale_result {
  * Each non-retired scale s is ranked by bias[s] * peak_s, where peak_s is the masked peak of @p dirty convolved
  * with Gaussian(sigmas[s]), ranked by matrix::peak_criterion. Scale 0 is taken as the identity, whatever
  * sigmas[0]: @p dirty is searched directly. Strictly greater wins, so the lowest scale takes a tie and a NaN peak
- * never wins. Syncs @p exec_ctx.
+ * never wins. @p mask is (n_scales, nrow, ncol) with one plane per scale, (1, nrow, ncol) shared by every scale, or a
+ * null data handle for no mask. Syncs @p exec_ctx.
  *
  * @param[in] exec_ctx  Execution context; scratch is allocated on it.
  * @param[in] conv_ctx  Convolution context for one (nrow, ncol) image, batch 1, wrap-free for @p sigmas.
@@ -31,8 +32,7 @@ struct scale_result {
  * @param[in] sigmas    Gaussian sigma per scale, (n_scales,).
  * @param[in] bias      Weight on each scale's peak, host, (n_scales,).
  * @param[in] retired   Indices of the scales to skip.
- * @param[in] mask      Device, true = masked: (n_scales, nrow, ncol) one plane per scale, (1, nrow, ncol) shared by
- *                      every scale, or a null data handle for no mask. Must outlive the returned criterion.
+ * @param[in] mask      Device, true = masked, see above. Must outlive the returned criterion.
  * @param[in] absolute  Rank by |x| instead of x.
  * @return The selected scale, its convolved residual, that plane's peak and the criterion it was ranked by.
  * @throws std::invalid_argument If every scale is retired.

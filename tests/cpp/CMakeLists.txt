@@ -13,10 +13,11 @@ add_executable(fast_deconv_unit_tests
   test_morphology.cpp
   test_mask.cpp
   test_tiled_argmax.cpp
-  test_clean.cpp
+  test_subtract.cpp
   test_gain.cpp
   test_multi_frequency.cpp
   test_core_parallel.cpp
+  test_ddmsc_auto_mask.cpp
 )
 
 # Includes fd_backend/core/{reduce,for_each}.hpp directly, so under CUDA nvcc must compile it.

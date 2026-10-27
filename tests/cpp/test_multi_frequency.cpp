@@ -9,7 +9,6 @@
 #include "helpers/backend_test.hpp"
 #include "helpers/host_oracles.hpp"
 
-namespace common = fast_deconv::common;
 namespace core = fast_deconv::core;
 namespace mfs = fast_deconv::multi_frequency;
 namespace fdtest = fast_deconv::test;
@@ -164,7 +163,7 @@ std::vector<double> power_design(const std::vector<double>& nu, double nu0, int 
   return xdes;
 }
 
-scene make_scene(std::vector<double> xdes_d, const std::vector<double>& y, common::index2d peak,
+scene make_scene(std::vector<double> xdes_d, const std::vector<double>& y, core::index2d peak,
                  float background = 0.0f)
 {
   const int n_freq = static_cast<int>(y.size());
@@ -196,7 +195,7 @@ class FitCoefficients : public fdtest::BackendTest {
   // constant per channel (value jn[f] at every pixel).
   std::pair<std::vector<float>, std::vector<float>> run(const std::vector<float>& xdes, const std::vector<float>& jn,
                                                         const std::vector<float>& weights,
-                                                        const std::vector<float>& dirty, common::index2d peak,
+                                                        const std::vector<float>& dirty, core::index2d peak,
                                                         int n_order = kOrder)
   {
     const int n_freq = static_cast<int>(weights.size());
@@ -257,7 +256,7 @@ TEST_F(FitCoefficients, WeightedJonesFitMatchesHostLeastSquares)
   const std::vector<double> w = {0.5, 1.0, 0.75, 1.25};
   const std::vector<double> y = {3.1, 2.7, 2.9, 2.4};  // deliberately not an exact model fit
 
-  const common::index2d peak{4, 6};  // bottom-right corner pixel
+  const core::index2d peak{4, 6};  // bottom-right corner pixel
   const auto sc = make_scene(log_design(log_nu), y, peak, /*background=*/0.1f);
   const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak);
   const auto expected = host_fit(sc.xdes_d, jn, w, y, kOrder);
@@ -280,7 +279,7 @@ TEST_F(FitCoefficients, PreservesBandWeightedMeanAtSteepJones)
   const std::vector<double> w = {0.2, 0.2, 0.2, 0.2, 0.2};
   const std::vector<double> y = {0.02, -0.015, 0.01, -0.005, 0.002};
 
-  const common::index2d peak{1, 2};
+  const core::index2d peak{1, 2};
   const auto sc = make_scene(power_design(nu, /*nu0=*/1480.0, kFitOrder), y, peak);
   const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak, kFitOrder);
   const auto expected = host_fit(sc.xdes_d, jn, w, y, kFitOrder);
@@ -307,7 +306,7 @@ TEST_F(FitCoefficients, MinimumNormFitWhenFewerBandsThanOrder)
   const std::vector<double> w = {0.5, 0.5};
   const std::vector<double> y = {0.0193, -0.0989};
 
-  const common::index2d peak{2, 4};
+  const core::index2d peak{2, 4};
   const auto sc = make_scene(power_design(nu, /*nu0=*/143.650818e6, kFitOrder), y, peak);
   const auto [compact, per_chan] = run(sc.xdes, to_float(jn), to_float(w), sc.dirty, peak, kFitOrder);
   const auto expected = host_fit_min_norm(sc.xdes_d, jn, y, kFitOrder);

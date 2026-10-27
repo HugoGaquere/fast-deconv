@@ -1,13 +1,13 @@
 #include <emu/submdspan.hpp>
-#include <fast_deconv/algorithm/psf_convolution.hpp>
 #include <fast_deconv/common/gain.hpp>
+#include <fast_deconv/common/psf_convolution.hpp>
 #include <fast_deconv/core/logger.hpp>
 #include <fast_deconv/core/profiler.hpp>
 #include <fast_deconv/linalg/linalg.hpp>
 #include <numbers>
 #include <stdexcept>
 
-namespace fast_deconv::algorithm {
+namespace fast_deconv::common {
 
 psf_convolution::psf_convolution(const core::exec_ctx& exec_ctx, core::span4d<const float> raw_psfs,
                                  std::vector<float> sigmas, core::span1d<const float> weights, float gamma)
@@ -90,4 +90,4 @@ psf_convolution::entry psf_convolution::get(int scale, std::int64_t facet)
   return e;
 }
 
-}  // namespace fast_deconv::algorithm
+}  // namespace fast_deconv::common

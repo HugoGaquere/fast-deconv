@@ -1,13 +1,161 @@
 #pragma once
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
-#include <fast_deconv/algorithm/ddmsc_cycles.hpp>
-#include <fast_deconv/algorithm/ddmsc_types.hpp>
-#include <fast_deconv/algorithm/scales.hpp>
+#include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
+#include <fast_deconv/core/index.hpp>
 #include <fast_deconv/core/memory_types.hpp>
+#include <fast_deconv/linalg/fft.hpp>
+#include <iterator>
+#include <optional>
+#include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace fast_deconv::algorithm::ddmsc {
+
+struct params {
+  // outer loop params
+  int max_iteration = 1000;        // total minor iterations across all scale selections
+  float divergence_factor = 2.0f;  // flux growth ratio that counts as divergence
+
+  // Every "rms" in this file is the standard deviation of the mean residual over all pixels (see
+  // matrix::stats_result::rms), not its root mean square.
+
+  // stopping criterion: stop_flux = max(flux_threshold, rms_factor*rms, peak_factor*peak, sidelobe_coeff*peak)
+  // computed once per call from the initial peak/standard deviation of the mean residual
+  float flux_threshold = 0.0f;       // absolute floor below which to stop
+  float stop_rms_factor = 0.0f;      // weights the initial standard deviation in the stop-flux composition
+  float stop_peak_factor = 0.0f;     // weights initial peak in the stop-flux composition
+  float stop_cycle_factor = 0.0f;    // 0 disables the sidelobe contribution
+  float stop_sidelobe_level = 0.0f;  // PSF sidelobe level used in the sidelobe term
+
+  // clean loop params
+  bool clean_negative = false;
+  float peak_factor = 0.15f;       // sub-clean threshold = peak_value * peak_factor
+  float gamma = 0.1f;              // CLEAN loop gain
+  int max_clean_iteration = 1000;  // sub-minor loop iterations per scale selection
+
+  // scales params
+  // Relative standard deviation change between outer iterations below which the selected scale takes a stall strike;
+  // a strike-free iteration resets its count. More than 5 consecutive strikes retire the scale. Engaging the
+  // auto-mask clears every count.
+  float scale_stall_threshold = 1e-6f;
+  bool enable_auto_mask = false;        // master switch for auto-masking
+  bool force_enable_auto_mask = false;  // with enable_auto_mask, engage masking immediately, bypassing thresholds
+
+  // Auto-masking engages once the residual peak drops to the threshold. The peak threshold wins when both are
+  // set; with neither, the threshold is 0, so only a non-positive peak (or force_enable_auto_mask) engages it.
+  std::optional<float> auto_mask_peak_threshold;  // absolute flux
+  std::optional<float> auto_mask_rms_threshold;   // multiple of the current standard deviation
+};
+
+struct context {
+  core::exec_resources resources;
+  core::exec_ctx exec;       // default; everything except the clean loop's cube updates
+  core::exec_ctx cube_exec;  // clean-loop fit/subtract on the dirty cube, overlapping exec
+  core::cont4d<const float> raw_psfs;
+  core::cont2d<const float> xdes;
+  core::cont2d<const bool> mask;
+  std::vector<float> scale_sigmas;
+  core::host_span1d<const float> scale_bias;
+  core::host_span2d<const int> map_pixel_facet;
+  std::int64_t dirty_nrow;
+  std::int64_t dirty_ncol;
+
+  std::vector<core::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
+  std::vector<int> historical_scales;                 // scale of each historical component
+
+  /**
+   * @brief Stages the run-constant inputs and copies the scale sigmas.
+   *
+   * The host spans must outlive the context: the host backend borrows them.
+   *
+   * @param[in] exec_device      Device the resources and both contexts are created on.
+   * @param[in] raw_psfs         Raw PSFs, host, (n_facets, n_freq, psf_h, psf_w). Staged.
+   * @param[in] xdes             Spectral design matrix, host, (n_freq, n_order). Staged.
+   * @param[in] mask             External mask, host, (dirty_nrow, dirty_ncol), true = masked. Staged.
+   * @param[in] scale_sigmas     Gaussian sigma per scale, host, (n_scales,). Copied.
+   * @param[in] scale_bias       Per-scale weight on the peak value during scale selection, host, (n_scales,). Borrowed.
+   * @param[in] map_pixel_facet  Facet index of every dirty pixel, host, (dirty_nrow, dirty_ncol). Borrowed.
+   * @param[in] dirty_nrow       Dirty image rows.
+   * @param[in] dirty_ncol       Dirty image columns.
+   */
+  context(int exec_device, core::host_span4d<const float> raw_psfs, core::host_span2d<const float> xdes,
+          core::host_span2d<const bool> mask, core::host_span1d<const float> scale_sigmas,
+          core::host_span1d<const float> scale_bias, core::host_span2d<const int> map_pixel_facet,
+          std::int64_t dirty_nrow, std::int64_t dirty_ncol)
+      : resources(exec_device),
+        exec(resources.make_ctx()),
+        cube_exec(resources.make_ctx()),
+        raw_psfs(exec.stage(raw_psfs)),
+        xdes(exec.stage(xdes)),
+        mask(exec.stage(mask)),
+        scale_sigmas(scale_sigmas.data_handle(), scale_sigmas.data_handle() + scale_sigmas.size()),
+        scale_bias(scale_bias),
+        map_pixel_facet(map_pixel_facet),
+        dirty_nrow(dirty_nrow),
+        dirty_ncol(dirty_ncol)
+  {
+    exec.wait();  // staging copies complete before construction returns
+  }
+
+  context(const context&) = delete;
+  context& operator=(const context&) = delete;
+  context(context&&) = delete;
+  context& operator=(context&&) = delete;
+};
+
+struct ddmsc_result {
+  std::vector<std::pair<std::int64_t, std::int64_t>>
+      peak_coords;  // pair, not index2d: bound read-only to Python as list[tuple]
+  std::vector<int> scales;
+  std::vector<float> gains;
+  std::vector<float> coeffs;  // row-major [component][n_order]
+  std::int64_t n_order = 0;
+  float initial_flux = 0.0f;  // peak flux of the mean residual on entry
+  float initial_rms = 0.0f;   // standard deviation of the mean residual on entry
+  // final_flux and final_rms ignore the auto-mask.
+  float final_flux = 0.0f;   // peak flux of the mean residual after the last outer iteration
+  float final_rms = 0.0f;    // standard deviation of the mean residual after the last outer iteration
+  float stop_flux = 0.0f;    // composed stop-flux threshold used for this call (max of the four limits)
+  int total_iterations = 0;  // total minor iterations consumed across all outer cycles
+  int outer_iterations = 0;  // scale selections, including the one that found no component
+  common::convergence_status status = common::convergence_status::running;  // why the outer loop ended
+
+  /// @p capacity is the most components one call can produce.
+  explicit ddmsc_result(std::size_t capacity)
+  {
+    peak_coords.reserve(capacity);
+    scales.reserve(capacity);
+    gains.reserve(capacity);
+  }
+
+  [[nodiscard]] std::size_t n_components() const { return peak_coords.size(); }
+
+  /// Appends one component; its coefficients come later, in set_coeffs().
+  void add_component(core::index2d coords, int scale, float gain)
+  {
+    peak_coords.emplace_back(coords.row, coords.col);
+    scales.push_back(scale);
+    gains.push_back(gain);
+  }
+
+  /// One row per component; @p ctx must be the stream @p rows was written on.
+  void set_coeffs(const core::exec_ctx& ctx, core::span2d<const float> rows)
+  {
+    if (rows.extent(0) != std::ssize(peak_coords))
+      throw std::logic_error("ddmsc_result: coefficient rows do not match the components added");
+
+    n_order = rows.extent(1);
+    coeffs.resize(rows.size());
+    if (coeffs.empty()) return;
+    ctx.copy(coeffs.data(), rows.data_handle(), std::ssize(coeffs));
+    ctx.wait();
+  }
+};
 
 /**
  * @brief   Stateful DDMSC deconvolution session.
@@ -17,28 +165,28 @@ namespace fast_deconv::algorithm::ddmsc {
  *
  *          `run()` accepts only the per-call inputs that change between major
  *          cycles: the dirty image, jones normalization, and per-frequency
- *          weights. All algorithm parameters are tunable.
+ *          weights. `cfg` is read at each call, so it may change between them.
  *
  *          All array inputs are host views. raw_psfs, xdes and mask are staged at
  *          construction, the `run()` inputs per call; scale_sigmas is copied; scale_bias
  *          and map_pixel_facet stay borrowed on the host. `dirty` is in/out — its residual
  *          is copied back into the caller's host buffer when `run()` returns.
  */
-class Ddmsc {
- public:
+struct Ddmsc {
+  context ctx;
+  params cfg;  // read at each run()
+
   /**
-   * @brief Builds the context (see context::context) and sets every algorithm parameter to its default.
+   * @brief Builds the context (see context::context); cfg starts at the params defaults.
    *
-   * Staging borrows on the host backend, so there the staged inputs must outlive this too.
+   * Borrowed inputs must outlive this, and so must the staged ones on the host backend, which borrows them.
    *
    * @param[in] raw_psfs         Raw PSFs, host, (n_facets, n_freq, psf_h, psf_w). Staged.
    * @param[in] xdes             Spectral design matrix, host, (n_freq, n_order). Staged.
    * @param[in] mask             External mask, host, (dirty_nrow, dirty_ncol), true = masked. Staged.
    * @param[in] scale_sigmas     Gaussian sigma per scale, host, (n_scales,). Copied.
-   * @param[in] scale_bias       Per-scale weight on the peak value during scale selection, host, (n_scales,).
-   *                             Borrowed: must outlive this.
-   * @param[in] map_pixel_facet  Facet index of every dirty pixel, host, (dirty_nrow, dirty_ncol). Borrowed: must
-   *                             outlive this.
+   * @param[in] scale_bias       Per-scale weight on the peak value during scale selection, host, (n_scales,). Borrowed.
+   * @param[in] map_pixel_facet  Facet index of every dirty pixel, host, (dirty_nrow, dirty_ncol). Borrowed.
    * @param[in] dirty_nrow       Dirty image rows.
    * @param[in] dirty_ncol       Dirty image columns.
    * @param[in] exec_device      Device the resources and streams are created on.
@@ -51,70 +199,13 @@ class Ddmsc {
   /**
    * @brief Run the minor loop for one major cycle.
    *
-   * @param[in,out] dirty         Dirty image, host, (n_freq, nrow, ncol); the residual is written back
-   *                              before returning.
+   * @param[in,out] dirty         Dirty image, host, (n_freq, nrow, ncol); the residual is written back.
    * @param[in]     jones_norm    Jones normalization, host, (n_freq, nrow, ncol).
    * @param[in]     weights_freq  Per-frequency weights, host, (n_freq,).
    * @return Extracted components, entry/exit flux and standard deviation, and why the loop stopped.
    */
   ddmsc_result run(core::host_span3d<float> dirty, core::host_span3d<const float> jones_norm,
                    core::host_span1d<const float> weights_freq);
-
-  // Getters and setters of the algorithm parameters, applied from the next run(). Each maps to the params field of
-  // the same name (max_sub_iteration -> max_clean_iteration, stall_threshold -> scale_stall_threshold,
-  // auto_mask -> enable_auto_mask, force_auto_mask -> force_enable_auto_mask); see params for their meaning.
-
-  bool clean_negative() const { return params_.clean_negative; }
-  void set_clean_negative(bool v) { params_.clean_negative = v; }
-
-  float peak_factor() const { return params_.peak_factor; }
-  void set_peak_factor(float v) { params_.peak_factor = v; }
-
-  float gamma() const { return params_.gamma; }
-  void set_gamma(float v) { params_.gamma = v; }
-
-  int max_sub_iteration() const { return params_.max_clean_iteration; }
-  void set_max_sub_iteration(int v) { params_.max_clean_iteration = v; }
-
-  float flux_threshold() const { return params_.flux_threshold; }
-  void set_flux_threshold(float v) { params_.flux_threshold = v; }
-
-  float stop_rms_factor() const { return params_.stop_rms_factor; }
-  void set_stop_rms_factor(float v) { params_.stop_rms_factor = v; }
-
-  float stop_peak_factor() const { return params_.stop_peak_factor; }
-  void set_stop_peak_factor(float v) { params_.stop_peak_factor = v; }
-
-  float stop_cycle_factor() const { return params_.stop_cycle_factor; }
-  void set_stop_cycle_factor(float v) { params_.stop_cycle_factor = v; }
-
-  float stop_sidelobe_level() const { return params_.stop_sidelobe_level; }
-  void set_stop_sidelobe_level(float v) { params_.stop_sidelobe_level = v; }
-
-  int max_iteration() const { return params_.max_iteration; }
-  void set_max_iteration(int v) { params_.max_iteration = v; }
-
-  float divergence_factor() const { return params_.divergence_factor; }
-  void set_divergence_factor(float v) { params_.divergence_factor = v; }
-
-  float stall_threshold() const { return params_.scale_stall_threshold; }
-  void set_stall_threshold(float v) { params_.scale_stall_threshold = v; }
-
-  bool auto_mask() const { return params_.enable_auto_mask; }
-  void set_auto_mask(bool v) { params_.enable_auto_mask = v; }
-
-  bool force_auto_mask() const { return params_.force_enable_auto_mask; }
-  void set_force_auto_mask(bool v) { params_.force_enable_auto_mask = v; }
-
-  std::optional<float> auto_mask_peak_threshold() const { return params_.auto_mask_peak_threshold; }
-  void set_auto_mask_peak_threshold(std::optional<float> v) { params_.auto_mask_peak_threshold = v; }
-
-  std::optional<float> auto_mask_rms_threshold() const { return params_.auto_mask_rms_threshold; }
-  void set_auto_mask_rms_threshold(std::optional<float> v) { params_.auto_mask_rms_threshold = v; }
-
- private:
-  context ctx_;
-  params params_;
 };
 
 }  // namespace fast_deconv::algorithm::ddmsc

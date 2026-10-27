@@ -26,8 +26,7 @@ peak find_peak(const core::exec_ctx& ctx, core::span2d<const float> data, peak_c
 {
   FD_PROFILE_FN();
   assert(data.is_exhaustive());
-  return core::reduce(ctx, data.mapping().required_span_size(), criterion_peak{data.data_handle(), criterion},
-                      peak_max{}, kPeakIdentity);
+  return core::reduce(ctx, core::count(data), criterion_peak{data.data_handle(), criterion}, peak_max{}, kPeakIdentity);
 }
 
 }  // namespace fast_deconv::matrix

@@ -42,6 +42,8 @@ CompileFlags:
     - "--restrict"
     - "--generate-line-info"
     - "-Xcompiler*"
+    # clangd crashes in Sema::emitDeferredDiags when rebuilding headers with OpenMP on
+    - "-fopenmp"
 Hover:
   ShowAKA: No
 InlayHints:

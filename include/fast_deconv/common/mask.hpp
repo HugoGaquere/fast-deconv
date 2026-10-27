@@ -1,7 +1,7 @@
 #pragma once
 
-#include <fast_deconv/common/region.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
+#include <fast_deconv/core/index.hpp>
 #include <vector>
 
 namespace fast_deconv::common {
@@ -34,13 +34,26 @@ namespace fast_deconv::common {
  * @param[in]    central_facet_psfs  Central facet per-frequency PSFs, device, (n_freq, psf_h, psf_w).
  * @param[in]    weights_freq        Per-channel weights, device, (n_freq,).
  * @param[in]    scale_sigmas        Gaussian sigma per scale, host, (n_scales,).
- * @param[in]    external_mask       External mask, device, (dirty_h, dirty_w), true = masked; OR'd into every
- *                                   scale slice.
+ * @param[in]    external_mask       External mask, device, (dirty_h, dirty_w), true = masked; OR'd into every slice.
  * @param[out]   mask_per_scale      (n_scales, dirty_h, dirty_w) bool, written entirely.
  */
-void build_auto_mask(const core::exec_ctx& ctx, const std::vector<index2d>& coords, const std::vector<int>& scales,
-                     core::span3d<const float> central_facet_psfs, core::span1d<const float> weights_freq,
-                     const std::vector<float>& scale_sigmas, core::span2d<const bool> external_mask,
-                     core::span3d<bool> mask_per_scale);
+void build_auto_mask(const core::exec_ctx& ctx, const std::vector<core::index2d>& coords,
+                     const std::vector<int>& scales, core::span3d<const float> central_facet_psfs,
+                     core::span1d<const float> weights_freq, const std::vector<float>& scale_sigmas,
+                     core::span2d<const bool> external_mask, core::span3d<bool> mask_per_scale);
+
+/**
+ * @brief Union of the valid regions of some scales' masks: the pixels at least one of them may clean.
+ *
+ * out[r, c] = false (valid) iff mask_per_scale[s, r, c] is false for some s in @p scales; with no scales,
+ * every pixel is masked.
+ *
+ * @param[in]  ctx             Execution context.
+ * @param[in]  mask_per_scale  (n_scales, nrow, ncol) bool, true = masked, as written by build_auto_mask.
+ * @param[in]  scales          Indices of the scales to combine, host.
+ * @param[out] out             (nrow, ncol) bool, true = masked, written entirely.
+ */
+void combine_scale_masks(const core::exec_ctx& ctx, core::span3d<const bool> mask_per_scale,
+                         const std::vector<int>& scales, core::span2d<bool> out);
 
 }  // namespace fast_deconv::common

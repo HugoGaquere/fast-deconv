@@ -4,7 +4,7 @@ from conan.tools.cmake import cmake_layout, CMakeToolchain
 
 class Recipe(ConanFile):
     name = "fast-deconv"
-    version = "0.9.1"
+    version = "0.9.2"
 
     # Conan supplies dependencies and CMake configuration for local builds.
     settings = "os", "compiler", "build_type", "arch"
@@ -14,7 +14,7 @@ class Recipe(ConanFile):
         "backend": ["cuda", "host"],
         "with_tests": [True, False],
     }
-    default_options = {"python_module": False, "backend": "cuda", "with_tests": True}
+    default_options = {"python_module": False, "backend": "host", "with_tests": True}
 
     options_descriptions = {
         "python_module": "Tells conan to adapt to the python module build",

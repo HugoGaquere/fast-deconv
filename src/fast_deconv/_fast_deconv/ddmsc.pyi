@@ -22,7 +22,7 @@ class DDMSC:
         self,
         raw_psfs: npt.NDArray[np.float32],
         xdes: npt.NDArray[np.float32],
-        scale_mask: npt.NDArray[np.bool_],
+        mask: npt.NDArray[np.bool_],
         scale_sigmas: npt.NDArray[np.float32],
         scale_bias: npt.NDArray[np.float32],
         map_pixel_facet: npt.NDArray[np.int32],

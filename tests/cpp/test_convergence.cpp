@@ -179,3 +179,32 @@ TEST(ScaleStallTracker, AllStalledOnlyOnceEveryScaleIs)
   EXPECT_TRUE(t.all_stalled());
   EXPECT_EQ(t.get_all_stalled(), (std::vector<int>{0, 1}));
 }
+
+// The threshold scales with the rms, so the same relative move strikes, or not, at any flux scale.
+TEST(ScaleStallTracker, ThresholdIsRelativeToThePreviousRms)
+{
+  for (const float rms : {1e-3f, 1.0f, 1e3f}) {
+    scale_stall_tracker t(/*n_scales=*/1, /*max_stall_count=*/0, /*stall_threshold=*/0.01f);
+    t.init_rms(rms);
+    t.update(0, rms * 0.98f);  // 2% move: progress
+    EXPECT_FALSE(t.is_stall(0)) << "rms " << rms;
+    t.update(0, rms * 0.98f * 0.995f);  // 0.5% move: strike 1 > 0
+    EXPECT_TRUE(t.is_stall(0)) << "rms " << rms;
+  }
+}
+
+// reset() un-retires every scale; later updates strike from zero again.
+TEST(ScaleStallTracker, ResetClearsEveryStrike)
+{
+  scale_stall_tracker t(/*n_scales=*/2, /*max_stall_count=*/0, /*stall_threshold=*/0.01f);
+  t.init_rms(1.0f);
+  t.update(0, 1.0f);
+  t.update(1, 1.0f);
+  ASSERT_TRUE(t.all_stalled());
+
+  t.reset();
+  EXPECT_TRUE(t.get_all_stalled().empty());
+
+  t.update(1, 1.0f);
+  EXPECT_EQ(t.get_all_stalled(), std::vector<int>{1});
+}

@@ -5,7 +5,7 @@
 
 namespace fast_deconv::kernel {
 
-__global__ void binary_dilation(const bool* data, const bool* structure, common::roi structure_roi, bool* out,
+__global__ void binary_dilation(const bool* data, const bool* structure, morphology::roi structure_roi, bool* out,
                                 std::int64_t nrow, std::int64_t ncol, std::int64_t data_stride,
                                 std::int64_t structure_stride)
 {
@@ -48,14 +48,13 @@ __global__ void binary_dilation(const bool* data, const bool* structure, common:
 namespace fast_deconv::morphology {
 
 void binary_dilation(const core::exec_ctx& ctx, core::span2d<const bool> data, core::span2d<const bool> structure,
-                     common::roi structure_roi, core::span2d<bool> out)
+                     morphology::roi structure_roi, core::span2d<bool> out)
 {
   // The kernel only sets pixels, so clear the output first.
   ctx.zero(out);
   const core::launch_cfg cfg(data.extent(0), data.extent(1));
   core::launch(ctx, cfg, kernel::binary_dilation, data.data_handle(), structure.data_handle(), structure_roi,
-               out.data_handle(), data.extent(0), data.extent(1), data.mapping().stride(0),
-               structure.mapping().stride(0));
+               out.data_handle(), data.extent(0), data.extent(1), data.stride(0), structure.stride(0));
 }
 
 }  // namespace fast_deconv::morphology

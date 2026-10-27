@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <emu/submdspan.hpp>
-#include <fast_deconv/algorithm/scales.hpp>
+#include <fast_deconv/common/scales.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/core/profiler.hpp>

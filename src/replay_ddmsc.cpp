@@ -223,7 +223,7 @@ int main(int argc, char** argv)
   // stages them to the device.
   auto npy_raw_psfs = load_init("raw_psfs");
   auto npy_xdes = load_init("xdes");
-  auto npy_mask = load_init("scale_mask");
+  auto npy_mask = load_init("mask");
   auto npy_scale_sigmas = load_init("scale_sigmas");
   auto npy_scale_bias = load_init("scale_bias");
   auto npy_map_pixel = load_init("map_pixel_facet");
@@ -302,22 +302,22 @@ int main(int argc, char** argv)
   // The cycle's parameters as dumped, each overridden by its flag when given.
   const auto configure = [&](ddmsc::Ddmsc& imager, const std::string& cdir) {
     auto load = [&](const char* name) { return npy::load_npy(cdir + name + ".npy"); };
-    imager.set_clean_negative(load("clean_negative").scalar<bool>());
-    imager.set_peak_factor(peak_factor.value_or(load("peak_factor").scalar<float>()));
-    imager.set_gamma(load("gamma").scalar<float>());
-    imager.set_max_sub_iteration(max_clean_iter.value_or(load("max_sub_iteration").scalar<int>()));
-    imager.set_flux_threshold(flux_threshold.value_or(load("flux_threshold").scalar<float>()));
-    imager.set_stop_rms_factor(stop_rms_factor.value_or(load("stop_rms_factor").scalar<float>()));
-    imager.set_stop_peak_factor(stop_peak_factor.value_or(load("stop_peak_factor").scalar<float>()));
-    imager.set_stop_cycle_factor(stop_cycle_factor.value_or(load("stop_cycle_factor").scalar<float>()));
-    imager.set_stop_sidelobe_level(stop_sidelobe_level.value_or(load("stop_sidelobe_level").scalar<float>()));
-    imager.set_max_iteration(max_iter.value_or(load("max_iteration").scalar<int>()));
-    imager.set_divergence_factor(divergence_factor.value_or(load("divergence_factor").scalar<float>()));
-    imager.set_stall_threshold(stall_threshold.value_or(load("stall_threshold").scalar<float>()));
-    imager.set_auto_mask(auto_mask.value_or(load("auto_mask").scalar<bool>()));
-    imager.set_force_auto_mask(load("force_auto_mask").scalar<bool>());
-    imager.set_auto_mask_peak_threshold(opt_finite(load("auto_mask_peak_threshold").scalar<float>()));
-    imager.set_auto_mask_rms_threshold(opt_finite(load("auto_mask_rms_threshold").scalar<float>()));
+    imager.cfg.clean_negative = load("clean_negative").scalar<bool>();
+    imager.cfg.peak_factor = peak_factor.value_or(load("peak_factor").scalar<float>());
+    imager.cfg.gamma = load("gamma").scalar<float>();
+    imager.cfg.max_clean_iteration = max_clean_iter.value_or(load("max_sub_iteration").scalar<int>());
+    imager.cfg.flux_threshold = flux_threshold.value_or(load("flux_threshold").scalar<float>());
+    imager.cfg.stop_rms_factor = stop_rms_factor.value_or(load("stop_rms_factor").scalar<float>());
+    imager.cfg.stop_peak_factor = stop_peak_factor.value_or(load("stop_peak_factor").scalar<float>());
+    imager.cfg.stop_cycle_factor = stop_cycle_factor.value_or(load("stop_cycle_factor").scalar<float>());
+    imager.cfg.stop_sidelobe_level = stop_sidelobe_level.value_or(load("stop_sidelobe_level").scalar<float>());
+    imager.cfg.max_iteration = max_iter.value_or(load("max_iteration").scalar<int>());
+    imager.cfg.divergence_factor = divergence_factor.value_or(load("divergence_factor").scalar<float>());
+    imager.cfg.scale_stall_threshold = stall_threshold.value_or(load("stall_threshold").scalar<float>());
+    imager.cfg.enable_auto_mask = auto_mask.value_or(load("auto_mask").scalar<bool>());
+    imager.cfg.force_enable_auto_mask = load("force_auto_mask").scalar<bool>();
+    imager.cfg.auto_mask_peak_threshold = opt_finite(load("auto_mask_peak_threshold").scalar<float>());
+    imager.cfg.auto_mask_rms_threshold = opt_finite(load("auto_mask_rms_threshold").scalar<float>());
   };
 
   // Wall time of one run() call, which writes the residual back into in.dirty.
@@ -362,7 +362,7 @@ int main(int argc, char** argv)
       std::copy(initial_dirty.begin(), initial_dirty.end(), in.dirty.as_float32());
       const auto imager = make_imager();
       configure(*imager, cdir);
-      imager->set_max_iteration(n_outer * clean_iter);
+      imager->cfg.max_iteration = n_outer * clean_iter;
       auto [ms, result] = timed_run(*imager, in);
       const bool pinned = result.outer_iterations == n_outer &&
                           result.n_components() == static_cast<size_t>(n_outer) * static_cast<size_t>(clean_iter);
@@ -400,9 +400,7 @@ int main(int argc, char** argv)
       baseline_ms.push_back(base_ms);
       per_outer_ms.push_back(per_outer);
 
-      printf("run %d: %.3f ms, baseline %.3f ms, %.3f ms per outer (%zu components, %d outer, flux %.6g, rms %.6g)\n",
-             run, ms, base_ms, per_outer, result.n_components(), result.outer_iterations, result.final_flux,
-             result.final_rms);
+      printf("run %d: %.3f ms, baseline %.3f ms, %.3f ms per outer\n", run, ms, base_ms, per_outer);
       if (csv.is_open()) {
         csv << label << ',' << host.data() << ',' << dir << ',' << first_cycle << ',' << nrow << ',' << ncol << ','
             << *force_scale << ',' << outer << ',' << clean_iter << ',' << run << ',' << ms << ',' << base_ms << ','
@@ -435,15 +433,12 @@ int main(int argc, char** argv)
 
       cycle_inputs in = load_inputs(cdir);
       configure(*imager, cdir);
-      const auto [ms, result] = timed_run(*imager, in);
+      // run() logs the cycle's recap.
+      const double ms = timed_run(*imager, in).first;
       total_ms += ms;
       if (cycle_ms.size() <= static_cast<size_t>(cycle - first_cycle)) cycle_ms.emplace_back();
       cycle_ms.at(cycle - first_cycle).push_back(ms);
 
-      if (run == 0)
-        printf("cycle %d: %.3f ms, %zu components, %d outer, flux %.6g -> %.6g (stop %.6g), rms %.6g -> %.6g\n", cycle,
-               ms, result.n_components(), result.outer_iterations, result.initial_flux, result.final_flux,
-               result.stop_flux, result.initial_rms, result.final_rms);
       if (only_cycle >= 0) {
         break;
       }
