@@ -42,8 +42,6 @@ class scale_stall_tracker {
   bool is_stall(int scale) const;
   /// Sets the standard deviation the first update() compares against.
   void init_rms(float rms);
-  /// Clears every scale's strikes, which un-retires the stalled scales.
-  void reset();
   /// Indices of the stalled scales, ascending.
   std::vector<int> get_all_stalled() const;
 
@@ -89,8 +87,6 @@ class convergence {
   [[nodiscard]] bool is_stall(int scale) const;
   /// See scale_stall_tracker::get_all_stalled().
   [[nodiscard]] std::vector<int> get_all_stalled() const;
-  /// See scale_stall_tracker::reset().
-  void reset_stalls();
 
   /// Seeds the initial flux and standard deviation; must be called once before any track().
   void init(float flux, float rms);

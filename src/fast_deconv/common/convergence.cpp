@@ -32,8 +32,6 @@ bool convergence::is_stall(int scale) const { return stalls_.is_stall(scale); }
 
 std::vector<int> convergence::get_all_stalled() const { return stalls_.get_all_stalled(); }
 
-void convergence::reset_stalls() { stalls_.reset(); }
-
 void convergence::init(float flux, float rms)
 {
   flux_history_.push_back(flux);
@@ -44,9 +42,8 @@ void convergence::init(float flux, float rms)
 
 void convergence::track(float flux, float rms, int subminor_count, int selected_scale)
 {
-  // Divergence iff current flux exceeds factor * previous flux; the count is cumulative across the major cycle
-  // (not reset on non-trigger).
-  // The initial-flux test catches slow growth that never exceeds factor * previous flux.
+  // A strike is a flux above factor * the previous or the initial flux; the initial test catches slow growth.
+  // Strikes add up over the run and never reset; more than max_divergent_iter of them is divergence.
   const bool diverging_iter = std::abs(flux) > divergence_factor_ * std::abs(flux_history_.back()) ||
                               std::abs(flux) > divergence_factor_ * std::abs(flux_history_.front());
   if (diverging_iter) count_divergent_iter_++;
@@ -78,8 +75,8 @@ void convergence::update_status_(bool no_components)
 
 void scale_stall_tracker::update(int scale, float rms)
 {
-  // Consecutive strikes, relative test: an absolute threshold below the float spacing of the rms only ever strikes
-  // on a bit-identical rms.
+  // Strike when the rms moved by less than stall_threshold of the previous one, whichever scale ran; a non-strike
+  // resets only this scale. Below float epsilon (~1.2e-7) only a bit-identical rms strikes.
   if (std::abs(last_rms_ - rms) < stall_threshold_ * std::abs(last_rms_))
     scales_stall_count_.at(scale)++;
   else
@@ -95,8 +92,6 @@ bool scale_stall_tracker::all_stalled() const
 bool scale_stall_tracker::is_stall(int scale) const { return scales_stall_count_.at(scale) > max_stall_count_; }
 
 void scale_stall_tracker::init_rms(float rms) { last_rms_ = rms; }
-
-void scale_stall_tracker::reset() { std::ranges::fill(scales_stall_count_, 0); }
 
 std::vector<int> scale_stall_tracker::get_all_stalled() const
 {

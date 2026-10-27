@@ -279,7 +279,6 @@ ddmsc_result run_ddmsc_cycles(context& ctx, const params& p, core::span3d<float>
       scale_masks = *ws.mask_per_scale;
       // A peak no scale can reach must not hold the loop above the stop flux.
       stats_mask = *ws.merged_active_mask;
-      deconv_convergence.reset_stalls();
     }
 
     const auto retired = deconv_convergence.get_all_stalled();
