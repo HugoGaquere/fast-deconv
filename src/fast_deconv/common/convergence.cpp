@@ -44,8 +44,8 @@ void convergence::init(float flux, float rms)
 
 void convergence::track(float flux, float rms, int subminor_count, int selected_scale)
 {
-  // Match DDFacet: divergence iff current flux exceeds factor * previous flux,
-  // and the count is cumulative across the major cycle (not reset on non-trigger).
+  // Divergence iff current flux exceeds factor * previous flux; the count is cumulative across the major cycle
+  // (not reset on non-trigger).
   // The initial-flux test catches slow growth that never exceeds factor * previous flux.
   const bool diverging_iter = std::abs(flux) > divergence_factor_ * std::abs(flux_history_.back()) ||
                               std::abs(flux) > divergence_factor_ * std::abs(flux_history_.front());
@@ -78,8 +78,8 @@ void convergence::update_status_(bool no_components)
 
 void scale_stall_tracker::update(int scale, float rms)
 {
-  // Consecutive strikes, unlike DDFacet's cumulative count. Relative, unlike DDFacet's absolute test: an absolute
-  // threshold below the float spacing of the rms only ever strikes on a bit-identical rms.
+  // Consecutive strikes, relative test: an absolute threshold below the float spacing of the rms only ever strikes
+  // on a bit-identical rms.
   if (std::abs(last_rms_ - rms) < stall_threshold_ * std::abs(last_rms_))
     scales_stall_count_.at(scale)++;
   else

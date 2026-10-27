@@ -59,8 +59,8 @@ TEST(Convergence, IterationsAddUpToTheBudget)
   EXPECT_EQ(c.status(), convergence_status::max_iterations);
 }
 
-// A strike is a flux above divergence_factor * the previous one. Strikes add up and never reset (as in
-// DDFacet), so spikes separated by calm iterations still end the run.
+// A strike is a flux above divergence_factor * the previous one. Strikes add up and never reset, so spikes
+// separated by calm iterations still end the run.
 TEST(Convergence, DivergentStrikesAccumulateAcrossCalmIterations)
 {
   auto c = make({.max_divergent_iter = 2, .divergence_factor = 2.0f});

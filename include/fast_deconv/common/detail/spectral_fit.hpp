@@ -66,7 +66,7 @@ FD_HOST_DEVICE inline bool solve_gauss_jordan(double* m, double* rhs, std::int64
 //
 // Exact fit (n_order >= n_freq) — fewer bands than coefficients, so SAX theta = y has
 // infinitely many solutions and G (n_order x n_order, rank n_freq) is singular. Take
-// the minimum-norm one instead, as DDFacet's ClassFrequencyMachine does:
+// the minimum-norm one instead:
 //
 //   H = SAX SAX^T  (n_freq x n_freq),  theta = SAX^T H^-1 y
 //

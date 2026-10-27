@@ -23,8 +23,7 @@ struct stats_acc {
 // reports -inf, not a finite floor.
 constexpr stats_acc kNoStats{-INFINITY, 0, 0};
 
-// Pixel i: excluded from the max where masked, but every pixel feeds the standard deviation, as DDFacet's
-// np.std(MeanDirty) stop threshold does.
+// Pixel i: excluded from the max where masked, but every pixel feeds the standard deviation.
 struct pixel_stats {
   const float* data;
   const bool* mask;
