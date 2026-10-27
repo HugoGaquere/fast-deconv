@@ -1,8 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
-#include <fast_deconv/algorithm/ddmsc_cycles.hpp>
-#include <fast_deconv/algorithm/ddmsc_types.hpp>
+#include <fast_deconv/algorithm/ddmsc.hpp>
 #include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <memory>
@@ -12,7 +11,7 @@
 #include "helpers/backend_test.hpp"
 #include "helpers/host_oracles.hpp"
 
-// Full run_ddmsc_cycles passes with the auto-mask engaged.
+// Full DDMSC runs with the auto-mask engaged.
 
 namespace common = fast_deconv::common;
 namespace core = fast_deconv::core;
@@ -69,20 +68,15 @@ TEST_F(DdmscAutoMask, PeakOutsideTheMaskDoesNotBlockConvergence)
   const std::vector<float> h_bias = {1.0f};
   const std::vector<int> h_map(kNpix, 0);
 
-  ddmsc::context ctx(
-      /*exec_device=*/0, core::host_span4d<const float>(h_psfs.data(), 1, kFreq, kN, kN),
+  ddmsc::Ddmsc session(
+      core::host_span4d<const float>(h_psfs.data(), 1, kFreq, kN, kN),
       core::host_span2d<const float>(h_xdes.data(), kFreq, 1), core::host_span2d<const bool>(h_mask.get(), kN, kN),
       core::host_span1d<const float>(h_sigmas.data(), 1), core::host_span1d<const float>(h_bias.data(), 1),
       core::host_span2d<const int>(h_map.data(), kN, kN), kN, kN);
-  ctx.historical_peak_coords = {{kArow, kAcol}};
-  ctx.historical_scales = {0};
+  session.ctx.historical_peak_coords = {{kArow, kAcol}};
+  session.ctx.historical_scales = {0};
 
-  const auto sr = res().make_ctx();
-  auto dirty = sr.stage(core::host_span3d<float>(h_dirty.data(), kFreq, kN, kN));
-  const auto jones = sr.stage(core::host_span3d<const float>(h_jones.data(), kFreq, kN, kN));
-  const auto weights = sr.stage(core::host_span1d<const float>(h_weights.data(), kFreq));
-
-  const ddmsc::params p{
+  session.cfg = {
       .max_iteration = 2000,
       .divergence_factor = 10.0f,
       .flux_threshold = 1.0f,  // below B: reachable only if B is left out of the stop test
@@ -101,9 +95,9 @@ TEST_F(DdmscAutoMask, PeakOutsideTheMaskDoesNotBlockConvergence)
       .auto_mask_rms_threshold = std::nullopt,
   };
 
-  const auto result = ddmsc::run_ddmsc_cycles(ctx, p, dirty, jones, weights);
-  sr.unstage(dirty, h_dirty.data());
-  sr.wait();
+  const auto result = session.run(core::host_span3d<float>(h_dirty.data(), kFreq, kN, kN),
+                                  core::host_span3d<const float>(h_jones.data(), kFreq, kN, kN),
+                                  core::host_span1d<const float>(h_weights.data(), kFreq));
 
   EXPECT_EQ(result.status, common::convergence_status::converged) << common::to_string(result.status);
   // The minor cycle stopped on the masked peak, but the caller deciding on another major cycle must see B.

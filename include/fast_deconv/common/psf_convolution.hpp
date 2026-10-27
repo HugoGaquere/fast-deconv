@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include <fast_deconv/algorithm/scales.hpp>
+#include <fast_deconv/common/scales.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace fast_deconv::algorithm {
+namespace fast_deconv::common {
 
 class psf_convolution {
  public:
@@ -67,4 +67,4 @@ class psf_convolution {
   std::unordered_map<std::int64_t, entry> entries_;  // scale_ entries, keyed by facet
 };
 
-}  // namespace fast_deconv::algorithm
+}  // namespace fast_deconv::common

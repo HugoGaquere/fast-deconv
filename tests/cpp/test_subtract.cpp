@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <fast_deconv/common/clean.hpp>
+#include <fast_deconv/common/subtract.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <memory>
 #include <random>

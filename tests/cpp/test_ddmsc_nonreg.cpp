@@ -4,8 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
-#include <fast_deconv/algorithm/ddmsc_cycles.hpp>
-#include <fast_deconv/algorithm/ddmsc_types.hpp>
+#include <fast_deconv/algorithm/ddmsc.hpp>
 #include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fstream>
@@ -21,7 +20,7 @@
 #include "helpers/rng.hpp"
 
 // ============================================================================
-// Non-regression test: a full run_ddmsc_cycles pass on a fully synthetic,
+// Non-regression test: a full Ddmsc::run pass on a fully synthetic,
 // seeded scene. Scalar METRICS of the run (not arrays) are compared against
 // the committed baseline tests/baselines/ddmsc_synthetic.json with loose,
 // per-metric tolerances so the test survives GPU / cuFFT-version drift while
@@ -172,20 +171,15 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
     h_xdes.at(f * kOrder + 1) = static_cast<float>(std::log(kNu.at(f) / kNu.at(0)));
   }
 
-  // ---- Stage the per-run inputs.
   const std::vector<float> h_jones(static_cast<std::size_t>(kFreq) * kNpix, 1.0f);
   const std::vector<float> h_weights(kFreq, 1.0f / kFreq);
-  const auto sr = res().make_ctx();
-  auto dirty = sr.stage(core::host_span3d<float>(h_dirty.data(), kFreq, kNrow, kNcol));
-  const auto jones = sr.stage(core::host_span3d<const float>(h_jones.data(), kFreq, kNrow, kNcol));
-  const auto weights = sr.stage(core::host_span1d<const float>(h_weights.data(), kFreq));
 
   auto h_mask = std::make_unique<bool[]>(kNpix);
   std::vector<float> h_sigmas(kScaleSigmas.begin(), kScaleSigmas.end());
   std::vector<float> scale_bias(kScaleBias.begin(), kScaleBias.end());
   std::vector<int> map_pixel_facet(kNpix, 0);
 
-  // Static inputs stay on the host; the context stages them to the device.
+  // Host views; the session stages them.
   core::host_span4d<float> psfs_view(h_psfs.data(), kFacets, kFreq, kNrow, kNcol);
   core::host_span2d<float> xdes_view(h_xdes.data(), kFreq, kOrder);
   core::host_span2d<bool> mask_view(h_mask.get(), kNrow, kNcol);
@@ -193,10 +187,9 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   core::host_span1d<float> bias_view(scale_bias.data(), kScales);
   core::host_span2d<int> map_view(map_pixel_facet.data(), kNrow, kNcol);
 
-  ddmsc::context ctx(/*exec_device=*/0, psfs_view, xdes_view, mask_view, sigmas_view, bias_view, map_view, kNrow,
-                     kNcol);
+  ddmsc::Ddmsc session(psfs_view, xdes_view, mask_view, sigmas_view, bias_view, map_view, kNrow, kNcol);
 
-  const ddmsc::params p{
+  session.cfg = {
       // Gaussian-component cleaning shrinks the residual by only ~5% of the
       // local peak per iteration on the largest scale, so give the run ample
       // headroom: it must stop on flux, never on this budget.
@@ -224,9 +217,9 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   };
 
   // ---- Run the full minor-cycle driver. `dirty` is left as the residual.
-  const auto result = ddmsc::run_ddmsc_cycles(ctx, p, dirty, jones, weights);
-  sr.unstage(dirty, h_dirty.data());
-  sr.wait();
+  const auto result = session.run(core::host_span3d<float>(h_dirty.data(), kFreq, kNrow, kNcol),
+                                  core::host_span3d<const float>(h_jones.data(), kFreq, kNrow, kNcol),
+                                  core::host_span1d<const float>(h_weights.data(), kFreq));
 
   // ---- Derive scalar metrics.
   const auto residual = weighted_sum(h_dirty, std::vector<float>(kFreq, 1.0f / kFreq), kNpix);
@@ -247,7 +240,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
   std::array<int, kScales> components_per_scale{};
   for (int i = 0; i < n_components; ++i) {
     cleaned_flux_total +=
-        static_cast<double>(p.gamma) * result.coeffs.at(core::narrow<std::size_t>(i * result.n_order));
+        static_cast<double>(session.cfg.gamma) * result.coeffs.at(core::narrow<std::size_t>(i * result.n_order));
     components_per_scale.at(result.scales.at(i))++;
   }
 
@@ -264,7 +257,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
       nearest = std::min(nearest, dist);
       if (dist <= 15.0)
         recovered_flux.at(s) +=
-            static_cast<double>(p.gamma) * result.coeffs.at(core::narrow<std::size_t>(i * result.n_order));
+            static_cast<double>(session.cfg.gamma) * result.coeffs.at(core::narrow<std::size_t>(i * result.n_order));
     }
     nearest_component_px.at(s) = nearest;
   }
@@ -286,7 +279,7 @@ TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
                  {"sigma_psf", kSigmaPsf},
                  {"noise_sigma", kNoiseSigma},
                  {"scale_bias", kScaleBias},
-                 {"scale_stall_threshold", p.scale_stall_threshold}};
+                 {"scale_stall_threshold", session.cfg.scale_stall_threshold}};
   json metrics = {
       {"n_components", n_components},
       {"total_iterations", result.total_iterations},

@@ -13,7 +13,7 @@ add_executable(fast_deconv_unit_tests
   test_morphology.cpp
   test_mask.cpp
   test_tiled_argmax.cpp
-  test_clean.cpp
+  test_subtract.cpp
   test_gain.cpp
   test_multi_frequency.cpp
   test_core_parallel.cpp

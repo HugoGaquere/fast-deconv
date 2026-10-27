@@ -173,7 +173,7 @@ set(FAST_DECONV_GENERIC_SOURCES
     src/fast_deconv/matrix/tiled_argmax.cpp
     src/fast_deconv/matrix/stats.cpp
     src/fast_deconv/common/mask.cpp
-    src/fast_deconv/common/clean.cpp
+    src/fast_deconv/common/subtract.cpp
     src/fast_deconv/common/multi_frequency.cpp
     src/fast_deconv/linalg/linalg.cpp
 )
@@ -182,10 +182,9 @@ if(FAST_DECONV_WITH_CUDA)
 endif()
 
 add_library(fast_deconv STATIC
-        src/fast_deconv/algorithm/ddmsc_cycles.cpp
         src/fast_deconv/algorithm/ddmsc.cpp
-        src/fast_deconv/algorithm/psf_convolution.cpp
-        src/fast_deconv/algorithm/scales.cpp
+        src/fast_deconv/common/psf_convolution.cpp
+        src/fast_deconv/common/scales.cpp
         src/fast_deconv/linalg/gaussian_convolution.cpp
         src/fast_deconv/common/convergence.cpp
         src/fast_deconv/common/gain.cpp

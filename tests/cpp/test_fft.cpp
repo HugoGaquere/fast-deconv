@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <fast_deconv/algorithm/psf_convolution.hpp>
+#include <fast_deconv/common/psf_convolution.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <fast_deconv/linalg/gaussian_convolution.hpp>
 #include <utility>
@@ -54,7 +54,7 @@ std::vector<double> band_limited_gaussian_taps(double sigma, int R)
 // Linear (zero outside) separable convolution of each (nrow, ncol) plane of a batch with the symmetric
 // taps h[0..R], h[-a] = h[a]: rows then columns, in double.
 std::vector<float> separable_linear_convolve(const std::vector<float>& img, int batch, int nrow, int ncol,
-                                                    const std::vector<double>& h)
+                                             const std::vector<double>& h)
 {
   const int R = static_cast<int>(h.size()) - 1;
   const auto tap = [&](int d) { return std::abs(d) <= R ? h.at(std::abs(d)) : 0.0; };
@@ -158,7 +158,7 @@ TEST_F(GaussianConvolution, PsfConvolutionMatchesItsDefinition)
   const auto d_psf = sr.stage(core::host_span4d<const float>(psf.data(), 1, n_freq, rows, cols));
   const auto d_weights = sr.stage(core::host_span1d<const float>(weights.data(), n_freq));
 
-  fast_deconv::algorithm::psf_convolution cache(sr, d_psf, {0.0f, sigma}, d_weights, /*gamma=*/0.1f);
+  fast_deconv::common::psf_convolution cache(sr, d_psf, {0.0f, sigma}, d_weights, /*gamma=*/0.1f);
   const auto e = cache.get(/*scale=*/1, /*facet=*/0);
 
   std::vector<float> conv(psf.size()), conv2(static_cast<std::size_t>(rows) * cols);

@@ -5,8 +5,9 @@
 
 #include <emu/pybind11/cast/mdspan.hpp>
 #include <fast_deconv/algorithm/ddmsc.hpp>
-#include <fast_deconv/algorithm/ddmsc_types.hpp>
 #include <fast_deconv/core/memory_types.hpp>
+#include <type_traits>
+#include <utility>
 
 #include "fast_deconv_bindings.hpp"
 
@@ -15,6 +16,19 @@ namespace core = fast_deconv::core;
 namespace ddmsc = fast_deconv::algorithm::ddmsc;
 
 namespace fast_deconv::python {
+
+namespace {
+
+// Binds one params field as a read/write property of the session.
+template <auto Field>
+void bind_param(py::class_<ddmsc::Ddmsc>& cls, const char* name)
+{
+  using T = std::remove_cvref_t<decltype(std::declval<ddmsc::params&>().*Field)>;
+  cls.def_property(
+      name, [](const ddmsc::Ddmsc& d) { return d.cfg.*Field; }, [](ddmsc::Ddmsc& d, T v) { d.cfg.*Field = v; });
+}
+
+}  // namespace
 
 void bind_ddmsc(py::module_& m)
 {
@@ -48,37 +62,37 @@ void bind_ddmsc(py::module_& m)
       .def_readonly("outer_iterations", &ddmsc::ddmsc_result::outer_iterations)
       .def_readonly("status", &ddmsc::ddmsc_result::status);
 
-  py::class_<ddmsc::Ddmsc>(ddmsc_module, "DDMSC")
-      .def(py::init<core::host_span4d<const float>, core::host_span2d<const float>, core::host_span2d<const bool>,
-                    core::host_span1d<const float>, core::host_span1d<const float>, core::host_span2d<const int>,
-                    std::int64_t, std::int64_t, int>(),
-           py::arg("raw_psfs"), py::arg("xdes"), py::arg("scale_mask"), py::arg("scale_sigmas"), py::arg("scale_bias"),
-           py::arg("map_pixel_facet"), py::arg("dirty_nrow"), py::arg("dirty_ncol"), py::arg("exec_device") = 0,
-           // Borrowed: scale_bias, map_pixel_facet, plus raw_psfs/xdes/scale_mask on the host backend.
-           py::keep_alive<1, 2>(),  // raw_psfs
-           py::keep_alive<1, 3>(),  // xdes
-           py::keep_alive<1, 4>(),  // scale_mask
-           py::keep_alive<1, 6>(),  // scale_bias
-           py::keep_alive<1, 7>())  // map_pixel_facet
+  py::class_<ddmsc::Ddmsc> cls(ddmsc_module, "DDMSC");
+  cls.def(py::init<core::host_span4d<const float>, core::host_span2d<const float>, core::host_span2d<const bool>,
+                   core::host_span1d<const float>, core::host_span1d<const float>, core::host_span2d<const int>,
+                   std::int64_t, std::int64_t, int>(),
+          py::arg("raw_psfs"), py::arg("xdes"), py::arg("scale_mask"), py::arg("scale_sigmas"), py::arg("scale_bias"),
+          py::arg("map_pixel_facet"), py::arg("dirty_nrow"), py::arg("dirty_ncol"), py::arg("exec_device") = 0,
+          // Borrowed: scale_bias, map_pixel_facet, plus raw_psfs/xdes/scale_mask on the host backend.
+          py::keep_alive<1, 2>(),  // raw_psfs
+          py::keep_alive<1, 3>(),  // xdes
+          py::keep_alive<1, 4>(),  // scale_mask
+          py::keep_alive<1, 6>(),  // scale_bias
+          py::keep_alive<1, 7>())  // map_pixel_facet
       .def("run", &ddmsc::Ddmsc::run, py::arg("dirty"), py::arg("jones_norm"), py::arg("weights_freq"),
-           R"pbdoc(Run the DDMSC minor-cycle loop with stall/divergence checks.)pbdoc")
-      .def_property("clean_negative", &ddmsc::Ddmsc::clean_negative, &ddmsc::Ddmsc::set_clean_negative)
-      .def_property("peak_factor", &ddmsc::Ddmsc::peak_factor, &ddmsc::Ddmsc::set_peak_factor)
-      .def_property("gamma", &ddmsc::Ddmsc::gamma, &ddmsc::Ddmsc::set_gamma)
-      .def_property("max_sub_iteration", &ddmsc::Ddmsc::max_sub_iteration, &ddmsc::Ddmsc::set_max_sub_iteration)
-      .def_property("flux_threshold", &ddmsc::Ddmsc::flux_threshold, &ddmsc::Ddmsc::set_flux_threshold)
-      .def_property("stop_rms_factor", &ddmsc::Ddmsc::stop_rms_factor, &ddmsc::Ddmsc::set_stop_rms_factor)
-      .def_property("stop_peak_factor", &ddmsc::Ddmsc::stop_peak_factor, &ddmsc::Ddmsc::set_stop_peak_factor)
-      .def_property("stop_cycle_factor", &ddmsc::Ddmsc::stop_cycle_factor, &ddmsc::Ddmsc::set_stop_cycle_factor)
-      .def_property("stop_sidelobe_level", &ddmsc::Ddmsc::stop_sidelobe_level, &ddmsc::Ddmsc::set_stop_sidelobe_level)
-      .def_property("max_iteration", &ddmsc::Ddmsc::max_iteration, &ddmsc::Ddmsc::set_max_iteration)
-      .def_property("divergence_factor", &ddmsc::Ddmsc::divergence_factor, &ddmsc::Ddmsc::set_divergence_factor)
-      .def_property("stall_threshold", &ddmsc::Ddmsc::stall_threshold, &ddmsc::Ddmsc::set_stall_threshold)
-      .def_property("auto_mask", &ddmsc::Ddmsc::auto_mask, &ddmsc::Ddmsc::set_auto_mask)
-      .def_property("force_auto_mask", &ddmsc::Ddmsc::force_auto_mask, &ddmsc::Ddmsc::set_force_auto_mask)
-      .def_property("auto_mask_peak_threshold", &ddmsc::Ddmsc::auto_mask_peak_threshold,
-                    &ddmsc::Ddmsc::set_auto_mask_peak_threshold)
-      .def_property("auto_mask_rms_threshold", &ddmsc::Ddmsc::auto_mask_rms_threshold,
-                    &ddmsc::Ddmsc::set_auto_mask_rms_threshold);
+           R"pbdoc(Run the DDMSC minor-cycle loop with stall/divergence checks.)pbdoc");
+
+  // Python names differ for max_sub_iteration, stall_threshold, auto_mask and force_auto_mask.
+  bind_param<&ddmsc::params::clean_negative>(cls, "clean_negative");
+  bind_param<&ddmsc::params::peak_factor>(cls, "peak_factor");
+  bind_param<&ddmsc::params::gamma>(cls, "gamma");
+  bind_param<&ddmsc::params::max_clean_iteration>(cls, "max_sub_iteration");
+  bind_param<&ddmsc::params::flux_threshold>(cls, "flux_threshold");
+  bind_param<&ddmsc::params::stop_rms_factor>(cls, "stop_rms_factor");
+  bind_param<&ddmsc::params::stop_peak_factor>(cls, "stop_peak_factor");
+  bind_param<&ddmsc::params::stop_cycle_factor>(cls, "stop_cycle_factor");
+  bind_param<&ddmsc::params::stop_sidelobe_level>(cls, "stop_sidelobe_level");
+  bind_param<&ddmsc::params::max_iteration>(cls, "max_iteration");
+  bind_param<&ddmsc::params::divergence_factor>(cls, "divergence_factor");
+  bind_param<&ddmsc::params::scale_stall_threshold>(cls, "stall_threshold");
+  bind_param<&ddmsc::params::enable_auto_mask>(cls, "auto_mask");
+  bind_param<&ddmsc::params::force_enable_auto_mask>(cls, "force_auto_mask");
+  bind_param<&ddmsc::params::auto_mask_peak_threshold>(cls, "auto_mask_peak_threshold");
+  bind_param<&ddmsc::params::auto_mask_rms_threshold>(cls, "auto_mask_rms_threshold");
 }
 }  // namespace fast_deconv::python
