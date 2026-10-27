@@ -4,8 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <fast_deconv/common/convergence.hpp>
-#include <fast_deconv/core/region.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
+#include <fast_deconv/core/index.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/linalg/fft.hpp>
 #include <iterator>
@@ -66,7 +66,7 @@ struct context {
   std::int64_t dirty_ncol;
 
   std::vector<core::index2d> historical_peak_coords;  // across runs; feeds the auto-mask
-  std::vector<int> historical_scales;                   // scale of each historical component
+  std::vector<int> historical_scales;                 // scale of each historical component
 
   /**
    * @brief Stages the run-constant inputs and copies the scale sigmas.

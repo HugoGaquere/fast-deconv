@@ -1,7 +1,7 @@
 #pragma once
 
-#include <fast_deconv/core/region.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
+#include <fast_deconv/core/index.hpp>
 #include <vector>
 
 namespace fast_deconv::common {
@@ -37,10 +37,10 @@ namespace fast_deconv::common {
  * @param[in]    external_mask       External mask, device, (dirty_h, dirty_w), true = masked; OR'd into every slice.
  * @param[out]   mask_per_scale      (n_scales, dirty_h, dirty_w) bool, written entirely.
  */
-void build_auto_mask(const core::exec_ctx& ctx, const std::vector<core::index2d>& coords, const std::vector<int>& scales,
-                     core::span3d<const float> central_facet_psfs, core::span1d<const float> weights_freq,
-                     const std::vector<float>& scale_sigmas, core::span2d<const bool> external_mask,
-                     core::span3d<bool> mask_per_scale);
+void build_auto_mask(const core::exec_ctx& ctx, const std::vector<core::index2d>& coords,
+                     const std::vector<int>& scales, core::span3d<const float> central_facet_psfs,
+                     core::span1d<const float> weights_freq, const std::vector<float>& scale_sigmas,
+                     core::span2d<const bool> external_mask, core::span3d<bool> mask_per_scale);
 
 /**
  * @brief Union of the valid regions of some scales' masks: the pixels at least one of them may clean.

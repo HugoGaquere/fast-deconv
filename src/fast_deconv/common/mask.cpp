@@ -17,10 +17,10 @@
 
 namespace fast_deconv::common {
 
-void build_auto_mask(const core::exec_ctx& ctx, const std::vector<core::index2d>& coords, const std::vector<int>& scales,
-                     core::span3d<const float> central_facet_psfs, core::span1d<const float> weights_freq,
-                     const std::vector<float>& scale_sigmas, core::span2d<const bool> external_mask,
-                     core::span3d<bool> mask_per_scale)
+void build_auto_mask(const core::exec_ctx& ctx, const std::vector<core::index2d>& coords,
+                     const std::vector<int>& scales, core::span3d<const float> central_facet_psfs,
+                     core::span1d<const float> weights_freq, const std::vector<float>& scale_sigmas,
+                     core::span2d<const bool> external_mask, core::span3d<bool> mask_per_scale)
 {
   FD_PROFILE_FN();
   assert(mask_per_scale.is_exhaustive());
@@ -78,7 +78,7 @@ void build_auto_mask(const core::exec_ctx& ctx, const std::vector<core::index2d>
     core::for_each_index(ctx, psf_nrow * psf_ncol, [=] FD_HOST_DEVICE(std::int64_t k) { fwhm[k] = psf[k] > half_max; });
 
     // 3c. Bounding box of FWHM, used as the structuring element's extent
-    const core::roi structure_roi = morphology::compute_mask_roi(ctx, fwhm_mask);
+    const morphology::roi structure_roi = morphology::compute_mask_roi(ctx, fwhm_mask);
 
     // 3d. Dilate mask_per_scale[i] using FWHM as structuring element
     core::span2d<bool> current_mask = emu::submdspan(mask_per_scale, i);

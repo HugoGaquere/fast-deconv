@@ -10,6 +10,7 @@
 #include <fast_deconv/common/psf_convolution.hpp>
 #include <fast_deconv/common/scales.hpp>
 #include <fast_deconv/common/subtract.hpp>
+#include <fast_deconv/core/index.hpp>
 #include <fast_deconv/core/logger.hpp>
 #include <fast_deconv/core/memory_types.hpp>
 #include <fast_deconv/core/profiler.hpp>
@@ -17,7 +18,6 @@
 #include <fast_deconv/linalg/linalg.hpp>
 #include <fast_deconv/matrix/stats.hpp>
 #include <fast_deconv/matrix/tiled_argmax.hpp>
-#include <fast_deconv/util/utils.hpp>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -152,7 +152,7 @@ int clean_loop(run_workspace& ws, const context& ctx, const params& p, const sca
   int n_clean_iter = 0;
   while (peak_value > threshold && n_clean_iter < p.max_clean_iteration) {
     FD_PROFILE_SCOPE("minor_iter");
-    const auto peak_coords = util::unravel_index_2D(peak_index, dirty_ncols);
+    const auto peak_coords = core::unravel_index_2D(peak_index, dirty_ncols);
     const int facet_idx = ctx.map_pixel_facet(peak_coords.row, peak_coords.col);
     const common::psf_convolution::entry psf = ws.psf_cache.get(selected_scale_idx, facet_idx);
     const float gain = psf.gain;

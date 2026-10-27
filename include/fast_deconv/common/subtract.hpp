@@ -1,7 +1,7 @@
 #pragma once
 #include <cmath>
-#include <fast_deconv/core/region.hpp>
 #include <fast_deconv/core/exec_ctx.hpp>
+#include <fast_deconv/core/index.hpp>
 #include <fast_deconv/matrix/peak.hpp>
 
 namespace fast_deconv::common {

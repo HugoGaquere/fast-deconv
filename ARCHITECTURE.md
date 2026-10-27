@@ -66,7 +66,7 @@ matrix       find_peak, tiled_argmax_ctx, max_and_rms    ◄──── tiled_a
 morphology   binary_dilation, compute_mask_roi           ◄──── binary_dilation (source only)
    │
 core         exec_resources, exec_ctx, span*/cont*,      ◄──── exec_impl, memory_types,
-             index2d/roi, narrow, FD_LOG_*, FD_PROFILE_*       for_each_index, reduce, launch
+             index2d, narrow, FD_LOG_*, FD_PROFILE_*           for_each_index, reduce, launch
 ```
 
 `linalg`, `matrix` and `morphology` sit side by side, and `util` sits beside `core`. `fd_backend` is not a layer of
@@ -86,7 +86,7 @@ fast-deconv/
 │   ├── common/                   deconvolution building blocks: subtraction, spectral fit, masks, scales
 │   │   └── detail/               spectral fit math, shared by host and device
 │   ├── algorithm/                the deconvolution algorithms, one header/source pair each (ddmsc)
-│   ├── util/                     CUDA/cuFFT error macros, .npy dump, index helpers
+│   ├── util/                     CUDA/cuFFT error macros, .npy dump
 │   └── backend/
 │       ├── cuda/fd_backend/      on the include path when FAST_DECONV_BACKEND=cuda
 │       │   ├── core/             exec_impl, for_each, reduce, memory_types, launch.cuh
@@ -121,8 +121,8 @@ the backend (`stage`, `unstage`).
 
 `memory_types.hpp` defines the array vocabulary: `span1d..span4d` (non-owning views) and `cont1d..cont4d` (owning,
 refcounted containers) in backend memory, plus `host_span*`/`host_cont*` for caller memory. All are emu mdspans with
-`int64` extents and row-major layout. `dims.hpp` has `narrow`, `ceil_div` and `count`. `region.hpp` has `index2d`,
-`roi` and `overlap_region`, plain structs with no dependencies.
+`int64` extents and row-major layout. `dims.hpp` has `narrow`, `ceil_div` and `count`. `index.hpp` has `index2d` and
+`unravel_index_2D`.
 
 `logger.hpp` (`FD_LOG_*`, over spdlog) and `profiler.hpp` (`FD_PROFILE_*`, over NVTX or Tracy) are the only ways the
 code logs and profiles.
@@ -198,7 +198,7 @@ fused max and standard-deviation reduction.
 
 ### `morphology`
 
-`binary_dilation` and `compute_mask_roi`, used only to build the auto-mask.
+`binary_dilation` and `compute_mask_roi` (which returns a `roi`), used only to build the auto-mask.
 
 ### `common`
 
@@ -284,7 +284,7 @@ debugging, profiling (nsys, ncu, Tracy) and benchmarking on real data. It is bui
 ### `include/fast_deconv/util`
 
 `CHECK_CUDA` and `REPORT_CUDA` (`cuda_macros.hpp`), `CUFFT_CALL` and `REPORT_CUFFT` (`cufft_macros.hpp`), `dump_npy`
-for debugging (`dump.hpp`), and `unravel_index_2D`. Everything here except `utils.hpp` is CUDA-only.
+for debugging (`dump.hpp`). Everything here is CUDA-only.
 
 ### `tests`
 
