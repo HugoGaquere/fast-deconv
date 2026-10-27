@@ -132,7 +132,7 @@ struct ddmsc_result {
     gains.reserve(capacity);
   }
 
-  [[nodiscard]] std::size_t n_components() const { return peak_coords.size(); }
+  std::size_t n_components() const { return peak_coords.size(); }
 
   /// Appends one component; its coefficients come later, in set_coeffs().
   void add_component(core::index2d coords, int scale, float gain)

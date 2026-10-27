@@ -15,7 +15,7 @@ enum class convergence_status {
 };
 
 /// Lower-case name of @p status, as logged.
-[[nodiscard]] std::string_view to_string(convergence_status status);
+std::string_view to_string(convergence_status status);
 
 /**
  * @brief Per-scale stall strikes, from the change in standard deviation between outer iterations.
@@ -79,14 +79,14 @@ class convergence {
   };
 
   /// True once status() is anything but running.
-  [[nodiscard]] bool should_stop() const;
+  bool should_stop() const;
   /// Minor iterations consumed so far.
-  [[nodiscard]] int iteration() const;
-  [[nodiscard]] convergence_status status() const;
+  int iteration() const;
+  convergence_status status() const;
   /// See scale_stall_tracker::is_stall().
-  [[nodiscard]] bool is_stall(int scale) const;
+  bool is_stall(int scale) const;
   /// See scale_stall_tracker::get_all_stalled().
-  [[nodiscard]] std::vector<int> get_all_stalled() const;
+  std::vector<int> get_all_stalled() const;
 
   /// Seeds the initial flux and standard deviation; must be called once before any track().
   void init(float flux, float rms);
