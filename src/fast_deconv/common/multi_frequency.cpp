@@ -23,9 +23,9 @@ void fit_coefficients(const core::exec_ctx& ctx, core::span3d<const float> resid
   if (n_order > detail::kSpectralMaxOrder)
     throw std::invalid_argument("fit_coefficients: n_order exceeds SPECTRAL_MAX_ORDER");
 
-  const std::int64_t residual_freq_stride = residual.mapping().stride(0);
+  const std::int64_t residual_freq_stride = residual.stride(0);
   const std::int64_t residual_peak_offset = residual.mapping()(0, peak_row, peak_col);
-  const std::int64_t jn_freq_stride = jones_norm.mapping().stride(0);
+  const std::int64_t jn_freq_stride = jones_norm.stride(0);
   const std::int64_t jn_peak_offset = jones_norm.mapping()(0, peak_row, peak_col);
   float* compact = compact_coeffs_out.data_handle();
   float* per_chan = coeffs_per_chan_out.data_handle();

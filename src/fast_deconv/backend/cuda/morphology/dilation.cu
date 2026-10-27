@@ -54,8 +54,7 @@ void binary_dilation(const core::exec_ctx& ctx, core::span2d<const bool> data, c
   ctx.zero(out);
   const core::launch_cfg cfg(data.extent(0), data.extent(1));
   core::launch(ctx, cfg, kernel::binary_dilation, data.data_handle(), structure.data_handle(), structure_roi,
-               out.data_handle(), data.extent(0), data.extent(1), data.mapping().stride(0),
-               structure.mapping().stride(0));
+               out.data_handle(), data.extent(0), data.extent(1), data.stride(0), structure.stride(0));
 }
 
 }  // namespace fast_deconv::morphology

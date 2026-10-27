@@ -29,8 +29,8 @@ void subtract_component(const core::exec_ctx& ctx, core::span3d<float> residual,
   FD_PROFILE_FN();
   const auto ovr =
       compute_overlap_region(peak_coords, residual.extent(1), residual.extent(2), psf.extent(1), psf.extent(2));
-  const std::int64_t res_freq_stride = residual.mapping().stride(0);
-  const std::int64_t psf_freq_stride = psf.mapping().stride(0);
+  const std::int64_t res_freq_stride = residual.stride(0);
+  const std::int64_t psf_freq_stride = psf.stride(0);
   float* res = residual.data_handle();
   const float* p = psf.data_handle();
   const float* coeffs = spectral_coeffs.data_handle();

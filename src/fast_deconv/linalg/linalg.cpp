@@ -14,7 +14,7 @@ void weighted_sum(const core::exec_ctx& ctx, core::span3d<const float> A, core::
   assert(A.extent(0) == weights.extent(0));
   assert(out.is_exhaustive());
   const std::int64_t n_planes = weights.extent(0);
-  const std::int64_t plane = A.mapping().stride(0);
+  const std::int64_t plane = A.stride(0);
   const float* a = A.data_handle();
   const float* w = weights.data_handle();
   float* o = out.data_handle();
