@@ -58,6 +58,9 @@ struct context {
   core::cont4d<const float> raw_psfs;
   core::cont2d<const float> xdes;
   core::cont2d<const bool> mask;
+  core::host_span4d<const float> host_raw_psfs;  // re-staged by restage_if_released()
+  core::host_span2d<const float> host_xdes;
+  core::host_span2d<const bool> host_mask;
   std::vector<float> scale_sigmas;
   core::host_span1d<const float> scale_bias;
   core::host_span2d<const int> map_pixel_facet;
@@ -70,7 +73,7 @@ struct context {
   /**
    * @brief Stages the run-constant inputs and copies the scale sigmas.
    *
-   * The host spans must outlive the context: the host backend borrows them.
+   * The host spans must outlive the context.
    *
    * @param[in] exec_device      Device the resources and both contexts are created on.
    * @param[in] raw_psfs         Raw PSFs, host, (n_facets, n_freq, psf_h, psf_w). Staged.
@@ -92,6 +95,9 @@ struct context {
         raw_psfs(exec.stage(raw_psfs)),
         xdes(exec.stage(xdes)),
         mask(exec.stage(mask)),
+        host_raw_psfs(raw_psfs),
+        host_xdes(xdes),
+        host_mask(mask),
         scale_sigmas(scale_sigmas.data_handle(), scale_sigmas.data_handle() + scale_sigmas.size()),
         scale_bias(scale_bias),
         map_pixel_facet(map_pixel_facet),
@@ -99,6 +105,33 @@ struct context {
         dirty_ncol(dirty_ncol)
   {
     exec.wait();  // staging copies complete before construction returns
+  }
+
+  /// Stages raw_psfs, xdes and mask again if release() dropped them. Syncs exec when it does.
+  void restage_if_released()
+  {
+    if (raw_psfs.data_handle() != nullptr) return;
+    raw_psfs = exec.stage(host_raw_psfs);
+    xdes = exec.stage(host_xdes);
+    mask = exec.stage(host_mask);
+    exec.wait();
+  }
+
+  /**
+   * @brief Drops the staged inputs and returns every idle pool block to the driver (or the OS on host).
+   *
+   * Keeps the component history. Syncs both contexts.
+   *
+   * @pre No run workspace is alive: its blocks would stay allocated.
+   */
+  void release()
+  {
+    cube_exec.wait();
+    raw_psfs = {};
+    xdes = {};
+    mask = {};
+    exec.wait();  // the frees above are ordered on exec, and the trim only returns completed ones
+    resources.trim();
   }
 
   context(const context&) = delete;
@@ -167,7 +200,7 @@ struct ddmsc_result {
  *          weights. `cfg` is read at each call, so it may change between them.
  *
  *          All array inputs are host views. raw_psfs, xdes and mask are staged at
- *          construction, the `run()` inputs per call; scale_sigmas is copied; scale_bias
+ *          construction and again after `release()`, the `run()` inputs per call; scale_sigmas is copied; scale_bias
  *          and map_pixel_facet stay borrowed on the host. `dirty` is in/out — its residual
  *          is copied back into the caller's host buffer when `run()` returns.
  */
@@ -178,7 +211,7 @@ struct Ddmsc {
   /**
    * @brief Builds the context (see context::context); cfg starts at the params defaults.
    *
-   * Borrowed inputs must outlive this, and so must the staged ones on the host backend, which borrows them.
+   * Borrowed inputs must outlive this, and so must the staged ones.
    *
    * @param[in] raw_psfs         Raw PSFs, host, (n_facets, n_freq, psf_h, psf_w). Staged.
    * @param[in] xdes             Spectral design matrix, host, (n_freq, n_order). Staged.
@@ -205,6 +238,13 @@ struct Ddmsc {
    */
   ddmsc_result run(core::host_span3d<float> dirty, core::host_span3d<const float> jones_norm,
                    core::host_span1d<const float> weights_freq);
+
+  /**
+   * @brief Frees all backend memory between run() calls.
+   *
+   * cfg and the component history the auto-mask is built from are kept. Syncs both contexts.
+   */
+  void release();
 };
 
 }  // namespace fast_deconv::algorithm::ddmsc

@@ -75,7 +75,10 @@ void bind_ddmsc(py::module_& m)
           py::keep_alive<1, 6>(),  // scale_bias
           py::keep_alive<1, 7>())  // map_pixel_facet
       .def("run", &ddmsc::Ddmsc::run, py::arg("dirty"), py::arg("jones_norm"), py::arg("weights_freq"),
-           R"pbdoc(Run the DDMSC minor-cycle loop with stall/divergence checks.)pbdoc");
+           R"pbdoc(Run the DDMSC minor-cycle loop with stall/divergence checks.)pbdoc")
+      .def(
+          "release", &ddmsc::Ddmsc::release,
+          R"pbdoc(Free all GPU (or pool) memory until the next run(); parameters and component history are kept.)pbdoc");
 
   // Python names differ for max_sub_iteration, stall_threshold, auto_mask and force_auto_mask.
   bind_param<&ddmsc::params::clean_negative>(cls, "clean_negative");

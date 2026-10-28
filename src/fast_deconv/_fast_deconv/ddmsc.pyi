@@ -40,6 +40,10 @@ class DDMSC:
         """
         Run the DDMSC minor-cycle loop with stall/divergence checks.
         """
+    def release(self) -> None:
+        """
+        Free all GPU (or pool) memory until the next run(); parameters and component history are kept.
+        """
     @property
     def auto_mask_peak_threshold(self) -> float | None:
         ...

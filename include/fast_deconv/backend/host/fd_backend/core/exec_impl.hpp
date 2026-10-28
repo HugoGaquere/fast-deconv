@@ -15,7 +15,7 @@ namespace fast_deconv::core {
  * @brief Host counterpart of the cuda memory pool: whole blocks only, no splitting.
  *
  * A freed block goes on the free list for its exact size and is handed back on the next request for that
- * size, never returned to the OS. The scratch sizes repeat identically every iteration, so exact-size
+ * size, returned to the OS only by trim(). The scratch sizes repeat identically every iteration, so exact-size
  * matching hits every time and the multi-GB mmap/munmap round trip disappears with it.
  */
 class block_pool {
@@ -30,11 +30,16 @@ class block_pool {
   block_pool(block_pool&&) = delete;
   block_pool& operator=(block_pool&&) = delete;
 
-  ~block_pool()
+  ~block_pool() { trim(); }
+
+  /// Returns every free-list block to the OS; live blocks are untouched.
+  void trim() noexcept
   {
+    const std::lock_guard lock(mutex_);
     for (const auto& [num_bytes, blocks] : free_lists_) {
       for (void* ptr : blocks) ::operator delete(ptr, alignment);
     }
+    free_lists_.clear();
   }
 
   void* alloc(std::uint64_t num_bytes)
@@ -146,6 +151,9 @@ class exec_resources_impl {
   std::uint64_t pool_used_bytes() const { return memory_pool.used_bytes(); }
   std::uint64_t pool_reserved_bytes() const { return memory_pool.reserved_bytes(); }
   std::uint64_t pool_peak_used_bytes() const { return memory_pool.peak_used_bytes(); }
+
+  /// Returns every idle block to the OS.
+  void trim() const { memory_pool.trim(); }
 
   /**
    * @brief Pool every exec_ctx allocates from.

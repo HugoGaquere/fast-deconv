@@ -175,6 +175,11 @@ Algorithm parameters are properties you can change between `run()` calls:
 - **Stopping:** `flux_threshold`, `stop_rms_factor`, `stop_peak_factor`, `stop_cycle_factor`, `stop_sidelobe_level`
 - **Auto-mask:** `auto_mask`, `force_auto_mask`, `auto_mask_peak_threshold`, `auto_mask_rms_threshold`
 
+`release()` frees every buffer the session holds on the GPU (on host, its pooled RAM) so that the
+next step, such as GPU gridding, can use it. The parameters and the component history the auto-mask
+is built from are kept, and the next `run()` uploads the PSFs, `xdes` and `mask` again. Call it only
+when something else needs the memory: on host, it gives up the pool reuse between cycles.
+
 Types are in `src/fast_deconv/_fast_deconv/ddmsc.pyi`.
 
 ## Development

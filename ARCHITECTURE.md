@@ -120,8 +120,8 @@ which throws on overflow.
 ### Memory comes from the context
 
 All working memory comes from `exec_ctx::alloc_mdcontainer` or `alloc_ptr`, and is freed through the context. No
-`cudaMalloc`, `new[]` or `std::vector` of device data. Pools never give memory back, since every minor cycle repeats
-the same sizes. On CUDA, allocation is stream-ordered: memory freed on one context must not still be in use on
+`cudaMalloc`, `new[]` or `std::vector` of device data. Pools give memory back only on `Ddmsc::release()`, since every
+minor cycle repeats the same sizes. On CUDA, allocation is stream-ordered: memory freed on one context must not still be in use on
 another.
 
 ### Backend differences live in `fd_backend`, chosen by the include path
@@ -219,7 +219,7 @@ non-regression test. It takes host views only; staging into backend memory is it
 
 | input | cuda | host | must outlive |
 |---|---|---|---|
-| `raw_psfs`, `xdes`, `mask` | copied to the device once | borrowed | the session, on host |
+| `raw_psfs`, `xdes`, `mask` | copied to the device, again after `release()` | borrowed | the session, on host |
 | `scale_sigmas` | copied to a `std::vector` | copied to a `std::vector` | nothing |
 | `scale_bias` | borrowed | borrowed | the session |
 | `map_pixel_facet` | borrowed | borrowed | the session |

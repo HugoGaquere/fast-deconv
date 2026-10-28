@@ -48,6 +48,9 @@ class exec_resources_impl {
     return static_cast<std::uint64_t>(v);
   }
 
+  /// Returns every idle block to the driver; frees still pending on a stream are not idle yet.
+  void trim() const { CHECK_CUDA(cudaMemPoolTrimTo(memory_pool, 0)); }
+
   std::uint8_t device{};
   cudaMemPool_t memory_pool{};
 
@@ -62,7 +65,7 @@ class exec_resources_impl {
     cudaMemPool_t pool{};
     CHECK_CUDA(cudaMemPoolCreate(&pool, &pool_props));
 
-    // Never release freed blocks back to the driver: they stay in the pool for reuse.
+    // Never release freed blocks back to the driver except on trim(): they stay in the pool for reuse.
     std::uint64_t threshold = UINT64_MAX;
     CHECK_CUDA(cudaMemPoolSetAttribute(pool, cudaMemPoolAttrReleaseThreshold, &threshold));
     return pool;

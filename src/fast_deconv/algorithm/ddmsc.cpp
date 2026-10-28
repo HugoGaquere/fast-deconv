@@ -361,6 +361,7 @@ ddmsc_result Ddmsc::run(core::host_span3d<float> dirty, core::host_span3d<const 
                         core::host_span1d<const float> weights_freq)
 {
   const auto t0 = std::chrono::steady_clock::now();
+  ctx.restage_if_released();
   auto staged_dirty = ctx.exec.stage(dirty);
   auto staged_jones = ctx.exec.stage(jones_norm);
   auto staged_weights = ctx.exec.stage(weights_freq);
@@ -385,5 +386,7 @@ ddmsc_result Ddmsc::run(core::host_span3d<float> dirty, core::host_span3d<const 
       static_cast<double>(ctx.resources.pool_peak_used_bytes()) / mib);
   return result;
 }
+
+void Ddmsc::release() { ctx.release(); }
 
 }  // namespace fast_deconv::algorithm::ddmsc
