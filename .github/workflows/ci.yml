@@ -20,8 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Check clang-format
-        run: git ls-files '*.cpp' '*.hpp' '*.cu' '*.cuh' '*.h' | xargs clang-format-22 --dry-run --Werror
+      - name: Install pre-commit
+        run: pipx install pre-commit
+
+      - name: Check formatting
+        run: pre-commit run --all-files --show-diff-on-failure
 
   host:
     name: host (${{ matrix.name }})

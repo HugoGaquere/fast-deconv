@@ -279,6 +279,20 @@ first, which downloads it from a GitHub release (126 MB) into `tests/data/lofar_
 After an intentional algorithmic change, run the test: it prints one row per cycle in the format of
 `kExpected`. Paste the rows, review the diff, and commit it.
 
+### Formatting
+
+C++ and CUDA sources follow `.clang-format`. A [pre-commit](https://pre-commit.com) hook, pinned in
+`.pre-commit-config.yaml`, checks staged files on each commit; CI runs the same check on every file.
+Install it once per clone:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+When the hook reformats a file, it stops the commit: review the change, `git add` it and commit again.
+To check every file, run `pre-commit run --all-files`.
+
 ## Architecture
 
 For the code layout, the layers, the backends and their invariants, see [ARCHITECTURE.md](ARCHITECTURE.md).
