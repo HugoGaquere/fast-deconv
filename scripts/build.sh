@@ -21,11 +21,15 @@
 #   ./scripts/build.sh --python        # host wheel into dist/host
 #   ./scripts/build.sh all --python    # both wheels, dist/<backend>/
 #   ./scripts/build.sh cuda --clean    # wipe the cuda tree, then rebuild from conan install
+#   ./scripts/build.sh host RelWithDebInfo -t --sanitize  # ASan + UBSan, then ctest
 #
 # conan install and cmake configure run only on a fresh tree; later runs just
 # build (CMake still regenerates itself when CMakeLists.txt changes). Pass
-# --clean after changing conanfile.py, the Conan profile, -t, --profile or
-# --flamegraph.
+# --clean after changing conanfile.py, the Conan profile, -t, --profile,
+# --flamegraph or --sanitize.
+#
+# --sanitize sets FAST_DECONV_SANITIZE (ASan + UBSan on host code) and reuses the
+# same tree as a plain build.
 #
 # --python builds the wheel instead of the C++ tree. -t and --flamegraph do not
 # apply to it: the test suite is C++/GTest only.
@@ -53,6 +57,7 @@ CTEST_FILTER=
 BUILD_PYTHON=0
 BUILD_FLAMEGRAPH=0
 BUILD_PROFILE=0
+BUILD_SANITIZE=0
 CLEAN=0
 
 for arg in "$@"; do
@@ -65,9 +70,10 @@ for arg in "$@"; do
     -p|--python)   BUILD_PYTHON=1 ;;
     -f|--flamegraph) BUILD_FLAMEGRAPH=1 ;;
     --profile)     BUILD_PROFILE=1 ;;
+    --sanitize)    BUILD_SANITIZE=1 ;;
     --clean)       CLEAN=1 ;;
-    -h|--help)     sed -n '3,42p' "${BASH_SOURCE[0]}"; exit 0 ;;
-    *) echo "usage: $0 [host|cuda|all] [Release|Debug|RelWithDebInfo] [-t[=REGEX]] [--flamegraph] [--profile] [--python] [--clean]" >&2; exit 2 ;;
+    -h|--help)     sed -n '3,46p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "usage: $0 [host|cuda|all] [Release|Debug|RelWithDebInfo] [-t[=REGEX]] [--flamegraph] [--profile] [--sanitize] [--python] [--clean]" >&2; exit 2 ;;
   esac
 done
 
@@ -89,6 +95,11 @@ if [ "$BUILD_PYTHON" -eq 1 ] && [ "$BUILD_PROFILE" -eq 1 ]; then
   exit 2
 fi
 
+if [ "$BUILD_PYTHON" -eq 1 ] && [ "$BUILD_SANITIZE" -eq 1 ]; then
+  echo "--sanitize cannot be combined with --python" >&2
+  exit 2
+fi
+
 CMAKE_CXX_PROFILE_FLAGS=
 CMAKE_CUDA_PROFILE_FLAGS=
 CMAKE_EXE_PROFILE_LINK_FLAGS=
@@ -102,6 +113,11 @@ fi
 CMAKE_WITH_PROFILER=OFF
 if [ "$BUILD_PROFILE" -eq 1 ]; then
   CMAKE_WITH_PROFILER=ON
+fi
+
+CMAKE_SANITIZE=OFF
+if [ "$BUILD_SANITIZE" -eq 1 ]; then
+  CMAKE_SANITIZE=ON
 fi
 
 # Build dependencies as Release so the cached packages are reused; `&:` scopes
@@ -156,6 +172,7 @@ for BACKEND in "${BACKENDS[@]}"; do
           -DBUILD_TESTING="$RUN_TESTS" \
           -DFAST_DECONV_BUILD_TOOLS=ON \
           -DFAST_DECONV_WITH_PROFILER="$CMAKE_WITH_PROFILER" \
+          -DFAST_DECONV_SANITIZE="$CMAKE_SANITIZE" \
           -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
           -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
           -DCMAKE_CUDA_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
