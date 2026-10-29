@@ -15,8 +15,23 @@ permissions:
   contents: read
 
 jobs:
-  host:
+  format:
     runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check clang-format
+        run: git ls-files '*.cpp' '*.hpp' '*.cu' '*.cuh' '*.h' | xargs clang-format-22 --dry-run --Werror
+
+  host:
+    name: host (${{ matrix.name }})
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: release, args: host -t }
+          - { name: sanitize, args: host RelWithDebInfo -t --sanitize }
     env:
       CC: gcc-15
       CXX: g++-15
@@ -51,4 +66,4 @@ jobs:
         run: scripts/fetch_test_data.sh
 
       - name: Build and test
-        run: scripts/build.sh host -t
+        run: scripts/build.sh ${{ matrix.args }}
