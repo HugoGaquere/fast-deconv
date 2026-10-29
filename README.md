@@ -267,6 +267,9 @@ outer iterations, components per scale, final peak and rms, and the sum of the o
 session is a simulated LOFAR LBA field of 9 point sources with direction-dependent gains: 975 × 975 px,
 6 bands, 9 facets, 4 scales.
 
+The dump (244 MB) is not tracked by git. The test fails without it: copy it into
+`tests/data/lofar_lba_point_sources/` first.
+
 After an intentional algorithmic change, run the test: it prints one row per cycle in the format of
 `kExpected`. Paste the rows, review the diff, and commit it.
 
