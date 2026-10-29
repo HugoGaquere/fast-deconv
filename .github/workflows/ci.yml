@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    runs-on: ubuntu-26.04
+    env:
+      CC: gcc-15
+      CXX: g++-15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Conan
+        run: pipx install conan
+
+      - name: Configure Conan
+        run: |
+          conan profile detect
+          sed -i 's/^compiler.cppstd=.*/compiler.cppstd=gnu20/' "$(conan profile path default)"
+          conan remote add cosmic https://gitlab.obspm.fr/api/v4/projects/5071/packages/conan
+
+      - name: Cache Conan packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.conan2/p
+          key: conan-${{ runner.os }}-gcc15-${{ hashFiles('conanfile.py') }}
+          restore-keys: conan-${{ runner.os }}-gcc15-
+
+      - name: Cache NONREG dump
+        id: dump
+        uses: actions/cache@v6
+        with:
+          path: tests/data/lofar_lba_point_sources
+          key: nonreg-dump-${{ hashFiles('scripts/fetch_test_data.sh') }}
+
+      - name: Fetch NONREG dump
+        if: steps.dump.outputs.cache-hit != 'true'
+        run: scripts/fetch_test_data.sh
+
+      - name: Build and test
+        run: scripts/build.sh host -t
