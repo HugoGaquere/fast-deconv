@@ -1,5 +1,9 @@
 # fast-deconv
 
+[![CI](https://github.com/HugoGaquere/fast-deconv/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/HugoGaquere/fast-deconv/actions/workflows/ci.yml?query=branch%3Amain)
+[![Version](https://img.shields.io/github/v/tag/HugoGaquere/fast-deconv?sort=semver&filter=v*&label=version)](https://github.com/HugoGaquere/fast-deconv/tags)
+[![License: MIT](https://img.shields.io/github/license/HugoGaquere/fast-deconv)](LICENSE)
+
 High-performance DDMSC deconvolution for radio astronomy, on GPUs and multi-core CPUs, callable from Python.
 
 fast-deconv is an optimized multi-scale and multi-frequency deconvolution engine with two execution backends, both tuned for speed: CUDA for NVIDIA GPUs and OpenMP for multi-core CPUs.
