@@ -47,7 +47,8 @@ constexpr double kRelTol = 1e-4;
 TEST(DdmscNonReg, LofarLbaPointSourcesReplayMatchesExpected)
 {
   const std::string dir = FAST_DECONV_NONREG_DUMP_DIR;
-  ASSERT_TRUE(std::filesystem::exists(dir + "/init")) << "no DDMSC dump in " << dir << " (not tracked by git)";
+  ASSERT_TRUE(std::filesystem::exists(dir + "/init"))
+      << "no DDMSC dump in " << dir << " (run scripts/fetch_test_data.sh)";
 
   // Held for the whole test: the session keeps host views on them.
   auto load_init = [&](const char* name) { return npy::load_npy(dir + "/init/" + name + ".npy"); };
