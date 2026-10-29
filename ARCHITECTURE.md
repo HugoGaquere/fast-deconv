@@ -57,7 +57,7 @@ fast-deconv/
 ├── src/python/                       pybind11 bindings
 ├── src/replay_ddmsc.cpp              replays a FAST_DECONV_DUMP session in C++
 ├── tests/cpp/                        GoogleTest: UNIT and NONREG
-├── tests/baselines/                  non-regression baseline
+├── tests/data/                       non-regression dump
 ├── scripts/                          build and verification, not part of the library
 └── cmake/                            Conan provider, wheel runtime bundling
 ```
@@ -204,8 +204,8 @@ compiled out unless `FAST_DECONV_WITH_PROFILER=ON`). A function that enqueues wo
 ### Tests are written once
 
 Tests take a `core::exec_ctx` and run unchanged on both backends, checked against double-precision oracles in
-`tests/cpp/helpers/host_oracles.hpp`. The non-regression baseline stores values only; its tolerances live in
-`test_ddmsc_nonreg.cpp`, so regenerating it (`FAST_DECONV_UPDATE_BASELINE=1`) cannot loosen them.
+`tests/cpp/helpers/host_oracles.hpp`. The non-regression test replays a captured DDMSC session and compares
+each cycle with values written in `test_ddmsc_nonreg.cpp`, next to their tolerances.
 
 ## API Boundaries
 

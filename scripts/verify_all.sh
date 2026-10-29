@@ -133,7 +133,7 @@ if ((RUN_MEMCHECK)); then
         compute-sanitizer --tool "$tool" --error-exitcode 1 "$unit_bin"
       done
 
-      # memcheck (only) on the full synthetic run: the NONREG binary is the one
+      # memcheck (only) on the replayed session: the NONREG binary is the one
       # thing that exercises the end-to-end minor-cycle orchestration. Run it
       # directly, not through ctest, so its 300s ctest timeout doesn't apply.
       # racecheck is skipped here — too slow on the full run.

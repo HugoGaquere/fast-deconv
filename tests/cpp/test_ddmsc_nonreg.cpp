@@ -1,349 +1,103 @@
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <array>
-#include <cmath>
-#include <cstdlib>
+#include <cstdio>
 #include <fast_deconv/algorithm/ddmsc.hpp>
 #include <fast_deconv/common/convergence.hpp>
 #include <fast_deconv/core/memory_types.hpp>
-#include <fstream>
-#include <memory>
-#include <nlohmann/json.hpp>
-#include <optional>
-#include <random>
+#include <filesystem>
 #include <string>
-#include <vector>
 
-#include "helpers/backend_test.hpp"
-#include "helpers/host_oracles.hpp"
-#include "helpers/rng.hpp"
+#include "ddmsc_dump.hpp"
+#include "npy_loader.hpp"
 
-// ============================================================================
-// Non-regression test: a full Ddmsc::run pass on a fully synthetic,
-// seeded scene. Scalar METRICS of the run (not arrays) are compared against
-// the committed baseline tests/baselines/ddmsc_synthetic.json with loose,
-// per-metric tolerances so the test survives GPU / cuFFT-version drift while
-// still catching algorithmic regressions.
-//
-// Regenerate the baseline after an intentional change:
-//   FAST_DECONV_UPDATE_BASELINE=1 ctest --test-dir <build> -L NONREG
-// then review and commit the JSON diff.
-// ============================================================================
+// Replays a captured DDMSC session cycle by cycle on one Ddmsc and checks each cycle against kExpected.
 
 namespace common = fast_deconv::common;
 namespace core = fast_deconv::core;
 namespace ddmsc = fast_deconv::algorithm::ddmsc;
-namespace fdtest = fast_deconv::test;
-
-using json = nlohmann::ordered_json;
 
 namespace {
 
-// ---- Scene definition (any change here requires regenerating the baseline;
-// ---- the config block in the JSON guards against a stale one).
-constexpr int kSeed = 42;
-constexpr int kNrow = 256;
-constexpr int kNcol = 256;
-constexpr int kNpix = kNrow * kNcol;
-constexpr int kFreq = 4;
 constexpr int kScales = 4;
-constexpr int kOrder = 2;
-constexpr int kFacets = 1;
-constexpr double kSigmaPsf = 2.0;     // unit-peak Gaussian PSF width (px)
-constexpr float kNoiseSigma = 0.01f;  // per-channel noise std
 
-constexpr std::array<double, kFreq> kNu = {1.0, 1.1, 1.2, 1.3};  // only ratios matter
-constexpr std::array<float, kScales> kScaleSigmas = {0.0f, 1.5f, 3.0f, 6.0f};
-// The scale kernels are sum-normalized, so blurring attenuates a source of
-// combined width sigma_c by sigma_c^2 / (sigma_c^2 + sigma_s^2). The biases
-// must overcome that attenuation for each extended source on its matched
-// scale, while staying low enough that point sources and smaller sources keep
-// preferring their own scale. Solving those inequalities for this scene gives
-// a window per scale; the values below sit mid-window (~7-18% margin on every
-// competing pair), avoiding near-tie selections that would flap across GPUs.
-constexpr std::array<float, kScales> kScaleBias = {1.0f, 1.45f, 2.3f, 4.2f};
-
-struct source {
-  int row, col;
-  double flux;   // integrated flux at the reference frequency
-  double sigma;  // 0 = point source
-  double alpha;  // spectral index: flux(nu) = flux * (nu/nu0)^alpha
+struct cycle_result {
+  common::convergence_status status;
+  int outer_iterations;
+  std::array<int, kScales> components_per_scale;
+  float final_flux;
+  float final_rms;
+  double coeff0_sum;  // sum of the order-0 spectral coefficients of the cycle's components
 };
 
-// >= 32 px from every edge, >= 40 px apart.
-//
-// Expected cleaning: the clean loop lands on scales 0, 2 and 3; scale 1 ends
-// with ZERO components and the baseline pins that. Its static bias window is
-// razor thin (a mildly extended source that scale 1 likes, scale 2 likes
-// almost as much at higher bias), and the inner loop thresholds globally over
-// the selected plane, so neighboring scales' sweeps absorb scale 1's niche
-// before it ever holds the global argmax. The s>0 clean-loop machinery is the
-// same code for every scale index, so scales 2/3 cover it.
-constexpr std::array<source, 5> kSources = {{
-    {64, 64, 10.0, 0.0, -0.7},
-    {64, 192, 4.0, 0.0, 0.3},
-    {128, 128, 6.0, 1.5, -0.5},
-    {192, 64, 8.0, 3.0, 0.0},
-    {192, 192, 5.0, 6.0, -1.0},
+// Regenerate after an intentional change: run the test and paste the rows it prints.
+constexpr std::array<cycle_result, 5> kExpected = {{
+    {common::convergence_status::converged, 10, {2, 80, 2, 0}, 2.748056f, 0.08433038f, 482.72864},
+    {common::convergence_status::converged, 67, {57, 110, 36, 90}, 0.9711169f, 0.07559972f, 309.931593},
+    {common::convergence_status::converged, 139, {393, 748, 39, 73}, 0.6188014f, 0.07324928f, 380.704849},
+    {common::convergence_status::converged, 64, {43, 415, 14, 108}, 0.5710051f, 0.07210074f, 73.9196213},
+    {common::convergence_status::converged, 39, {10, 35, 12, 101}, 0.596601f, 0.07194155f, 10.7770987},
 }};
 
-// Unit-peak Gaussian PSF, identical across channels, centered at (H/2, W/2).
-std::vector<float> make_psfs()
-{
-  std::vector<float> psf(static_cast<std::size_t>(kFreq) * kNpix);
-  for (int r = 0; r < kNrow; ++r) {
-    for (int c = 0; c < kNcol; ++c) {
-      const double d2 =
-          (r - kNrow / 2) * static_cast<double>(r - kNrow / 2) + (c - kNcol / 2) * static_cast<double>(c - kNcol / 2);
-      const float v = static_cast<float>(std::exp(-d2 / (2.0 * kSigmaPsf * kSigmaPsf)));
-      for (int f = 0; f < kFreq; ++f) psf.at(static_cast<std::size_t>(f) * kNpix + fdtest::flat(r, c, kNcol)) = v;
-    }
-  }
-  return psf;
-}
-
-// Analytic dirty image: sky (sum-normalized Gaussians / deltas) convolved with
-// the unit-peak Gaussian PSF has the closed form
-//   dirty_src = flux * (nu/nu0)^alpha * [sigma_psf^2 / (sigma_src^2 + sigma_psf^2)]
-//               * unit-peak-Gaussian(sqrt(sigma_src^2 + sigma_psf^2))
-// so no convolution code (host or device) is involved in building the input.
-std::vector<float> make_dirty(std::mt19937& rng)
-{
-  std::vector<float> dirty(static_cast<std::size_t>(kFreq) * kNpix, 0.0f);
-  for (int f = 0; f < kFreq; ++f) {
-    for (const auto& s : kSources) {
-      const double spec = std::pow(kNu.at(f) / kNu.at(0), s.alpha);
-      const double var_comb = s.sigma * s.sigma + kSigmaPsf * kSigmaPsf;
-      const double amplitude = s.flux * (kSigmaPsf * kSigmaPsf / var_comb) * spec;
-      const int radius = static_cast<int>(std::ceil(6.0 * std::sqrt(var_comb)));
-      for (int r = std::max(0, s.row - radius); r <= std::min(kNrow - 1, s.row + radius); ++r) {
-        for (int c = std::max(0, s.col - radius); c <= std::min(kNcol - 1, s.col + radius); ++c) {
-          const double d2 = (r - s.row) * static_cast<double>(r - s.row) + (c - s.col) * static_cast<double>(c - s.col);
-          dirty.at(static_cast<std::size_t>(f) * kNpix + fdtest::flat(r, c, kNcol)) +=
-              static_cast<float>(amplitude * std::exp(-d2 / (2.0 * var_comb)));
-        }
-      }
-    }
-  }
-  fdtest::add_normal_noise(rng, dirty, kNoiseSigma);
-  return dirty;
-}
-
-// out[i] = sum_f weights[f] * data[f * npix + i]
-std::vector<float> weighted_sum(const std::vector<float>& data, const std::vector<float>& weights, std::size_t npix)
-{
-  std::vector<float> out(npix, 0.0f);
-  for (std::size_t i = 0; i < npix; ++i) {
-    double acc = 0.0;
-    for (std::size_t f = 0; f < weights.size(); ++f) acc += static_cast<double>(weights.at(f)) * data.at(f * npix + i);
-    out.at(i) = static_cast<float>(acc);
-  }
-  return out;
-}
-
-// ---- Metric comparison machinery
-
-struct metric_row {
-  std::string name;
-  double baseline;
-  double actual;
-  double tol_rel;
-  double tol_abs;
-
-  bool pass() const { return std::abs(actual - baseline) <= std::max(tol_abs, tol_rel * std::abs(baseline)); }
-};
+// Relative tolerance on the float metrics: backends and compilers round differently.
+constexpr double kRelTol = 1e-4;
 
 }  // namespace
 
-class DdmscNonReg : public fdtest::BackendTest {};
-
-TEST_F(DdmscNonReg, SyntheticSceneMatchesBaselineMetrics)
+TEST(DdmscNonReg, LofarLbaPointSourcesReplayMatchesExpected)
 {
-  // ---- Build the scene on the host.
-  std::mt19937 rng(kSeed);
-  auto h_dirty = make_dirty(rng);
-  auto h_psfs = make_psfs();
+  const std::string dir = FAST_DECONV_NONREG_DUMP_DIR;
+  if (!std::filesystem::exists(dir + "/init")) GTEST_SKIP() << "no dump in " << dir;
 
-  std::vector<float> h_xdes(kFreq * kOrder);
-  for (int f = 0; f < kFreq; ++f) {
-    h_xdes.at(f * kOrder + 0) = 1.0f;
-    h_xdes.at(f * kOrder + 1) = static_cast<float>(std::log(kNu.at(f) / kNu.at(0)));
+  // Held for the whole test: the session keeps host views on them.
+  auto load_init = [&](const char* name) { return npy::load_npy(dir + "/init/" + name + ".npy"); };
+  auto raw_psfs = load_init("raw_psfs");
+  auto xdes = load_init("xdes");
+  auto mask = load_init("mask");
+  auto scale_sigmas = load_init("scale_sigmas");
+  auto scale_bias = load_init("scale_bias");
+  auto map_pixel_facet = load_init("map_pixel_facet");
+
+  const auto n_freq = raw_psfs.shape.at(1);
+  const auto nrow = map_pixel_facet.shape.at(0);
+  const auto ncol = map_pixel_facet.shape.at(1);
+  ASSERT_EQ(scale_sigmas.shape.at(0), static_cast<std::size_t>(kScales));
+
+  ddmsc::Ddmsc session(
+      core::host_span4d<float>(raw_psfs.as_float32(), raw_psfs.shape.at(0), n_freq, raw_psfs.shape.at(2),
+                               raw_psfs.shape.at(3)),
+      core::host_span2d<float>(xdes.as_float32(), n_freq, xdes.shape.at(1)),
+      core::host_span2d<bool>(mask.as_bool(), nrow, ncol), core::host_span1d<float>(scale_sigmas.as_float32(), kScales),
+      core::host_span1d<float>(scale_bias.as_float32(), kScales),
+      core::host_span2d<int>(map_pixel_facet.as_int32(), nrow, ncol), static_cast<int>(nrow), static_cast<int>(ncol));
+
+  for (std::size_t c = 0; c < kExpected.size(); ++c) {
+    SCOPED_TRACE("cycle " + std::to_string(c));
+    const std::string cdir = dir + "/cycle_" + std::to_string(c) + "/";
+    auto dirty = npy::load_npy(cdir + "dirty.npy");
+    auto jones_norm = npy::load_npy(cdir + "jones_norm.npy");
+    auto weights = npy::load_npy(cdir + "weights_freq.npy");
+
+    session.cfg = ddmsc_dump::read_params(cdir);
+    const auto r = session.run(core::host_span3d<float>(dirty.as_float32(), n_freq, nrow, ncol),
+                               core::host_span3d<const float>(jones_norm.as_float32(), n_freq, nrow, ncol),
+                               core::host_span1d<const float>(weights.as_float32(), n_freq));
+
+    cycle_result actual{r.status, r.outer_iterations, {}, r.final_flux, r.final_rms, 0.0};
+    for (const int s : r.scales) actual.components_per_scale.at(s)++;
+    for (std::size_t i = 0; i < r.n_components(); ++i) actual.coeff0_sum += r.coeffs.at(i * r.n_order);
+
+    const auto& p = actual.components_per_scale;
+    std::printf("    {common::convergence_status::%s, %d, {%d, %d, %d, %d}, %.7gf, %.7gf, %.9g},\n",
+                std::string(common::to_string(actual.status)).c_str(), actual.outer_iterations, p[0], p[1], p[2], p[3],
+                actual.final_flux, actual.final_rms, actual.coeff0_sum);
+
+    const auto& e = kExpected.at(c);
+    EXPECT_EQ(actual.status, e.status);
+    EXPECT_EQ(actual.outer_iterations, e.outer_iterations);
+    EXPECT_EQ(actual.components_per_scale, e.components_per_scale);
+    EXPECT_NEAR(actual.final_flux, e.final_flux, kRelTol * e.final_flux);
+    EXPECT_NEAR(actual.final_rms, e.final_rms, kRelTol * e.final_rms);
+    EXPECT_NEAR(actual.coeff0_sum, e.coeff0_sum, kRelTol * std::abs(e.coeff0_sum));
   }
-
-  const std::vector<float> h_jones(static_cast<std::size_t>(kFreq) * kNpix, 1.0f);
-  const std::vector<float> h_weights(kFreq, 1.0f / kFreq);
-
-  auto h_mask = std::make_unique<bool[]>(kNpix);
-  std::vector<float> h_sigmas(kScaleSigmas.begin(), kScaleSigmas.end());
-  std::vector<float> scale_bias(kScaleBias.begin(), kScaleBias.end());
-  std::vector<int> map_pixel_facet(kNpix, 0);
-
-  // Host views; the session stages them.
-  core::host_span4d<float> psfs_view(h_psfs.data(), kFacets, kFreq, kNrow, kNcol);
-  core::host_span2d<float> xdes_view(h_xdes.data(), kFreq, kOrder);
-  core::host_span2d<bool> mask_view(h_mask.get(), kNrow, kNcol);
-  core::host_span1d<float> sigmas_view(h_sigmas.data(), kScales);
-  core::host_span1d<float> bias_view(scale_bias.data(), kScales);
-  core::host_span2d<int> map_view(map_pixel_facet.data(), kNrow, kNcol);
-
-  ddmsc::Ddmsc session(psfs_view, xdes_view, mask_view, sigmas_view, bias_view, map_view, kNrow, kNcol);
-
-  session.cfg = {
-      // Gaussian-component cleaning shrinks the residual by only ~5% of the
-      // local peak per iteration on the largest scale, so give the run ample
-      // headroom: it must stop on flux, never on this budget.
-      .max_iteration = 2000,
-      .divergence_factor = 4.0f,
-      .flux_threshold = 0.06f,  // ~3x the expected noise peak: the run must stop on flux, not budget
-      .stop_rms_factor = 0.0f,
-      .stop_peak_factor = 0.0f,
-      .stop_cycle_factor = 0.0f,
-      .stop_sidelobe_level = 0.0f,
-      .clean_negative = false,
-      .peak_factor = 0.15f,
-      .gamma = 0.1f,
-      .max_clean_iteration = 50,
-      // Realistic stall tracking is load-bearing here: the large scale-3 bias
-      // makes the smoothed plane outbid compact scales even when scale-3
-      // cleaning stops improving the rms, and retirement is what breaks that
-      // spiral (as in production). Productive outer iterations move the rms by
-      // a few percent in this scene; a move below 0.5% of it counts as a stall strike.
-      .scale_stall_threshold = 5e-3f,
-      .enable_auto_mask = false,
-      .force_enable_auto_mask = false,
-      .auto_mask_peak_threshold = std::nullopt,
-      .auto_mask_rms_threshold = std::nullopt,
-  };
-
-  // ---- Run the full minor-cycle driver. `dirty` is left as the residual.
-  const auto result = session.run(core::host_span3d<float>(h_dirty.data(), kFreq, kNrow, kNcol),
-                                  core::host_span3d<const float>(h_jones.data(), kFreq, kNrow, kNcol),
-                                  core::host_span1d<const float>(h_weights.data(), kFreq));
-
-  // ---- Derive scalar metrics.
-  const auto residual = weighted_sum(h_dirty, std::vector<float>(kFreq, 1.0f / kFreq), kNpix);
-  const float residual_rms = fdtest::std_all(residual);
-  float residual_max_abs = 0.0f;
-  for (const float v : residual) residual_max_abs = std::max(residual_max_abs, std::abs(v));
-
-  const int n_components = static_cast<int>(result.peak_coords.size());
-  ASSERT_EQ(result.gains.size(), result.peak_coords.size());
-  ASSERT_EQ(result.coeffs.size(), result.peak_coords.size() * core::narrow<std::size_t>(result.n_order));
-
-  // Peak-flux removed from the dirty image per component: the subtraction is
-  // coeff * gain * conv_psf where conv_psf is sum-normalized with peak p_s and
-  // gain = gamma / p_s by construction — so the removed peak flux is exactly
-  // gamma * coeff0 on EVERY scale. (gain * coeff0 would over-count extended
-  // scales by 1/p_s.)
-  double cleaned_flux_total = 0.0;
-  std::array<int, kScales> components_per_scale{};
-  for (int i = 0; i < n_components; ++i) {
-    cleaned_flux_total +=
-        static_cast<double>(session.cfg.gamma) * result.coeffs.at(core::narrow<std::size_t>(i * result.n_order));
-    components_per_scale.at(result.scales.at(i))++;
-  }
-
-  // Per-source recovered flux (sum of gamma * order-0 coeff within 15 px) and
-  // distance from each planted source to its nearest component.
-  std::array<double, kSources.size()> recovered_flux{};
-  std::array<double, kSources.size()> nearest_component_px{};
-  for (std::size_t s = 0; s < kSources.size(); ++s) {
-    double nearest = 1e9;
-    for (int i = 0; i < n_components; ++i) {
-      const auto dr = static_cast<double>(result.peak_coords.at(i).first - kSources.at(s).row);
-      const auto dc = static_cast<double>(result.peak_coords.at(i).second - kSources.at(s).col);
-      const double dist = std::sqrt(dr * dr + dc * dc);
-      nearest = std::min(nearest, dist);
-      if (dist <= 15.0)
-        recovered_flux.at(s) +=
-            static_cast<double>(session.cfg.gamma) * result.coeffs.at(core::narrow<std::size_t>(i * result.n_order));
-    }
-    nearest_component_px.at(s) = nearest;
-  }
-
-  // ---- Ground-truth checks (independent of the baseline).
-  ASSERT_GT(n_components, 0) << "the run cleaned nothing";
-  for (std::size_t s = 0; s < kSources.size(); ++s)
-    EXPECT_LE(nearest_component_px.at(s), 3.0) << "no component near planted source " << s;
-  // Point sources are exact in the peak-flux bookkeeping: recovered ≈ planted.
-  EXPECT_NEAR(recovered_flux.at(0), kSources.at(0).flux, 0.15 * kSources.at(0).flux);
-  EXPECT_NEAR(recovered_flux.at(1), kSources.at(1).flux, 0.15 * kSources.at(1).flux);
-
-  // ---- Assemble the metrics JSON.
-  json config = {{"seed", kSeed},
-                 {"nrow", kNrow},
-                 {"ncol", kNcol},
-                 {"n_freq", kFreq},
-                 {"n_scales", kScales},
-                 {"sigma_psf", kSigmaPsf},
-                 {"noise_sigma", kNoiseSigma},
-                 {"scale_bias", kScaleBias},
-                 {"scale_stall_threshold", session.cfg.scale_stall_threshold}};
-  json metrics = {
-      {"n_components", n_components},
-      {"total_iterations", result.total_iterations},
-      {"status", std::string(common::to_string(result.status))},
-      {"final_flux", result.final_flux},
-      {"stop_flux", result.stop_flux},
-      {"residual_rms", residual_rms},
-      {"residual_max_abs", residual_max_abs},
-      {"cleaned_flux_total", cleaned_flux_total},
-      {"components_per_scale", components_per_scale},
-      {"recovered_flux_per_source", recovered_flux},
-  };
-
-  const std::string baseline_path = FAST_DECONV_BASELINE_PATH;
-
-  // ---- Regeneration mode: write and skip.
-  const char* update = std::getenv("FAST_DECONV_UPDATE_BASELINE");
-  if (update != nullptr && std::string(update) != "0") {
-    json out = {{"schema_version", 1},
-                {"note", "regenerate with FAST_DECONV_UPDATE_BASELINE=1; tolerances live in test_ddmsc_nonreg.cpp"},
-                {"config", config},
-                {"metrics", metrics}};
-    std::ofstream f(baseline_path);
-    ASSERT_TRUE(f.good()) << "cannot write baseline at " << baseline_path;
-    f << out.dump(2) << "\n";
-    GTEST_SKIP() << "baseline regenerated at " << baseline_path << " — review and commit the diff";
-  }
-
-  // ---- Load and validate the baseline.
-  std::ifstream f(baseline_path);
-  if (!f.good())
-    FAIL() << "baseline not found at " << baseline_path
-           << "\nGenerate it with: FAST_DECONV_UPDATE_BASELINE=1 ctest -L NONREG, then commit it.";
-  json baseline = json::parse(f);
-
-  ASSERT_EQ(baseline.at("config"), config) << "scene config changed since the baseline was generated — regenerate it "
-                                              "(FAST_DECONV_UPDATE_BASELINE=1) and commit the diff";
-
-  const json& base = baseline.at("metrics");
-
-  // Categorical, so it is compared exactly instead of through the tolerance table.
-  EXPECT_EQ(base.at("status").get<std::string>(), std::string(common::to_string(result.status)))
-      << "the run ended for a different reason than the baseline";
-
-  // Tolerances are code, not baseline content: regeneration can never clobber
-  // them. Loose on purpose — cross-GPU / cuFFT-version drift reorders near-tie
-  // argmax and scale-selection decisions.
-  std::vector<metric_row> rows = {
-      {"n_components", base.at("n_components").get<double>(), static_cast<double>(n_components), 0.15, 0.0},
-      {"total_iterations", base.at("total_iterations").get<double>(), static_cast<double>(result.total_iterations),
-       0.15, 0.0},
-      {"final_flux", base.at("final_flux").get<double>(), result.final_flux, 0.10, 1e-4},
-      {"stop_flux", base.at("stop_flux").get<double>(), result.stop_flux, 1e-6, 0.0},
-      {"residual_rms", base.at("residual_rms").get<double>(), residual_rms, 0.10, 0.0},
-      {"residual_max_abs", base.at("residual_max_abs").get<double>(), residual_max_abs, 0.10, 0.0},
-      {"cleaned_flux_total", base.at("cleaned_flux_total").get<double>(), cleaned_flux_total, 0.05, 0.0},
-  };
-  for (int s = 0; s < kScales; ++s)
-    rows.push_back({"components_per_scale[" + std::to_string(s) + "]",
-                    base.at("components_per_scale").at(s).get<double>(),
-                    static_cast<double>(components_per_scale.at(s)), 0.25, 3.0});
-  for (std::size_t s = 0; s < kSources.size(); ++s)
-    rows.push_back({"recovered_flux_per_source[" + std::to_string(s) + "]",
-                    base.at("recovered_flux_per_source").at(s).get<double>(), recovered_flux.at(s), 0.10, 0.05});
-
-  for (const auto& r : rows) EXPECT_TRUE(r.pass()) << r.name << ": baseline=" << r.baseline << " actual=" << r.actual;
 }

@@ -256,19 +256,19 @@ The test suite is C++ only. Run it from a build tree built with `-t`:
 
 ```bash
 ctest --test-dir build/release-backend_host -L UNIT     # kernels checked against CPU oracles
-ctest --test-dir build/release-backend_host -L NONREG   # full synthetic DDMSC run vs baseline
+ctest --test-dir build/release-backend_host -L NONREG   # replay of a captured DDMSC session
 ```
 
 For the CUDA backend, use `build/release-backend_cuda` instead. Its test binaries need a GPU to run.
 
-The non-regression test compares the scalar metrics of a synthetic run with
-`tests/baselines/ddmsc_synthetic.json`. After an intentional algorithmic change,
-regenerate the baseline, review the diff, and commit it:
+The non-regression test replays the DDMSC session dumped in `tests/data/lofar_lba_point_sources/`, cycle by
+cycle, and compares each cycle with the expected values in `tests/cpp/test_ddmsc_nonreg.cpp`: exit status,
+outer iterations, components per scale, final peak and rms, and the sum of the order-0 coefficients. The
+session is a simulated LOFAR LBA field of 9 point sources with direction-dependent gains: 975 × 975 px,
+6 bands, 9 facets, 4 scales.
 
-```bash
-FAST_DECONV_UPDATE_BASELINE=1 ctest --test-dir build/release-backend_host -L NONREG
-git diff tests/baselines/ddmsc_synthetic.json
-```
+After an intentional algorithmic change, run the test: it prints one row per cycle in the format of
+`kExpected`. Paste the rows, review the diff, and commit it.
 
 ## Architecture
 
@@ -290,7 +290,6 @@ fast-deconv builds on:
 - [DUCC](https://gitlab.mpcdf.mpg.de/mtr/ducc)
 - [Tracy](https://github.com/wolfpld/tracy)
 - [GoogleTest](https://github.com/google/googletest)
-- [nlohmann/json](https://github.com/nlohmann/json)
 
 ## License
 

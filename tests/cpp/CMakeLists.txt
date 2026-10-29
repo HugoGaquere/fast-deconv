@@ -42,13 +42,10 @@ include(GoogleTest)
 gtest_discover_tests(fast_deconv_unit_tests PROPERTIES LABELS "UNIT")
 
 #-------------------------------------------------------------------#
-# Non-regression test (label NONREG): full synthetic DDMSC run whose
-# scalar metrics are compared against a committed JSON baseline. Backend
-# agnostic like the unit tests; both backends share the one baseline.
-# Regenerate the baseline with FAST_DECONV_UPDATE_BASELINE=1.
+# Non-regression test (label NONREG): replays a captured DDMSC session
+# and compares each cycle with the values in the test. Backend agnostic
+# like the unit tests.
 #-------------------------------------------------------------------#
-find_package(nlohmann_json CONFIG REQUIRED)
-
 add_executable(fast_deconv_nonreg_tests
   test_ddmsc_nonreg.cpp
 )
@@ -56,16 +53,15 @@ add_executable(fast_deconv_nonreg_tests
 target_link_libraries(fast_deconv_nonreg_tests PRIVATE
   fast_deconv
   GTest::gtest_main
-  nlohmann_json::nlohmann_json
 )
 
+# npy_loader.hpp and ddmsc_dump.hpp are shared with replay_ddmsc.
 target_include_directories(fast_deconv_nonreg_tests PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${PROJECT_SOURCE_DIR}/src
 )
 
-# Baseline lives in the source tree so a regeneration shows up as a git diff.
 target_compile_definitions(fast_deconv_nonreg_tests PRIVATE
-  FAST_DECONV_BASELINE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../baselines/ddmsc_synthetic.json"
+  FAST_DECONV_NONREG_DUMP_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data/lofar_lba_point_sources"
 )
 
 gtest_discover_tests(fast_deconv_nonreg_tests PROPERTIES LABELS "NONREG" TIMEOUT 300)

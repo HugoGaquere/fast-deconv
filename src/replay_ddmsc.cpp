@@ -63,14 +63,12 @@
 #include <utility>
 #include <vector>
 
+#include "ddmsc_dump.hpp"
 #include "npy_loader.hpp"
 
 namespace core = fast_deconv::core;
 namespace algo = fast_deconv::algorithm;
 namespace ddmsc = fast_deconv::algorithm::ddmsc;
-
-// A NaN scalar in the dump is an unset optional on the Python side.
-static std::optional<float> opt_finite(float v) { return std::isnan(v) ? std::nullopt : std::optional<float>(v); }
 
 // Crops the last two axes of a C-order array to their centred rows x cols window, in place.
 // Every kept row moves to a lower offset, so no row still to be read is overwritten.
@@ -301,23 +299,19 @@ int main(int argc, char** argv)
 
   // The cycle's parameters as dumped, each overridden by its flag when given.
   const auto configure = [&](ddmsc::Ddmsc& imager, const std::string& cdir) {
-    auto load = [&](const char* name) { return npy::load_npy(cdir + name + ".npy"); };
-    imager.cfg.clean_negative = load("clean_negative").scalar<bool>();
-    imager.cfg.peak_factor = peak_factor.value_or(load("peak_factor").scalar<float>());
-    imager.cfg.gamma = load("gamma").scalar<float>();
-    imager.cfg.max_clean_iteration = max_clean_iter.value_or(load("max_sub_iteration").scalar<int>());
-    imager.cfg.flux_threshold = flux_threshold.value_or(load("flux_threshold").scalar<float>());
-    imager.cfg.stop_rms_factor = stop_rms_factor.value_or(load("stop_rms_factor").scalar<float>());
-    imager.cfg.stop_peak_factor = stop_peak_factor.value_or(load("stop_peak_factor").scalar<float>());
-    imager.cfg.stop_cycle_factor = stop_cycle_factor.value_or(load("stop_cycle_factor").scalar<float>());
-    imager.cfg.stop_sidelobe_level = stop_sidelobe_level.value_or(load("stop_sidelobe_level").scalar<float>());
-    imager.cfg.max_iteration = max_iter.value_or(load("max_iteration").scalar<int>());
-    imager.cfg.divergence_factor = divergence_factor.value_or(load("divergence_factor").scalar<float>());
-    imager.cfg.scale_stall_threshold = stall_threshold.value_or(load("stall_threshold").scalar<float>());
-    imager.cfg.enable_auto_mask = auto_mask.value_or(load("auto_mask").scalar<bool>());
-    imager.cfg.force_enable_auto_mask = load("force_auto_mask").scalar<bool>();
-    imager.cfg.auto_mask_peak_threshold = opt_finite(load("auto_mask_peak_threshold").scalar<float>());
-    imager.cfg.auto_mask_rms_threshold = opt_finite(load("auto_mask_rms_threshold").scalar<float>());
+    auto& cfg = imager.cfg;
+    cfg = ddmsc_dump::read_params(cdir);
+    cfg.peak_factor = peak_factor.value_or(cfg.peak_factor);
+    cfg.max_clean_iteration = max_clean_iter.value_or(cfg.max_clean_iteration);
+    cfg.flux_threshold = flux_threshold.value_or(cfg.flux_threshold);
+    cfg.stop_rms_factor = stop_rms_factor.value_or(cfg.stop_rms_factor);
+    cfg.stop_peak_factor = stop_peak_factor.value_or(cfg.stop_peak_factor);
+    cfg.stop_cycle_factor = stop_cycle_factor.value_or(cfg.stop_cycle_factor);
+    cfg.stop_sidelobe_level = stop_sidelobe_level.value_or(cfg.stop_sidelobe_level);
+    cfg.max_iteration = max_iter.value_or(cfg.max_iteration);
+    cfg.divergence_factor = divergence_factor.value_or(cfg.divergence_factor);
+    cfg.scale_stall_threshold = stall_threshold.value_or(cfg.scale_stall_threshold);
+    cfg.enable_auto_mask = auto_mask.value_or(cfg.enable_auto_mask);
   };
 
   // Wall time of one run() call, which writes the residual back into in.dirty.

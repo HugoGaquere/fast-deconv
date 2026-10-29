@@ -45,7 +45,6 @@ class Recipe(ConanFile):
     def build_requirements(self):
         if self.build_tests:
             self.test_requires("gtest/1.15.0")
-            self.test_requires("nlohmann_json/3.11.3")
 
     def layout(self):
         if self.options.python_module:
