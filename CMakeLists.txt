@@ -65,7 +65,8 @@ list(APPEND CONAN_INSTALL_ARGS
   "--options=fast-deconv/*:with_tests=${_fd_with_tests}"
 )
 if(BUILD_TESTING)
-  list(APPEND CONAN_INSTALL_ARGS "--conf=tools.build:skip_test=False")
+  # Dependencies never build their own tests; `&:` scopes the second conf to this project.
+  list(APPEND CONAN_INSTALL_ARGS "--conf=tools.build:skip_test=True" "--conf=&:tools.build:skip_test=False")
 endif()
 
 #-------------------------------------------------------------------#

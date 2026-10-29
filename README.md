@@ -224,13 +224,15 @@ after changing `conanfile.py`, the Conan profile, `-t`, `--profile` or `--flameg
 To build without the script, run Conan and CMake directly:
 
 ```bash
-conan install . -o "fast-deconv/*:backend=host" -c tools.build:skip_test=False \
+conan install . -o "fast-deconv/*:backend=host" \
+      -c tools.build:skip_test=True -c "&:tools.build:skip_test=False" \
       --build=missing -s build_type=Release
 cmake --preset conan-release-backend_host
 cmake --build build/release-backend_host
 ```
 
-For the CUDA backend, replace `host` with `cuda` in all three commands.
+For the CUDA backend, replace `host` with `cuda` in all three commands. The first `-c` keeps
+dependencies from building their own test suites; `&:` applies the second only to fast-deconv.
 
 Conan only supplies the dependencies. This recipe does not package the library.
 

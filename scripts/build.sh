@@ -137,9 +137,11 @@ for BACKEND in "${BACKENDS[@]}"; do
   if [ ! -f "$BUILD_DIR/generators/conan_toolchain.cmake" ]; then
     banner "conan install (${BACKEND}, ${BUILD_TYPE})"
     # --build=missing matters for host: the cuda=False emu binary is not prebuilt.
+    # Dependencies never build their own tests; `&:` scopes the second -c to this project.
     conan install . -o "fast-deconv/*:backend=${BACKEND}" \
           -o "fast-deconv/*:with_tests=${CONAN_WITH_TESTS}" \
-          -c "tools.build:skip_test=${CONAN_SKIP_TESTS}" \
+          -c tools.build:skip_test=True \
+          -c "&:tools.build:skip_test=${CONAN_SKIP_TESTS}" \
           --build=missing "${CONAN_BUILD_TYPE_ARGS[@]}"
   fi
 

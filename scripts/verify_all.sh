@@ -69,7 +69,7 @@ fi
 # ---------------------------------------------------------------------------
 banner "2/7  configure Release (conan install + cmake preset, per backend)"
 for b in "${BACKENDS[@]}"; do
-  conan install . -o "fast-deconv/*:backend=$b" -c tools.build:skip_test=False --build=missing -s build_type=Release
+  conan install . -o "fast-deconv/*:backend=$b" -c tools.build:skip_test=True -c "&:tools.build:skip_test=False" --build=missing -s build_type=Release
   cmake --preset "conan-release-backend_$b"
 done
 
@@ -166,7 +166,7 @@ if ((RUN_SANITIZE)); then
 
   for b in "${BACKENDS[@]}"; do
     banner "host sanitizers ($b)"
-    conan install . -o "fast-deconv/*:backend=$b" -c tools.build:skip_test=False --build=missing -s build_type=Debug
+    conan install . -o "fast-deconv/*:backend=$b" -c tools.build:skip_test=True -c "&:tools.build:skip_test=False" --build=missing -s build_type=Debug
     SANITIZED+=("$b")
     cmake --preset "conan-debug-backend_$b" -DFAST_DECONV_SANITIZE=ON
     cmake --build "build/debug-backend_$b"
