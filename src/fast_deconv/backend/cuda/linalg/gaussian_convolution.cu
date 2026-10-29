@@ -36,14 +36,14 @@ void copy_planes(const core::exec_ctx& ctx, const float* src, std::int64_t src_n
 void pad(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output, std::int64_t n_batch)
 {
   ctx.zero(output, dims.padded_total() * n_batch);
-  copy_planes(ctx, input, dims.input_nrow, dims.input_ncol, output, dims.padded_nrow, dims.padded_ncol,
-              dims.input_nrow, dims.input_ncol, n_batch);
+  copy_planes(ctx, input, dims.input_nrow, dims.input_ncol, output, dims.padded_nrow, dims.padded_ncol, dims.input_nrow,
+              dims.input_ncol, n_batch);
 }
 
 void crop(const core::exec_ctx& ctx, const fft_dims& dims, const float* input, float* output, std::int64_t n_batch)
 {
-  copy_planes(ctx, input, dims.padded_nrow, dims.padded_ncol, output, dims.input_nrow, dims.input_ncol,
-              dims.input_nrow, dims.input_ncol, n_batch);
+  copy_planes(ctx, input, dims.padded_nrow, dims.padded_ncol, output, dims.input_nrow, dims.input_ncol, dims.input_nrow,
+              dims.input_ncol, n_batch);
 }
 
 gaussian_convolution_ctx::gaussian_convolution_ctx(const core::exec_ctx& ctx, std::int64_t batch, std::int64_t nrow,

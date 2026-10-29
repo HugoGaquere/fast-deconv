@@ -4,15 +4,14 @@
 #include <fmt/format.h>
 
 #include <cstdint>
+#include <fast_deconv/core/concepts.hpp>
+#include <fast_deconv/util/cuda_macros.hpp>
 #include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
-
-#include <fast_deconv/core/concepts.hpp>
-#include <fast_deconv/util/cuda_macros.hpp>
 
 // Debug helper: write any mdspan (host or device) to a NumPy .npy file.
 //
@@ -35,17 +34,28 @@ namespace detail {
 template <typename T>
 constexpr const char* npy_descr() noexcept
 {
-  if constexpr (std::is_same_v<T, float>) return "<f4";
-  else if constexpr (std::is_same_v<T, double>) return "<f8";
-  else if constexpr (std::is_same_v<T, std::int8_t>) return "|i1";
-  else if constexpr (std::is_same_v<T, std::uint8_t>) return "|u1";
-  else if constexpr (std::is_same_v<T, std::int16_t>) return "<i2";
-  else if constexpr (std::is_same_v<T, std::uint16_t>) return "<u2";
-  else if constexpr (std::is_same_v<T, std::int32_t>) return "<i4";
-  else if constexpr (std::is_same_v<T, std::uint32_t>) return "<u4";
-  else if constexpr (std::is_same_v<T, std::int64_t>) return "<i8";
-  else if constexpr (std::is_same_v<T, std::uint64_t>) return "<u8";
-  else if constexpr (std::is_same_v<T, bool>) return "|b1";
+  if constexpr (std::is_same_v<T, float>)
+    return "<f4";
+  else if constexpr (std::is_same_v<T, double>)
+    return "<f8";
+  else if constexpr (std::is_same_v<T, std::int8_t>)
+    return "|i1";
+  else if constexpr (std::is_same_v<T, std::uint8_t>)
+    return "|u1";
+  else if constexpr (std::is_same_v<T, std::int16_t>)
+    return "<i2";
+  else if constexpr (std::is_same_v<T, std::uint16_t>)
+    return "<u2";
+  else if constexpr (std::is_same_v<T, std::int32_t>)
+    return "<i4";
+  else if constexpr (std::is_same_v<T, std::uint32_t>)
+    return "<u4";
+  else if constexpr (std::is_same_v<T, std::int64_t>)
+    return "<i8";
+  else if constexpr (std::is_same_v<T, std::uint64_t>)
+    return "<u8";
+  else if constexpr (std::is_same_v<T, bool>)
+    return "|b1";
   else {
     static_assert(!sizeof(T*), "dump_npy: unsupported element type");
     return "";
@@ -84,9 +94,8 @@ void dump_npy(std::string_view path, const M& span)
   }
   shape_str += ")";
 
-  std::string header = fmt::format("{{'descr': '{}', 'fortran_order': {}, 'shape': {}, }}",
-                                   detail::npy_descr<T>(), fortran_order ? "True" : "False",
-                                   shape_str);
+  std::string header = fmt::format("{{'descr': '{}', 'fortran_order': {}, 'shape': {}, }}", detail::npy_descr<T>(),
+                                   fortran_order ? "True" : "False", shape_str);
 
   // .npy v1.0: total of (magic[6] + version[2] + len[2] + header) must be a
   // multiple of 64. Header is space-padded and must end with '\n'.
@@ -114,8 +123,7 @@ void dump_npy(std::string_view path, const M& span)
     CHECK_CUDA(cudaMemcpy(host.get(), span.data_handle(), bytes, cudaMemcpyDeviceToHost));
     out.write(reinterpret_cast<const char*>(host.get()), static_cast<std::streamsize>(bytes));
   } else {
-    out.write(reinterpret_cast<const char*>(span.data_handle()),
-              static_cast<std::streamsize>(bytes));
+    out.write(reinterpret_cast<const char*>(span.data_handle()), static_cast<std::streamsize>(bytes));
   }
 }
 

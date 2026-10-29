@@ -1,7 +1,6 @@
 #pragma once
 #include <emu/concepts.hpp>
 #include <emu/detail/mdspan_types.hpp>
-
 #include <type_traits>
 
 namespace fast_deconv::core::cpts {
