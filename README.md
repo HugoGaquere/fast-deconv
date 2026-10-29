@@ -279,10 +279,15 @@ first, which downloads it from a GitHub release (126 MB) into `tests/data/lofar_
 After an intentional algorithmic change, run the test: it prints one row per cycle in the format of
 `kExpected`. Paste the rows, review the diff, and commit it.
 
-### Formatting
+## Architecture
 
-C++ and CUDA sources follow `.clang-format`. A [pre-commit](https://pre-commit.com) hook, pinned in
-`.pre-commit-config.yaml`, checks staged files on each commit; CI runs the same check on every file.
+For the code layout, the layers, the backends and their invariants, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Contributing
+
+### One-time setup
+
+C++ and CUDA sources follow `.clang-format`, enforced by a [pre-commit](https://pre-commit.com) hook.
 Install it once per clone:
 
 ```bash
@@ -290,16 +295,28 @@ pip install pre-commit
 pre-commit install
 ```
 
-When the hook reformats a file, it stops the commit: review the change, `git add` it and commit again.
-To check every file, run `pre-commit run --all-files`.
+### Making a change
 
-## Architecture
+1. Commit as usual. The hook runs clang-format on the staged C, C++ and CUDA files:
+   - if nothing changes, the commit goes through;
+   - if a file changes, the commit stops and the fixes are left unstaged. Review them with `git diff`,
+     stage them with `git add -u`, and commit again.
+2. Build and test before pushing: `./scripts/build.sh host -t`. CI has no GPU, so after a change to CUDA
+   code, also run `./scripts/verify_all.sh`, which covers both backends, compute-sanitizer and ASan/UBSan.
+3. Push. CI runs on pushes to `dev` and `main` and on pull requests into `main`:
+   - `format`: the pre-commit hook on every file;
+   - `host (release)`: `./scripts/build.sh host -t`, which runs UNIT and NONREG;
+   - `host (sanitize)`: the same tests built with ASan and UBSan.
 
-For the code layout, the layers, the backends and their invariants, see [ARCHITECTURE.md](ARCHITECTURE.md).
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org): `feat(ddmsc): …`,
+`fix(build): …`, `test(nonreg): …`, `ci: …`.
 
-## Contributing
+Other commands:
 
-TODO
+- `pre-commit run --all-files` formats the whole repository.
+- `git commit --no-verify` skips the hook; CI still checks the formatting.
+- To move to a newer clang-format, run `pre-commit autoupdate`, then `pre-commit run --all-files`, and
+  commit the reformat on its own.
 
 ## Third-party libraries
 
